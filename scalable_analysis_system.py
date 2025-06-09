@@ -454,7 +454,7 @@ class ScalableAnalysisSystem:
 def generate_large_scale_configs(symbols_count=20, timeframes=4, configs=10):
     """大規模設定を生成"""
     symbols = [f"TOKEN{i:03d}" for i in range(1, symbols_count + 1)]
-    timeframes_list = ['15m', '1h', '4h', '1d'][:timeframes]
+    timeframes_list = ['1m', '3m', '5m', '15m', '30m', '1h'][:timeframes]
     configs_list = [f"Config_{i:02d}" for i in range(1, configs + 1)]
     
     batch_configs = []

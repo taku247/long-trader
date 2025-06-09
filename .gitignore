@@ -74,4 +74,4 @@ compressed/
 # APIキー・設定ファイル
 config.json
 api_keys.json
-secrets.json
+secrets.jsonconfig.json

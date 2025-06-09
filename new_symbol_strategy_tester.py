@@ -29,7 +29,7 @@ class NewSymbolStrategyTester:
     def _analyze_existing_strategies(self):
         """既存の戦略情報を分析"""
         strategies = {
-            'timeframes': ['15m', '1h', '4h', '1d'],
+            'timeframes': ['15m', '1h'],
             'configs': [
                 'Conservative_ML',
                 'Aggressive_Traditional', 
@@ -253,8 +253,10 @@ class NewSymbolStrategyTester:
         timeframe_multipliers = {
             '15m': 0.8,  # 短期間、ノイズが多い
             '1h': 1.0,   # 標準
-            '4h': 1.15,  # 中期間、良いトレンド
-            '1d': 1.1    # 長期間、安定
+            '30m': 0.9,  # 30分足
+            '5m': 0.7,   # 5分足、ノイズが非常に多い
+            '3m': 0.65,  # 3分足
+            '1m': 0.6    # 1分足、最も短期
         }
         return timeframe_multipliers.get(timeframe, 1.0)
     

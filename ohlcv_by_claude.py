@@ -71,8 +71,8 @@ info = Info(constants.MAINNET_API_URL)
 parser = argparse.ArgumentParser(description='Hyperliquid OHLCVデータ取得と特徴量エンジニアリング')
 parser.add_argument('--symbol', type=str, default='HYPE', help='取得する通貨シンボル (例: BTC, HYPE, ETH, SOL)')
 parser.add_argument('--timeframe', type=str, default='1h', 
-                   choices=['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'],
-                   help='時間足 (1m, 3m, 5m, 15m, 30m, 1h, 4h, 1d)')
+                   choices=['1m', '3m', '5m', '15m', '30m', '1h'],
+                   help='時間足 (1m, 3m, 5m, 15m, 30m, 1h)')
 args = parser.parse_args()
 
 COIN_SYMBOL = args.symbol.upper()
@@ -85,9 +85,7 @@ TIMEFRAME_CONFIG = {
     '5m': {'days': 30, 'annualize_factor': 288 * 365},         # 5分足: 30日間 (288 = 24*60/5)
     '15m': {'days': 60, 'annualize_factor': 96 * 365},         # 15分足: 60日間 (96 = 24*60/15)
     '30m': {'days': 90, 'annualize_factor': 48 * 365},         # 30分足: 90日間 (48 = 24*60/30)
-    '1h': {'days': 90, 'annualize_factor': 24 * 365},          # 1時間足: 90日間
-    '4h': {'days': 180, 'annualize_factor': 6 * 365},          # 4時間足: 180日間
-    '1d': {'days': 365, 'annualize_factor': 365}               # 日足: 365日間
+    '1h': {'days': 90, 'annualize_factor': 24 * 365}           # 1時間足: 90日間
 }
 
 DAYS_TO_FETCH = TIMEFRAME_CONFIG[TIMEFRAME]['days']

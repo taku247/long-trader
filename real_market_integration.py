@@ -42,7 +42,7 @@ class RealMarketAnalysisSystem:
         
         # 利用可能なシンボルとタイムフレーム
         self.available_symbols = ['HYPE', 'BTC', 'ETH', 'SOL', 'ARB', 'OP', 'AVAX', 'MATIC', 'DOT', 'ADA']
-        self.available_timeframes = ['15m', '1h', '4h', '1d']
+        self.available_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
     
     def init_database(self):
         """SQLiteデータベースを初期化"""

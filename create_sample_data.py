@@ -10,7 +10,7 @@ def create_sample_backtest_data():
     
     # 設定
     symbols = ['HYPE', 'SOL', 'PEPE', 'WIF', 'BONK']
-    timeframes = ['15m', '1h', '4h', '1d']
+    timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
     module_configs = [
         'Conservative_ML',
         'Aggressive_Traditional', 
@@ -82,7 +82,7 @@ def create_sample_backtest_data():
                 }[symbol]
                 
                 timeframe_multiplier = {
-                    '15m': 0.7, '1h': 1.0, '4h': 1.2, '1d': 1.1
+                    '1m': 0.5, '3m': 0.6, '5m': 0.65, '15m': 0.7, '30m': 0.85, '1h': 1.0
                 }[timeframe]
                 
                 # 設定による性能調整

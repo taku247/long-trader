@@ -26,13 +26,11 @@ class HyperliquidDataFetcher:
         # 時間足に応じた設定
         self.timeframe_config = {
             '1m': {'days': 7, 'annualize_factor': 60 * 24 * 365},
-            '3m': {'days': 21, 'annualize_factor': 20 * 24 * 365},  # 新規追加
+            '3m': {'days': 21, 'annualize_factor': 20 * 24 * 365},
             '5m': {'days': 30, 'annualize_factor': 288 * 365},
             '15m': {'days': 60, 'annualize_factor': 96 * 365},
             '30m': {'days': 90, 'annualize_factor': 48 * 365},
-            '1h': {'days': 90, 'annualize_factor': 24 * 365},
-            '4h': {'days': 180, 'annualize_factor': 6 * 365},
-            '1d': {'days': 365, 'annualize_factor': 365}
+            '1h': {'days': 90, 'annualize_factor': 24 * 365}
         }
     
     def fetch_data(self, symbol: str, timeframe: str = "1h", limit: int = 1000) -> pd.DataFrame:
@@ -126,9 +124,7 @@ class HyperliquidDataFetcher:
             '5m': 5,
             '15m': 15,
             '30m': 30,
-            '1h': 60,
-            '4h': 240,
-            '1d': 1440
+            '1h': 60
         }
         return timeframe_minutes.get(timeframe, 60)
 

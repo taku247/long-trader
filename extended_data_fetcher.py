@@ -48,20 +48,20 @@ class ExtendedDataFetcher:
                 'intervals_per_day': 24,
                 'min_samples_needed': 300
             },
-            '4h': {
-                'days': 730,  # 2 years
-                'intervals_per_day': 6,
-                'min_samples_needed': 250
+            '3m': {
+                'days': 60,  # 2 months
+                'intervals_per_day': 480,  # 24*60/3
+                'min_samples_needed': 600
             },
-            '1d': {
-                'days': 1095,  # 3 years
-                'intervals_per_day': 1,
-                'min_samples_needed': 200
+            '1m': {
+                'days': 30,  # 1 month
+                'intervals_per_day': 1440,  # 24*60/1
+                'min_samples_needed': 1000
             }
         }
         
         # Supported timeframes for backtesting
-        self.supported_timeframes = ['5m', '15m', '30m', '1h']
+        self.supported_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
     
     def fetch_extended_data(self, 
                            symbol: str, 

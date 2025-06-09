@@ -10,7 +10,7 @@ class BatchStrategyGenerator:
     def __init__(self):
         # 既存システムから抽出した戦略設定
         self.strategy_configs = {
-            'timeframes': ['15m', '1h', '4h', '1d'],
+            'timeframes': ['1m', '3m', '5m', '15m', '30m', '1h'],
             'strategies': [
                 'Conservative_ML',
                 'Aggressive_Traditional', 

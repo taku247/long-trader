@@ -377,9 +377,7 @@ def main():
     try:
         config = {
             '15m': {'days': 60},
-            '1h': {'days': 90},
-            '4h': {'days': 180},
-            '1d': {'days': 365}
+            '1h': {'days': 90}
         }
         days = config.get(args.timeframe, {'days': 60})['days']
         

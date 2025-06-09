@@ -35,7 +35,7 @@ def main():
     parser.add_argument('--symbol', type=str, 
                        help='分析対象シンボル (例: HYPE, SOL, WIF)')
     parser.add_argument('--timeframe', type=str, default='1h',
-                       choices=['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'],
+                       choices=['1m', '3m', '5m', '15m', '30m', '1h'],
                        help='時間足 (デフォルト: 1h)')
     
     # 一括分析

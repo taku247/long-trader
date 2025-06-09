@@ -1,0 +1,378 @@
+/* Long Trader Dashboard Styles */
+
+:root {
+    --primary-color: #007bff;
+    --success-color: #28a745;
+    --warning-color: #ffc107;
+    --danger-color: #dc3545;
+    --info-color: #17a2b8;
+    --light-bg: #f8f9fa;
+    --dark-bg: #343a40;
+    --border-radius: 8px;
+    --box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+body {
+    background-color: var(--light-bg);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Cards */
+.card {
+    border: none;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.card-header {
+    background-color: white;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 600;
+}
+
+/* Status Items */
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.status-item:last-child {
+    border-bottom: none;
+}
+
+.status-item .label {
+    font-weight: 500;
+    color: #6c757d;
+}
+
+/* Statistics */
+.stat-box {
+    padding: 15px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--primary-color);
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-top: 5px;
+}
+
+/* Badges */
+.badge {
+    font-size: 0.85rem;
+    padding: 6px 12px;
+}
+
+/* Connection Status */
+#connection-status {
+    position: relative;
+}
+
+#connection-status.connected {
+    background-color: var(--success-color) !important;
+}
+
+#connection-status.disconnected {
+    background-color: var(--danger-color) !important;
+}
+
+#connection-status.connecting {
+    background-color: var(--warning-color) !important;
+}
+
+/* Monitor Status */
+#monitor-status.running {
+    background-color: var(--success-color) !important;
+}
+
+#monitor-status.stopped {
+    background-color: var(--danger-color) !important;
+}
+
+#monitor-status.starting {
+    background-color: var(--warning-color) !important;
+}
+
+/* Symbol Tags */
+.symbol-tag {
+    display: inline-block;
+    background-color: var(--info-color);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin: 2px;
+}
+
+/* Alert Items */
+.alert-item {
+    border: 1px solid #dee2e6;
+    border-radius: var(--border-radius);
+    padding: 15px;
+    margin-bottom: 10px;
+    background-color: white;
+    transition: border-color 0.2s;
+}
+
+.alert-item:hover {
+    border-color: var(--primary-color);
+}
+
+.alert-item.trading-opportunity {
+    border-left: 4px solid var(--success-color);
+}
+
+.alert-item.risk-warning {
+    border-left: 4px solid var(--warning-color);
+}
+
+.alert-item.system-status {
+    border-left: 4px solid var(--info-color);
+}
+
+.alert-item.error {
+    border-left: 4px solid var(--danger-color);
+}
+
+.alert-header {
+    display: flex;
+    justify-content: between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.alert-title {
+    font-weight: 600;
+    margin: 0;
+    flex-grow: 1;
+}
+
+.alert-timestamp {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-left: 10px;
+}
+
+.alert-message {
+    color: #495057;
+    line-height: 1.4;
+    margin-bottom: 8px;
+    white-space: pre-line;
+}
+
+.alert-metadata {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.alert-meta-item {
+    font-size: 0.8rem;
+    padding: 2px 8px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    color: #6c757d;
+}
+
+/* Priority Indicators */
+.priority-low {
+    color: #6c757d;
+}
+
+.priority-medium {
+    color: var(--warning-color);
+}
+
+.priority-high {
+    color: var(--danger-color);
+}
+
+.priority-critical {
+    color: #8e44ad;
+    font-weight: bold;
+}
+
+/* Loading States */
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #6c757d;
+}
+
+.loading i {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Empty States */
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #6c757d;
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    opacity: 0.5;
+}
+
+/* Buttons */
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn-group-sm .btn {
+    font-size: 0.8rem;
+}
+
+/* Form Controls */
+.form-control, .form-select {
+    border-radius: 6px;
+    border: 1px solid #ced4da;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .status-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .alert-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .alert-timestamp {
+        margin-left: 0;
+        margin-top: 5px;
+    }
+    
+    .stat-value {
+        font-size: 1.5rem;
+    }
+}
+
+/* Alert Type Filters */
+.btn-check:checked + .btn-outline-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-check:checked + .btn-outline-success {
+    background-color: var(--success-color);
+    border-color: var(--success-color);
+}
+
+.btn-check:checked + .btn-outline-warning {
+    background-color: var(--warning-color);
+    border-color: var(--warning-color);
+}
+
+.btn-check:checked + .btn-outline-info {
+    background-color: var(--info-color);
+    border-color: var(--info-color);
+}
+
+/* Notifications */
+.notification {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    z-index: 1050;
+    max-width: 350px;
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    padding: 15px;
+    border-left: 4px solid var(--info-color);
+    animation: slideIn 0.3s ease-out;
+}
+
+.notification.success {
+    border-left-color: var(--success-color);
+}
+
+.notification.warning {
+    border-left-color: var(--warning-color);
+}
+
+.notification.error {
+    border-left-color: var(--danger-color);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Progress Indicators */
+.progress-ring {
+    width: 40px;
+    height: 40px;
+}
+
+.progress-ring circle {
+    stroke: var(--primary-color);
+    stroke-width: 3;
+    fill: transparent;
+    stroke-dasharray: 126;
+    stroke-dashoffset: 126;
+    transform-origin: center;
+    transition: stroke-dashoffset 0.3s;
+}
+
+/* Pulse Animation for Live Updates */
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(0, 123, 255, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(0, 123, 255, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(0, 123, 255, 0);
+    }
+}

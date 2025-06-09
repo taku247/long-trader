@@ -11,6 +11,7 @@ import argparse
 import logging
 import signal
 import time
+import threading
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -80,9 +81,16 @@ class RealTimeMonitor:
         self.monitored_symbols = set()
         self.last_config_reload = datetime.now()
         
-        # Setup signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        # Setup signal handlers (only if running in main thread)
+        try:
+            if threading.current_thread() == threading.main_thread():
+                signal.signal(signal.SIGINT, self._signal_handler)
+                signal.signal(signal.SIGTERM, self._signal_handler)
+                self.logger.debug("Signal handlers registered")
+            else:
+                self.logger.debug("Skipping signal handlers (not in main thread)")
+        except Exception as e:
+            self.logger.warning(f"Could not register signal handlers: {e}")
     
     def _load_config(self, config_path: Optional[str] = None) -> Dict[str, Any]:
         """Load monitoring configuration."""

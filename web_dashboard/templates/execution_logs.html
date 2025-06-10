@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>実行ログ - Long Trader</title>
+    
+    <!-- CSS Dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dashboard.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/execution_logs.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- Header -->
+        <nav class="navbar navbar-dark bg-dark">
+            <div class="container-fluid">
+                <span class="navbar-brand mb-0 h1">
+                    <i class="fas fa-history"></i> Long Trader 実行ログ
+                </span>
+                <div class="d-flex">
+                    <a href="/" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-arrow-left"></i> ダッシュボード
+                    </a>
+                    <a href="/settings" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-cog"></i> 設定
+                    </a>
+                    <a href="/analysis" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-chart-line"></i> 履歴分析
+                    </a>
+                    <button id="btn-refresh" class="btn btn-primary btn-sm">
+                        <i class="fas fa-sync"></i> 更新
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Statistics Cards -->
+        <div class="row mt-3">
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon text-primary">
+                            <i class="fas fa-play-circle"></i>
+                        </div>
+                        <h3 id="total-executions" class="stats-number">-</h3>
+                        <p class="stats-label">総実行数</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon text-success">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <h3 id="success-rate" class="stats-number">-</h3>
+                        <p class="stats-label">成功率</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon text-warning">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <h3 id="avg-duration" class="stats-number">-</h3>
+                        <p class="stats-label">平均実行時間</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <div class="stats-icon text-info">
+                            <i class="fas fa-server"></i>
+                        </div>
+                        <h3 id="compute-hours" class="stats-number">-</h3>
+                        <p class="stats-label">計算時間</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-filter"></i> フィルター
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <label for="filter-type" class="form-label">実行タイプ</label>
+                                <select class="form-select" id="filter-type">
+                                    <option value="">全て</option>
+                                    <option value="SYMBOL_ADDITION">銘柄追加</option>
+                                    <option value="SCHEDULED_BACKTEST">定期バックテスト</option>
+                                    <option value="SCHEDULED_TRAINING">定期学習</option>
+                                    <option value="EMERGENCY_RETRAIN">緊急再学習</option>
+                                    <option value="MANUAL_EXECUTION">手動実行</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="filter-symbol" class="form-label">銘柄</label>
+                                <input type="text" class="form-control" id="filter-symbol" placeholder="銘柄名 (例: HYPE)">
+                            </div>
+                            <div class="col-md-3">
+                                <label for="filter-status" class="form-label">ステータス</label>
+                                <select class="form-select" id="filter-status">
+                                    <option value="">全て</option>
+                                    <option value="PENDING">待機中</option>
+                                    <option value="RUNNING">実行中</option>
+                                    <option value="SUCCESS">成功</option>
+                                    <option value="FAILED">失敗</option>
+                                    <option value="CANCELLED">キャンセル</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="filter-days" class="form-label">期間</label>
+                                <select class="form-select" id="filter-days">
+                                    <option value="1">過去24時間</option>
+                                    <option value="7" selected>過去7日</option>
+                                    <option value="30">過去30日</option>
+                                    <option value="">全期間</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <button id="btn-apply-filters" class="btn btn-primary me-2">
+                                    <i class="fas fa-search"></i> フィルター適用
+                                </button>
+                                <button id="btn-clear-filters" class="btn btn-outline-secondary">
+                                    <i class="fas fa-times"></i> クリア
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Execution Logs Table -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-list"></i> 実行履歴
+                        </h5>
+                        <div>
+                            <span id="results-count" class="text-muted me-3">0件</span>
+                            <div class="btn-group" role="group">
+                                <button id="btn-auto-refresh" class="btn btn-outline-success btn-sm" data-bs-toggle="button">
+                                    <i class="fas fa-sync"></i> 自動更新
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>実行ID</th>
+                                        <th>タイプ</th>
+                                        <th>銘柄</th>
+                                        <th>開始時刻</th>
+                                        <th>実行時間</th>
+                                        <th>ステータス</th>
+                                        <th>進捗</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="executions-table-body">
+                                    <!-- 動的に生成 -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Loading State -->
+                        <div id="loading-state" class="text-center py-4" style="display: none;">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">読み込み中...</span>
+                            </div>
+                            <p class="mt-2">実行ログを読み込み中...</p>
+                        </div>
+                        
+                        <!-- Empty State -->
+                        <div id="empty-state" class="text-center py-5" style="display: none;">
+                            <i class="fas fa-inbox text-muted" style="font-size: 3rem;"></i>
+                            <h5 class="mt-3 text-muted">実行ログがありません</h5>
+                            <p class="text-muted">条件に一致する実行ログが見つかりませんでした。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <nav aria-label="実行ログページネーション">
+                    <ul class="pagination justify-content-center" id="pagination">
+                        <!-- 動的に生成 -->
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- Execution Detail Modal -->
+    <div class="modal fade" id="executionDetailModal" tabindex="-1" aria-labelledby="executionDetailModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="executionDetailModalLabel">
+                        <i class="fas fa-info-circle"></i> 実行詳細
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- 基本情報 -->
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-id-card"></i> 基本情報</h6>
+                            <table class="table table-sm">
+                                <tr><td>実行ID:</td><td id="detail-execution-id">-</td></tr>
+                                <tr><td>タイプ:</td><td id="detail-type">-</td></tr>
+                                <tr><td>銘柄:</td><td id="detail-symbol">-</td></tr>
+                                <tr><td>開始時刻:</td><td id="detail-start-time">-</td></tr>
+                                <tr><td>終了時刻:</td><td id="detail-end-time">-</td></tr>
+                                <tr><td>実行時間:</td><td id="detail-duration">-</td></tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-chart-bar"></i> 進捗情報</h6>
+                            <div class="mb-3">
+                                <label class="form-label">進捗状況</label>
+                                <div class="progress">
+                                    <div id="detail-progress-bar" class="progress-bar" role="progressbar" style="width: 0%">0%</div>
+                                </div>
+                            </div>
+                            <p><strong>現在の操作:</strong> <span id="detail-current-operation">-</span></p>
+                            <p><strong>完了タスク:</strong> <span id="detail-completed-tasks">0</span> / <span id="detail-total-tasks">0</span></p>
+                        </div>
+                    </div>
+
+                    <!-- ステップ詳細 -->
+                    <div class="mb-4">
+                        <h6><i class="fas fa-tasks"></i> ステップ詳細</h6>
+                        <div class="accordion" id="stepsAccordion">
+                            <!-- 動的に生成 -->
+                        </div>
+                    </div>
+
+                    <!-- エラー情報 -->
+                    <div id="error-section" class="mb-4" style="display: none;">
+                        <h6><i class="fas fa-exclamation-triangle text-danger"></i> エラー情報</h6>
+                        <div id="error-list">
+                            <!-- 動的に生成 -->
+                        </div>
+                    </div>
+
+                    <!-- リソース使用状況 -->
+                    <div id="resource-section" class="mb-4" style="display: none;">
+                        <h6><i class="fas fa-server"></i> リソース使用状況</h6>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <p><strong>CPU使用率:</strong> <span id="detail-cpu">-</span>%</p>
+                            </div>
+                            <div class="col-md-4">
+                                <p><strong>メモリ使用量:</strong> <span id="detail-memory">-</span> MB</p>
+                            </div>
+                            <div class="col-md-4">
+                                <p><strong>ディスクI/O:</strong> <span id="detail-disk">-</span> MB</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                    <button type="button" class="btn btn-primary" id="btn-rerun-execution">
+                        <i class="fas fa-redo"></i> 再実行
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/execution_logs.js') }}"></script>
+</body>
+</html>

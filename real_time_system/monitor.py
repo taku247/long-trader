@@ -20,14 +20,20 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
+    from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
+    print("✅ Using production HighLeverageBotOrchestrator")
 except ImportError:
-    print("Warning: Could not import HighLeverageBotOrchestrator, using mock")
+    print("⚠️ Could not import production orchestrator, trying test version")
     try:
-        from mock_high_leverage_bot import MockHighLeverageBotOrchestrator as HighLeverageBotOrchestrator
+        from engines.test_high_leverage_bot_orchestrator import TestHighLeverageBotOrchestrator as HighLeverageBotOrchestrator
+        print("✅ Using test HighLeverageBotOrchestrator")
     except ImportError:
-        print("Warning: Could not import mock bot either")
-        HighLeverageBotOrchestrator = None
+        print("Warning: Could not import test orchestrator either, using mock")
+        try:
+            from mock_high_leverage_bot import MockHighLeverageBotOrchestrator as HighLeverageBotOrchestrator
+        except ImportError:
+            print("Warning: Could not import mock bot either")
+            HighLeverageBotOrchestrator = None
 
 from real_time_system.alert_manager import AlertManager, AlertType, AlertPriority
 from real_time_system.utils.scheduler_utils import TaskScheduler, RateLimiter

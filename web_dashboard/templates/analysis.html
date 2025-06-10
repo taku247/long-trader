@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alert History Analysis - Long Trader</title>
+    
+    <!-- CSS Dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dashboard.css') }}" rel="stylesheet">
+    
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- Header -->
+        <nav class="navbar navbar-dark bg-dark">
+            <div class="container-fluid">
+                <span class="navbar-brand mb-0 h1">
+                    <i class="fas fa-chart-line"></i> アラート履歴分析
+                </span>
+                <div class="d-flex">
+                    <a href="/" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-arrow-left"></i> ダッシュボード
+                    </a>
+                    <button id="btn-refresh-data" class="btn btn-primary btn-sm">
+                        <i class="fas fa-sync"></i> データ更新
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Controls -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-filter"></i> フィルター設定
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <label for="symbol-select" class="form-label">トークン</label>
+                                <select class="form-select" id="symbol-select">
+                                    <option value="HYPE">HYPE</option>
+                                    <option value="SOL">SOL</option>
+                                    <option value="PEPE">PEPE</option>
+                                    <option value="WIF">WIF</option>
+                                    <option value="BONK">BONK</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="period-select" class="form-label">期間</label>
+                                <select class="form-select" id="period-select">
+                                    <option value="7">過去7日</option>
+                                    <option value="30" selected>過去30日</option>
+                                    <option value="90">過去90日</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="strategy-select" class="form-label">戦略</label>
+                                <select class="form-select" id="strategy-select">
+                                    <option value="">全て</option>
+                                    <option value="Conservative_ML">Conservative ML</option>
+                                    <option value="Aggressive_Traditional">Aggressive Traditional</option>
+                                    <option value="Full_ML">Full ML</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 d-flex align-items-end">
+                                <button id="btn-apply-filters" class="btn btn-success w-100">
+                                    <i class="fas fa-search"></i> 分析実行
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts and Statistics -->
+        <div class="row mt-3">
+            <!-- Price Chart -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-chart-candlestick"></i> 
+                            価格チャート + アラートポイント
+                            <span id="chart-symbol-label" class="badge bg-primary ms-2">HYPE</span>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="price-chart" style="height: 500px;">
+                            <div class="text-center text-muted py-5">
+                                <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                                <p>チャートを読み込み中...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics Panel -->
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-chart-pie"></i> 統計情報
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="statistics-content">
+                            <div class="stat-item">
+                                <span class="label">総アラート数:</span>
+                                <span id="total-alerts-stat" class="badge bg-info">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="label">成功率:</span>
+                                <span id="success-rate-stat" class="badge bg-success">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="label">平均リターン:</span>
+                                <span id="avg-return-stat" class="badge bg-primary">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="label">最高利益:</span>
+                                <span id="max-gain-stat" class="badge bg-warning">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="label">最大損失:</span>
+                                <span id="max-loss-stat" class="badge bg-danger">-</span>
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <h6>戦略別成功率</h6>
+                        <div id="strategy-stats">
+                            <div class="text-muted">データを読み込み中...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alert Details -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-info-circle"></i> アラート詳細
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="alert-details">
+                            <div class="text-muted">
+                                チャート上のアラートポイントをクリックして詳細を表示
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alert List -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-list"></i> アラート一覧
+                        </h5>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="alert-sort" id="sort-time" autocomplete="off" checked>
+                            <label class="btn btn-outline-primary" for="sort-time">時間順</label>
+                            
+                            <input type="radio" class="btn-check" name="alert-sort" id="sort-performance" autocomplete="off">
+                            <label class="btn btn-outline-success" for="sort-performance">成果順</label>
+                            
+                            <input type="radio" class="btn-check" name="alert-sort" id="sort-leverage" autocomplete="off">
+                            <label class="btn btn-outline-warning" for="sort-leverage">レバレッジ順</label>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="alert-list-container">
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-database fa-2x mb-2"></i>
+                                <p>データを読み込み中...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Alert Detail -->
+    <div class="modal fade" id="alertDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-chart-line"></i> アラート詳細分析
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="modal-alert-details">
+                        <!-- 詳細内容がここに動的に追加される -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/analysis.js') }}"></script>
+</body>
+</html>

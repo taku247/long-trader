@@ -80,6 +80,18 @@ class AlertManager:
         self.cooldown_minutes = config.get('alerts', {}).get('cooldown_minutes', 60)
         self.max_alerts_per_hour = config.get('alerts', {}).get('max_alerts_per_hour', 10)
         
+        # Database integration
+        self.db_enabled = config.get('database', {}).get('enabled', True)
+        self.db_writer = None
+        if self.db_enabled:
+            try:
+                from alert_history_system.alert_db_writer import AlertDBWriter
+                self.db_writer = AlertDBWriter()
+                self.logger.success("Database integration enabled")
+            except Exception as e:
+                self.logger.warning(f"Could not initialize database writer: {e}")
+                self.db_enabled = False
+        
         # Initialize log file
         if self.file_enabled:
             self._init_log_file()
@@ -333,6 +345,29 @@ class AlertManager:
         # Keep only last 1000 alerts in memory
         if len(self.alert_history) > 1000:
             self.alert_history = self.alert_history[-1000:]
+        
+        # Save to database
+        if self.db_enabled and self.db_writer and alert.alert_type == AlertType.TRADING_OPPORTUNITY:
+            try:
+                alert_data = {
+                    'alert_id': alert.alert_id,
+                    'symbol': alert.symbol,
+                    'alert_type': alert.alert_type.value,
+                    'priority': alert.priority.value,
+                    'timestamp': alert.timestamp,
+                    'leverage': alert.leverage,
+                    'confidence': alert.confidence,
+                    'strategy': alert.strategy,
+                    'timeframe': alert.timeframe,
+                    'metadata': alert.metadata or {}
+                }
+                
+                if self.db_writer.save_trading_opportunity_alert(alert_data):
+                    self.logger.success(f"Alert saved to database: {alert.alert_id}")
+                else:
+                    self.logger.warning(f"Failed to save alert to database: {alert.alert_id}")
+            except Exception as e:
+                self.logger.error(f"Database save error: {e}")
         
         # Send through all channels
         success = True

@@ -21,27 +21,36 @@ from real_time_system.utils.colored_log import (
 def main():
     """Run the web dashboard demo."""
     
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Long Trader Web Dashboard Demo')
+    parser.add_argument('--host', default='localhost', help='Host to bind to')
+    parser.add_argument('--port', type=int, default=5001, help='Port to bind to')
+    parser.add_argument('--debug', action='store_true', default=True, help='Enable debug mode')
+    
+    args = parser.parse_args()
+    
     logger = get_colored_logger("demo_dashboard")
     
     print_banner("WEB DASHBOARD DEMO", "Long Trader Real-Time Monitoring Dashboard")
     logger.system_start("Demo dashboard mode activated")
     
     print_info("Demo Configuration:")
-    print("  • Host: localhost")
-    print("  • Port: 5000")
+    print(f"  • Host: {args.host}")
+    print(f"  • Port: {args.port}")
     print("  • Debug mode: Enabled")
     print("  • Real-time monitoring: Available")
     print("  • WebSocket updates: Enabled")
     print()
     
     print_info("Access the dashboard:")
-    print("  🌐 URL: http://localhost:5000")
+    print(f"  🌐 URL: http://{args.host}:{args.port}")
     print("  📊 Features: Status monitoring, Alert history, Real-time updates")
     print()
     
     try:
         # Initialize and run dashboard
-        dashboard = WebDashboard(host='localhost', port=5000, debug=True)
+        dashboard = WebDashboard(host=args.host, port=args.port, debug=args.debug)
         
         print_success("Starting web dashboard...")
         print_warning("Press Ctrl+C to stop the server")

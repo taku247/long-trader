@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Long Trader</title>
+    
+    <!-- CSS Dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dashboard.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/settings.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- Header -->
+        <nav class="navbar navbar-dark bg-dark">
+            <div class="container-fluid">
+                <span class="navbar-brand mb-0 h1">
+                    <i class="fas fa-cog"></i> Long Trader 設定
+                </span>
+                <div class="d-flex">
+                    <a href="/" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-arrow-left"></i> ダッシュボード
+                    </a>
+                    <a href="/analysis" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-chart-line"></i> 履歴分析
+                    </a>
+                    <button id="btn-save-settings" class="btn btn-success btn-sm me-2">
+                        <i class="fas fa-save"></i> 設定保存
+                    </button>
+                    <button id="btn-reset-settings" class="btn btn-warning btn-sm">
+                        <i class="fas fa-undo"></i> リセット
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Message Area (Fixed at top) -->
+        <div id="message-area" class="message-area"></div>
+
+        <!-- Settings Content -->
+        <div class="row mt-3">
+            <!-- Symbol Management -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-coins"></i> 監視銘柄管理
+                        </h5>
+                        <button id="btn-add-symbol" class="btn btn-primary btn-sm">
+                            <i class="fas fa-plus"></i> 銘柄追加
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="symbols-list" class="symbols-container">
+                            <!-- 動的に生成される銘柄リスト -->
+                        </div>
+                        
+                        <!-- 新規銘柄追加フォーム -->
+                        <div id="add-symbol-form" class="add-symbol-form" style="display: none;">
+                            <div class="row align-items-center">
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="new-symbol-input" 
+                                           placeholder="銘柄名を入力 (例: HYPE, SOL, PEPE)" maxlength="10">
+                                    <div class="form-text">
+                                        <i class="fas fa-info-circle text-primary"></i> 
+                                        全時間足・全戦略で自動学習・バックテストを実行します
+                                    </div>
+                                    <div class="form-text">
+                                        <i class="fas fa-coins text-success"></i> 
+                                        <strong>有効な銘柄例:</strong> BTC, ETH, SOL, AVAX, DOGE, HYPE, WIF, PEPE, BONK, ARB, OP
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <button id="btn-confirm-add" class="btn btn-success w-100">
+                                        <i class="fas fa-plus"></i> 銘柄追加・分析開始
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alert Conditions -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-bullseye"></i> アラート条件
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label for="leverage-threshold" class="form-label">
+                                    <i class="fas fa-lever"></i> レバレッジ閾値
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="leverage-threshold" 
+                                           min="1" max="100" step="0.1" value="10.0">
+                                    <span class="input-group-text">x</span>
+                                </div>
+                                <div class="form-text">この値以上でアラート発生</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="confidence-threshold" class="form-label">
+                                    <i class="fas fa-percentage"></i> 信頼度閾値
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="confidence-threshold" 
+                                           min="0" max="100" step="1" value="70">
+                                    <span class="input-group-text">%</span>
+                                </div>
+                                <div class="form-text">この値以上でアラート発生</div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <label for="cooldown-minutes" class="form-label">
+                                    <i class="fas fa-clock"></i> クールダウン時間
+                                </label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="cooldown-minutes" 
+                                           min="1" max="1440" value="60">
+                                    <span class="input-group-text">分</span>
+                                </div>
+                                <div class="form-text">同じ銘柄の再アラート間隔</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="max-alerts-hour" class="form-label">
+                                    <i class="fas fa-bell"></i> 1時間最大アラート数
+                                </label>
+                                <input type="number" class="form-control" id="max-alerts-hour" 
+                                       min="1" max="100" value="10">
+                                <div class="form-text">スパム防止用制限</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Scheduler Management -->
+                <div class="card mt-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-clock"></i> 定期実行スケジューラー
+                        </h5>
+                        <div>
+                            <button id="btn-start-scheduler" class="btn btn-success btn-sm me-1">
+                                <i class="fas fa-play"></i> 開始
+                            </button>
+                            <button id="btn-stop-scheduler" class="btn btn-danger btn-sm">
+                                <i class="fas fa-stop"></i> 停止
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Scheduler Status -->
+                        <div class="scheduler-status mb-3 p-3 bg-light rounded">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <small class="text-muted">ステータス</small>
+                                    <div id="scheduler-status" class="fw-bold">
+                                        <span class="badge bg-secondary">停止中</span>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">総タスク数</small>
+                                    <div id="scheduler-total-tasks" class="fw-bold">0</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">有効タスク</small>
+                                    <div id="scheduler-enabled-tasks" class="fw-bold">0</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">次回実行</small>
+                                    <div id="scheduler-next-execution" class="fw-bold">-</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Scheduled Tasks List -->
+                        <div class="scheduled-tasks">
+                            <h6 class="mb-3">
+                                <i class="fas fa-list"></i> スケジュールされたタスク
+                                <button id="btn-refresh-tasks" class="btn btn-outline-secondary btn-sm ms-2">
+                                    <i class="fas fa-sync"></i>
+                                </button>
+                            </h6>
+                            
+                            <div id="scheduled-tasks-list" class="tasks-list">
+                                <!-- 動的に生成される -->
+                            </div>
+                            
+                            <div id="scheduler-empty-state" class="text-center text-muted py-3" style="display: none;">
+                                <i class="fas fa-calendar-times fa-2x mb-2"></i>
+                                <p>スケジュールされたタスクがありません</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Migration System -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-database"></i> 既存設定マイグレーション
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="migration-info mb-3 p-3 bg-light rounded">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-info-circle text-info me-2"></i>
+                                <strong>マイグレーション機能について</strong>
+                            </div>
+                            <p class="small mb-0">
+                                既存のconfig.jsonファイルから銘柄設定を新しい管理システムに安全に移行します。
+                                バックアップを作成してから実行するため、既存設定に影響はありません。
+                            </p>
+                        </div>
+                        
+                        <!-- Migration Status -->
+                        <div class="migration-status mb-3">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <small class="text-muted">マイグレーション状況</small>
+                                    <div id="migration-status" class="fw-bold">
+                                        <span class="badge bg-secondary">未確認</span>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <small class="text-muted">バックアップディレクトリ</small>
+                                    <div id="migration-backup-dir" class="fw-bold small">-</div>
+                                </div>
+                                <div class="col-md-4">
+                                    <small class="text-muted">最新マイグレーション</small>
+                                    <div id="migration-last-run" class="fw-bold small">-</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Migration Actions -->
+                        <div class="migration-actions">
+                            <button id="btn-migration-check" class="btn btn-outline-primary me-2">
+                                <i class="fas fa-search"></i> 移行可能銘柄をチェック
+                            </button>
+                            <button id="btn-migration-execute" class="btn btn-success me-2" disabled>
+                                <i class="fas fa-play"></i> マイグレーション実行
+                            </button>
+                            <button id="btn-migration-history" class="btn btn-outline-info">
+                                <i class="fas fa-history"></i> 履歴表示
+                            </button>
+                        </div>
+                        
+                        <!-- Migration Results -->
+                        <div id="migration-results" class="migration-results mt-3" style="display: none;">
+                            <h6 class="mb-3">
+                                <i class="fas fa-list-check"></i> マイグレーション結果
+                            </h6>
+                            <div id="migration-results-content">
+                                <!-- 動的に生成される -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notification Settings -->
+            <div class="col-lg-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-bell"></i> 通知設定
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Discord Settings -->
+                        <div class="notification-section">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6><i class="fab fa-discord text-primary"></i> Discord通知</h6>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="discord-enabled">
+                                    <label class="form-check-label" for="discord-enabled"></label>
+                                </div>
+                            </div>
+                            
+                            <div id="discord-settings" class="discord-settings">
+                                <div class="mb-3">
+                                    <label for="discord-webhook" class="form-label">Webhook URL</label>
+                                    <input type="url" class="form-control" id="discord-webhook" 
+                                           placeholder="https://discord.com/api/webhooks/...">
+                                    <div class="form-text">DiscordサーバーのWebhook URLを入力</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="discord-mention" class="form-label">メンション設定</label>
+                                    <input type="text" class="form-control" id="discord-mention" 
+                                           placeholder="ロールID (オプション)">
+                                    <div class="form-text">重要なアラート時にメンションするロールID</div>
+                                </div>
+                                
+                                <button id="btn-test-discord" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-paper-plane"></i> テスト送信
+                                </button>
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <!-- Console/Log Settings -->
+                        <div class="notification-section">
+                            <h6><i class="fas fa-terminal text-success"></i> ログ設定</h6>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label for="log-level" class="form-label">ログレベル</label>
+                                    <select class="form-select" id="log-level">
+                                        <option value="DEBUG">DEBUG</option>
+                                        <option value="INFO" selected>INFO</option>
+                                        <option value="WARNING">WARNING</option>
+                                        <option value="ERROR">ERROR</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="log-file-enabled" class="form-label">ファイル出力</label>
+                                    <div class="form-check form-switch mt-2">
+                                        <input class="form-check-input" type="checkbox" id="log-file-enabled" checked>
+                                        <label class="form-check-label" for="log-file-enabled">有効</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Profile Management -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-user-cog"></i> プロファイル管理
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <select class="form-select" id="profile-select">
+                                    <option value="default">デフォルト設定</option>
+                                    <option value="conservative">保守的設定</option>
+                                    <option value="aggressive">積極的設定</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <button id="btn-load-profile" class="btn btn-outline-primary w-100">
+                                    <i class="fas fa-download"></i> 読み込み
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <input type="text" class="form-control" id="new-profile-name" 
+                                           placeholder="新しいプロファイル名">
+                                </div>
+                                <div class="col-md-4">
+                                    <button id="btn-save-profile" class="btn btn-success w-100">
+                                        <i class="fas fa-save"></i> 保存
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <button id="btn-export-settings" class="btn btn-outline-secondary me-2">
+                                <i class="fas fa-file-export"></i> エクスポート
+                            </button>
+                            <button id="btn-import-settings" class="btn btn-outline-secondary">
+                                <i class="fas fa-file-import"></i> インポート
+                            </button>
+                            <input type="file" id="import-file-input" accept=".json" style="display: none;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="row mt-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body py-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div id="settings-status" class="text-muted">
+                                <i class="fas fa-info-circle"></i> 設定を変更した後は「設定保存」ボタンを押してください
+                            </div>
+                            <div id="last-saved" class="text-muted small">
+                                <!-- 最終保存時刻が表示される -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Symbol Edit Modal -->
+    <div class="modal fade" id="editSymbolModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-edit"></i> 銘柄設定編集
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="edit-symbol-form">
+                        <input type="hidden" id="edit-symbol-original">
+                        
+                        <div class="mb-3">
+                            <label for="edit-symbol-name" class="form-label">銘柄名</label>
+                            <input type="text" class="form-control" id="edit-symbol-name" readonly>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit-symbol-interval" class="form-label">監視間隔</label>
+                            <select class="form-select" id="edit-symbol-interval">
+                                <option value="1">1分</option>
+                                <option value="3">3分</option>
+                                <option value="5">5分</option>
+                                <option value="15">15分</option>
+                                <option value="30">30分</option>
+                                <option value="60">60分</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="edit-symbol-strategy" class="form-label">戦略</label>
+                            <select class="form-select" id="edit-symbol-strategy">
+                                <option value="Conservative_ML">Conservative ML</option>
+                                <option value="Aggressive_Traditional">Aggressive Traditional</option>
+                                <option value="Full_ML">Full ML</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="edit-symbol-enabled">
+                                <label class="form-check-label" for="edit-symbol-enabled">
+                                    監視を有効にする
+                                </label>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="btn-save-symbol-edit">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+</body>
+</html>

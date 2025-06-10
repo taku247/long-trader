@@ -65,10 +65,6 @@ class Dashboard {
             this.stopMonitor();
         });
         
-        // Status refresh button
-        document.getElementById('btn-refresh-status').addEventListener('click', () => {
-            this.updateStatus();
-        });
         
         // Alert filters
         document.querySelectorAll('input[name="alert-filter"]').forEach(radio => {
@@ -83,10 +79,6 @@ class Dashboard {
             this.loadMoreAlerts();
         });
         
-        // Clear alerts button
-        document.getElementById('btn-clear-alerts').addEventListener('click', () => {
-            this.clearAlerts();
-        });
     }
     
     updateConnectionStatus(status, text) {
@@ -108,14 +100,14 @@ class Dashboard {
             
         } catch (error) {
             console.error('Error updating status:', error);
-            this.showNotification('ステータス更新エラー', 'error');
+            this.showMessageBanner('ステータス更新エラー', 'error');
         }
     }
     
     updateSystemStatus(status) {
         // Update monitor status
         const monitorStatus = document.getElementById('monitor-status');
-        if (status.status === 'running') {
+        if (status.running === true) {
             monitorStatus.className = 'badge running';
             monitorStatus.textContent = '動作中';
         } else {
@@ -141,8 +133,8 @@ class Dashboard {
         }
         
         // Update last update time
-        const lastUpdate = status.last_update ? 
-            new Date(status.last_update).toLocaleString('ja-JP') : '-';
+        const lastUpdate = status.start_time ? 
+            new Date().toLocaleString('ja-JP') : '-';
         document.getElementById('last-update').textContent = lastUpdate;
     }
     
@@ -312,15 +304,15 @@ class Dashboard {
             const result = await response.json();
             
             if (response.ok) {
-                this.showNotification('監視システムを開始しました', 'success');
+                this.showMessageBanner('監視システムを開始しました', 'success');
                 await this.updateStatus();
             } else {
-                this.showNotification(`エラー: ${result.error}`, 'error');
+                this.showMessageBanner(`エラー: ${result.error}`, 'error', false);
             }
             
         } catch (error) {
             console.error('Error starting monitor:', error);
-            this.showNotification('監視開始エラー', 'error');
+            this.showMessageBanner('監視開始エラー', 'error');
         }
     }
     
@@ -333,15 +325,15 @@ class Dashboard {
             const result = await response.json();
             
             if (response.ok) {
-                this.showNotification('監視システムを停止しました', 'warning');
+                this.showMessageBanner('監視システムを停止しました', 'warning');
                 await this.updateStatus();
             } else {
-                this.showNotification(`エラー: ${result.error}`, 'error');
+                this.showMessageBanner(`エラー: ${result.error}`, 'error', false);
             }
             
         } catch (error) {
             console.error('Error stopping monitor:', error);
-            this.showNotification('監視停止エラー', 'error');
+            this.showMessageBanner('監視停止エラー', 'error');
         }
     }
     
@@ -351,6 +343,49 @@ class Dashboard {
         this.showNotification('アラート履歴をクリアしました', 'info');
     }
     
+    showMessageBanner(message, type = 'info', autoHide = true) {
+        const messageArea = document.getElementById('message-area');
+        
+        // Remove existing banner if any
+        const existingBanner = messageArea.querySelector('.message-banner');
+        if (existingBanner) {
+            existingBanner.remove();
+        }
+        
+        // Get appropriate icon for message type
+        const icons = {
+            'success': 'fas fa-check-circle',
+            'error': 'fas fa-exclamation-circle',
+            'warning': 'fas fa-exclamation-triangle',
+            'info': 'fas fa-info-circle'
+        };
+        
+        const banner = document.createElement('div');
+        banner.className = `message-banner ${type}`;
+        banner.innerHTML = `
+            <div class="message-content">
+                <i class="${icons[type] || icons.info}"></i>
+                <span>${message}</span>
+            </div>
+            <button class="close-btn" onclick="this.parentElement.remove()">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        messageArea.appendChild(banner);
+        
+        // Auto hide after 8 seconds for success/info, 12 seconds for warnings/errors
+        if (autoHide) {
+            const hideDelay = (type === 'error' || type === 'warning') ? 12000 : 8000;
+            setTimeout(() => {
+                if (banner.parentElement) {
+                    banner.style.animation = 'slideUp 0.3s ease-out';
+                    setTimeout(() => banner.remove(), 300);
+                }
+            }, hideDelay);
+        }
+    }
+
     showNotification(message, type = 'info') {
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;

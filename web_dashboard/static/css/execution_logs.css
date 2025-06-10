@@ -1,0 +1,340 @@
+/**
+ * Execution Logs page CSS
+ * 実行ログページ専用スタイル
+ */
+
+/* Statistics Cards */
+.stats-card {
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.2s ease;
+    height: 100%;
+}
+
+.stats-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.stats-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.stats-number {
+    font-size: 2rem;
+    font-weight: bold;
+    margin: 0.5rem 0;
+    color: #333;
+}
+
+.stats-label {
+    color: #666;
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+/* Table Styling */
+.table {
+    font-size: 0.9rem;
+}
+
+.table th {
+    font-weight: 600;
+    border-bottom: 2px solid #dee2e6;
+    vertical-align: middle;
+}
+
+.table td {
+    vertical-align: middle;
+    padding: 0.75rem 0.5rem;
+}
+
+/* Status Badges */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-pending {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.status-running {
+    background-color: #cce5ff;
+    color: #004085;
+    border: 1px solid #99d6ff;
+}
+
+.status-success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.status-failed {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.status-cancelled {
+    background-color: #e2e3e5;
+    color: #495057;
+    border: 1px solid #d6d8db;
+}
+
+/* Progress Bars */
+.execution-progress {
+    width: 80px;
+    height: 6px;
+}
+
+.progress-text {
+    font-size: 0.7rem;
+    color: #666;
+}
+
+/* Type Badges */
+.type-badge {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+}
+
+.type-symbol-addition {
+    background-color: #e3f2fd;
+    color: #1976d2;
+}
+
+.type-scheduled-backtest {
+    background-color: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.type-scheduled-training {
+    background-color: #e8f5e8;
+    color: #388e3c;
+}
+
+.type-emergency-retrain {
+    background-color: #ffebee;
+    color: #d32f2f;
+}
+
+.type-manual-execution {
+    background-color: #fff3e0;
+    color: #f57c00;
+}
+
+/* Execution ID styling */
+.execution-id {
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    color: #666;
+    background-color: #f8f9fa;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+}
+
+.execution-id:hover {
+    background-color: #e9ecef;
+    color: #495057;
+}
+
+/* Duration formatting */
+.duration {
+    font-weight: 500;
+    color: #495057;
+}
+
+.duration.long {
+    color: #dc3545;
+}
+
+.duration.medium {
+    color: #ffc107;
+}
+
+.duration.short {
+    color: #28a745;
+}
+
+/* Filter section */
+.filter-section {
+    background-color: #f8f9fa;
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+/* Action buttons */
+.action-buttons {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.btn-action {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    border-radius: 0.25rem;
+}
+
+/* Modal enhancements */
+.modal-xl .modal-body {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.step-accordion .accordion-item {
+    border: 1px solid #e9ecef;
+    margin-bottom: 0.5rem;
+    border-radius: 0.375rem;
+}
+
+.step-accordion .accordion-header {
+    border-radius: 0.375rem;
+}
+
+.step-success .accordion-button {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.step-failed .accordion-button {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.step-running .accordion-button {
+    background-color: #cce5ff;
+    color: #004085;
+}
+
+/* Error section */
+.error-item {
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 0.375rem;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.error-title {
+    font-weight: 600;
+    color: #721c24;
+    margin-bottom: 0.5rem;
+}
+
+.error-message {
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    background-color: #fff;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    border: 1px solid #dee2e6;
+    white-space: pre-wrap;
+}
+
+/* Loading and empty states */
+.loading-state, .empty-state {
+    padding: 3rem 1rem;
+}
+
+.empty-state i {
+    opacity: 0.5;
+}
+
+/* Auto-refresh indicator */
+.auto-refresh-active {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .stats-icon {
+        font-size: 2rem;
+    }
+    
+    .stats-number {
+        font-size: 1.5rem;
+    }
+    
+    .table-responsive {
+        font-size: 0.8rem;
+    }
+    
+    .execution-id {
+        font-size: 0.7rem;
+    }
+    
+    .action-buttons {
+        flex-direction: column;
+    }
+    
+    .filter-section .row > div {
+        margin-bottom: 1rem;
+    }
+}
+
+/* Print styles */
+@media print {
+    .navbar, .pagination, .action-buttons, .modal {
+        display: none !important;
+    }
+    
+    .card {
+        border: 1px solid #000 !important;
+        page-break-inside: avoid;
+    }
+}
+
+/* Utilities */
+.text-truncate-id {
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cursor-pointer {
+    cursor: pointer;
+}
+
+.border-dashed {
+    border-style: dashed !important;
+}
+
+/* Custom scrollbar for modal */
+.modal-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}

@@ -765,44 +765,15 @@ class WebDashboard:
                     exit_price = trade.get('exit_price')
                     leverage = float(trade.get('leverage', 0))
                     
-                    # Calculate take profit and stop loss based on actual trade outcome
-                    take_profit_price = None
-                    stop_loss_price = None
+                    # Use actual TP/SL prices from backtest data if available
+                    take_profit_price = trade.get('take_profit_price')
+                    stop_loss_price = trade.get('stop_loss_price')
                     
-                    if entry_price is not None and exit_price is not None:
-                        entry_price = float(entry_price)
-                        exit_price = float(exit_price)
-                        
-                        # Calculate actual return percentage
-                        actual_return_pct = (exit_price - entry_price) / entry_price
-                        
-                        # Reverse engineer realistic TP/SL levels based on the trade outcome
-                        if trade.get('is_success', False):
-                            # For successful trades, set TP slightly below exit price
-                            # This makes the display more realistic
-                            take_profit_price = exit_price * 0.995  # TP is 0.5% below actual exit
-                            
-                            # Set SL based on conservative risk management (2-3% below entry)
-                            if 'Conservative' in config:
-                                sl_pct = 0.02  # 2% stop for conservative
-                            elif 'Aggressive' in config:
-                                sl_pct = 0.04  # 4% stop for aggressive  
-                            else:  # Full_ML
-                                sl_pct = 0.03  # 3% stop for ML
-                            stop_loss_price = entry_price * (1 - sl_pct)
-                            
-                        else:
-                            # For failed trades, set SL slightly above exit price
-                            stop_loss_price = exit_price * 1.005  # SL is 0.5% above actual exit
-                            
-                            # Set TP based on reasonable targets (4-8% above entry)
-                            if 'Conservative' in config:
-                                tp_pct = 0.04  # 4% target for conservative
-                            elif 'Aggressive' in config:
-                                tp_pct = 0.08  # 8% target for aggressive
-                            else:  # Full_ML
-                                tp_pct = 0.06  # 6% target for ML
-                            take_profit_price = entry_price * (1 + tp_pct)
+                    # Convert to float if not None
+                    if take_profit_price is not None:
+                        take_profit_price = float(take_profit_price)
+                    if stop_loss_price is not None:
+                        stop_loss_price = float(stop_loss_price)
                     
                     formatted_trade = {
                         'entry_time': trade.get('entry_time', 'N/A'),

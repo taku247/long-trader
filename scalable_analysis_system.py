@@ -253,26 +253,66 @@ class ScalableAnalysisSystem:
                     if (i + 1) % 10 == 0:
                         print(f"🔄 {symbol} {timeframe} {config}: 進捗 ({i + 1}/{num_trades})")
                     
-                    # レバレッジに基づいてPnLを計算
+                    # レバレッジとTP/SL価格を計算
                     leverage = result.get('leverage', 5.0)
                     confidence = result.get('confidence', 70.0) / 100.0
                     risk_reward = result.get('risk_reward_ratio', 2.0)
+                    current_price = 100.0  # Base price for simulation
+                    
+                    # TP/SL計算機能を使用
+                    from engines.stop_loss_take_profit_calculators import DefaultSLTPCalculator, ConservativeSLTPCalculator, AggressiveSLTPCalculator
+                    from interfaces.data_types import MarketContext
+                    
+                    # リアルなタイムスタンプ生成（過去90日間に分散）
+                    trade_time = start_time + timedelta(seconds=i * time_interval)
+                    
+                    # 戦略に応じたTP/SL計算器を選択
+                    if 'Conservative' in config:
+                        sltp_calculator = ConservativeSLTPCalculator()
+                    elif 'Aggressive' in config:
+                        sltp_calculator = AggressiveSLTPCalculator()
+                    else:
+                        sltp_calculator = DefaultSLTPCalculator()
+                    
+                    # 模擬的な市場コンテキスト
+                    market_context = MarketContext(
+                        current_price=current_price,
+                        volume_24h=1000000.0,
+                        volatility=0.03,
+                        trend_direction='BULLISH',
+                        market_phase='MARKUP',
+                        timestamp=trade_time
+                    )
+                    
+                    # TP/SL価格を実際に計算
+                    sltp_levels = sltp_calculator.calculate_levels(
+                        current_price=current_price,
+                        leverage=leverage,
+                        support_levels=[],  # 簡易実装のため空
+                        resistance_levels=[],  # 簡易実装のため空
+                        market_context=market_context
+                    )
+                    
+                    # 実際のTP/SL価格
+                    tp_price = sltp_levels.take_profit_price
+                    sl_price = sltp_levels.stop_loss_price
+                    entry_price = current_price
                     
                     # 成功確率（信頼度ベース）
-                    is_success = np.random.random() < (confidence * 0.8 + 0.2)  # 20-100%の範囲
+                    is_success = np.random.random() < (confidence * 0.8 + 0.2)
                     
                     if is_success:
-                        # 成功時はリスクリワード比に基づいて利益計算
-                        pnl_pct = np.random.uniform(0.01, 0.05) * risk_reward
+                        # 成功時はTP価格付近でクローズ
+                        exit_price = tp_price * np.random.uniform(0.98, 1.02)  # TP価格の±2%
+                        pnl_pct = (exit_price - entry_price) / entry_price
                     else:
-                        # 失敗時は損失
-                        pnl_pct = -np.random.uniform(0.005, 0.02)
+                        # 失敗時はSL価格付近でクローズ
+                        exit_price = sl_price * np.random.uniform(0.98, 1.02)  # SL価格の±2%
+                        pnl_pct = (exit_price - entry_price) / entry_price
                     
                     # レバレッジ適用
                     leveraged_pnl = pnl_pct * leverage
                     
-                    # リアルなタイムスタンプ生成（過去90日間に分散）
-                    trade_time = start_time + timedelta(seconds=i * time_interval)
                     # 営業時間内（平日の9:00-21:00 JST = 0:00-12:00 UTC）に調整
                     if trade_time.weekday() >= 5:  # 土日は月曜に移動
                         trade_time += timedelta(days=(7 - trade_time.weekday()))
@@ -293,12 +333,14 @@ class ScalableAnalysisSystem:
                     trades.append({
                         'entry_time': jst_entry_time.strftime('%Y-%m-%d %H:%M:%S JST'),
                         'exit_time': jst_exit_time.strftime('%Y-%m-%d %H:%M:%S JST'),
+                        'entry_price': entry_price,
+                        'exit_price': exit_price,
+                        'take_profit_price': tp_price,
+                        'stop_loss_price': sl_price,
                         'leverage': leverage,
                         'pnl_pct': leveraged_pnl,
                         'confidence': confidence,
                         'is_success': is_success,
-                        'entry_price': result.get('current_price', 100.0),
-                        'exit_price': result.get('current_price', 100.0) * (1 + pnl_pct),
                         'strategy': config
                     })
                     

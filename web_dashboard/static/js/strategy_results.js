@@ -736,28 +736,29 @@ class StrategyResultsManager {
     }
 
     determineExitReason(trade) {
-        if (!trade.exit_price || !trade.entry_price || !trade.take_profit_price || !trade.stop_loss_price) {
+        if (!trade.exit_price || !trade.entry_price) {
             return trade.is_success ? 'Target' : 'Stop';
         }
         
         const exitPrice = trade.exit_price;
         const entryPrice = trade.entry_price;
-        const tpPrice = trade.take_profit_price;
-        const slPrice = trade.stop_loss_price;
-        
-        // Check if exit price is closer to TP or SL
-        const distanceToTP = Math.abs(exitPrice - tpPrice);
-        const distanceToSL = Math.abs(exitPrice - slPrice);
+        const returnPct = (exitPrice - entryPrice) / entryPrice;
         
         if (trade.is_success) {
-            if (distanceToTP < distanceToSL) {
+            // For profitable trades
+            if (returnPct >= 0.035) {  // 3.5%+ return
                 return 'TP達成';
+            } else if (returnPct >= 0.015) {  // 1.5-3.5% return
+                return '部分利確';
             } else {
                 return '手動利確';
             }
         } else {
-            if (distanceToSL < distanceToTP) {
+            // For losing trades
+            if (returnPct <= -0.025) {  // -2.5% or worse
                 return 'SL発動';
+            } else if (returnPct <= -0.01) {  // -1% to -2.5%
+                return '早期損切';
             } else {
                 return '手動損切';
             }

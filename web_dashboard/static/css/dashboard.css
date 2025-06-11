@@ -49,6 +49,55 @@ body {
     border-bottom: none;
 }
 
+/* Sticky Table Headers for Trade Details */
+.trade-details-table {
+    max-height: 600px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: var(--border-radius);
+}
+
+.trade-details-table .table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: var(--dark-bg) !important;
+    border-bottom: 2px solid #495057;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.trade-details-table .table tbody tr:hover {
+    background-color: rgba(0,123,255,0.1);
+}
+
+/* Improve table readability */
+.trade-details-table .table th {
+    vertical-align: middle;
+    padding: 12px 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+    min-width: 80px;
+}
+
+.trade-details-table .table td {
+    vertical-align: middle;
+    padding: 8px;
+    font-size: 0.875rem;
+    text-align: center;
+    min-width: 80px;
+}
+
+/* Modal improvements for better table display */
+.modal-xl .modal-body {
+    padding: 1rem 1.5rem;
+}
+
+.trade-details-table .table {
+    margin-bottom: 0;
+}
+
 .status-item .label {
     font-weight: 500;
     color: #6c757d;

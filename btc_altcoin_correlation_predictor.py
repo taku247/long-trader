@@ -60,12 +60,31 @@ class BTCAltcoinCorrelationPredictor:
             
             all_data = []
             
-            # 1日ずつデータを取得
+            # 1日ずつデータを取得（429エラー対策付き）
             for i in range(days):
                 day_start = start_time + (i * 24 * 60 * 60 * 1000)
                 day_end = day_start + (24 * 60 * 60 * 1000)
                 
-                candles = self.info.candles_snapshot(symbol, timeframe, day_start, day_end)
+                # リトライ機構付きAPI呼び出し
+                retry_count = 0
+                max_retries = 3
+                while retry_count < max_retries:
+                    try:
+                        candles = self.info.candles_snapshot(symbol, timeframe, day_start, day_end)
+                        break
+                    except Exception as e:
+                        if "429" in str(e) or "rate limit" in str(e).lower():
+                            retry_count += 1
+                            wait_time = 2.0 ** retry_count  # 指数バックオフ: 2秒、4秒、8秒
+                            print(f"BTC相関分析でRate Limit発生 (リトライ {retry_count}/{max_retries}), {wait_time}秒待機...")
+                            time.sleep(wait_time)
+                        else:
+                            print(f"BTC相関分析でAPI呼び出しエラー: {e}")
+                            candles = []
+                            break
+                else:
+                    print(f"BTC相関分析: 最大リトライ数に到達、day {i+1}をスキップ")
+                    candles = []
                 
                 for candle in candles:
                     all_data.append({
@@ -77,8 +96,8 @@ class BTCAltcoinCorrelationPredictor:
                         'volume': float(candle['v'])
                     })
                 
-                # レート制限対策
-                time.sleep(0.1)
+                # レート制限対策（BTC相関分析用に延長）
+                time.sleep(0.5)
             
             df = pd.DataFrame(all_data)
             df.set_index('timestamp', inplace=True)

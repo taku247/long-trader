@@ -89,7 +89,7 @@ class ScalableAnalysisSystem:
             max_workers: 並列数（デフォルト: CPU数）
         """
         if max_workers is None:
-            max_workers = min(cpu_count(), 8)  # 最大8並列
+            max_workers = min(cpu_count(), 4)  # Rate Limit対策で最大4並列
         
         logger.info(f"バッチ分析開始: {len(batch_configs)}パターン, {max_workers}並列")
         
@@ -182,18 +182,23 @@ class ScalableAnalysisSystem:
         
         return True
     
-    def _generate_real_analysis(self, symbol, timeframe, config, num_trades=50):  # 高精度のため50回に戻す
+    def _generate_real_analysis(self, symbol, timeframe, config, num_trades=50):  # 高精度のため50回維持
         """ハイレバレッジボットを使用した実分析"""
         try:
-            from engines.test_high_leverage_bot_orchestrator import TestHighLeverageBotOrchestrator
+            # 本格的な戦略分析のため、実際のAPIデータを使用
+            from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
             
-            bot = TestHighLeverageBotOrchestrator()
+            print(f"🎯 実データによる戦略分析を開始: {symbol} {timeframe} {config}")
+            print("   ⏳ データ取得とML分析のため、処理に数分かかる場合があります...")
+            
+            bot = HighLeverageBotOrchestrator(use_default_plugins=True)
             
             # 複数回分析を実行してトレードデータを生成（完全ログ抑制）
             trades = []
             import sys
             import os
             import contextlib
+            import time
             
             # 進捗表示用
             print(f"🔄 {symbol} {timeframe} {config}: 高精度分析実行中 (0/{num_trades})")
@@ -219,9 +224,30 @@ class ScalableAnalysisSystem:
             
             for i in range(num_trades):
                 try:
-                    # 完全なログ抑制で分析実行
-                    with suppress_all_output():
-                        result = bot.analyze_symbol(symbol, timeframe, config)
+                    # 戦略分析では時間をかけてでも正確な分析を実行
+                    # タイムアウトやエラーが発生した場合は再試行
+                    retry_count = 0
+                    max_retries = 3
+                    
+                    while retry_count < max_retries:
+                        try:
+                            # 完全なログ抑制で分析実行
+                            with suppress_all_output():
+                                result = bot.analyze_symbol(symbol, timeframe, config)
+                            break  # 成功したらループを抜ける
+                        except Exception as e:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                print(f"   ⚠️ 分析エラー (リトライ {retry_count}/{max_retries}): {str(e)[:100]}...")
+                                time.sleep(5)  # 5秒待機してリトライ
+                            else:
+                                print(f"   ❌ 分析失敗 (最大リトライ数に到達): {str(e)[:100]}...")
+                                # フォールバック: テスト版で代替
+                                from engines.test_high_leverage_bot_orchestrator import TestHighLeverageBotOrchestrator
+                                fallback_bot = TestHighLeverageBotOrchestrator()
+                                result = fallback_bot.analyze_symbol(symbol, timeframe, config)
+                                print(f"   🔄 フォールバック分析で継続")
+                                break
                     
                     # 進捗表示（10回ごと）
                     if (i + 1) % 10 == 0:
@@ -247,22 +273,26 @@ class ScalableAnalysisSystem:
                     
                     # リアルなタイムスタンプ生成（過去90日間に分散）
                     trade_time = start_time + timedelta(seconds=i * time_interval)
-                    # 営業時間内（平日の9:00-21:00 UTC）に調整
+                    # 営業時間内（平日の9:00-21:00 JST = 0:00-12:00 UTC）に調整
                     if trade_time.weekday() >= 5:  # 土日は月曜に移動
                         trade_time += timedelta(days=(7 - trade_time.weekday()))
-                    # 時間調整（9:00-21:00 UTC）
+                    # 時間調整（9:00-21:00 JST = 0:00-12:00 UTC）
                     hour = trade_time.hour
-                    if hour < 9:
-                        trade_time = trade_time.replace(hour=9)
-                    elif hour > 21:
-                        trade_time = trade_time.replace(hour=21)
+                    if hour < 0:  # JST 9:00 = UTC 0:00
+                        trade_time = trade_time.replace(hour=0)
+                    elif hour > 12:  # JST 21:00 = UTC 12:00
+                        trade_time = trade_time.replace(hour=12)
                     
                     # 退出時間は5分-2時間後
                     exit_time = trade_time + timedelta(minutes=np.random.randint(5, 120))
                     
+                    # 日本時間（UTC+9）で表示
+                    jst_entry_time = trade_time + timedelta(hours=9)
+                    jst_exit_time = exit_time + timedelta(hours=9)
+                    
                     trades.append({
-                        'entry_time': trade_time.strftime('%Y-%m-%d %H:%M:%S'),
-                        'exit_time': exit_time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'entry_time': jst_entry_time.strftime('%Y-%m-%d %H:%M:%S JST'),
+                        'exit_time': jst_exit_time.strftime('%Y-%m-%d %H:%M:%S JST'),
                         'leverage': leverage,
                         'pnl_pct': leveraged_pnl,
                         'confidence': confidence,

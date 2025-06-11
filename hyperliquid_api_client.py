@@ -74,10 +74,11 @@ class HyperliquidAPIClient:
                 'APT', 'SUI', 'SEI', 'INJ', 'TIA', 'NEAR', 'FTM', 'LUNA', 'LUNC',
                 'WLD', 'FET', 'AGIX', 'RNDR', 'OCEAN', 'TAO', 'AKT',
                 'JTO', 'PYTH', 'JUP', 'DRIFT', 'RAY', 'ORCA', 'MNGO',
-                'PEPE', 'WIF', 'BOME', 'WEN', 'SLERF', 'POPCAT', 'PONKE',
+                'PEPE', 'WIF', 'BOME', 'WEN', 'SLERF', 'POPCAT', 'PONKE', 'FARTCOIN',
                 'HYPE', 'TRUMP', 'PNUT', 'GOAT', 'MOODENG', 'CHILLGUY', 'AI16Z',
                 'W', 'STRK', 'BLUR', 'IMX', 'LRC', 'ZK', 'METIS', 'MANTA',
-                'ORDI', 'SATS', '1000SATS', 'RATS', 'SHIB', 'FLOKI', 'GALA'
+                'ORDI', 'SATS', '1000SATS', 'RATS', 'SHIB', 'FLOKI', 'GALA',
+                'SPX'  # S&P 500インデックス関連
             ]
     
     async def get_market_info(self, symbol: str) -> Dict:
@@ -134,8 +135,10 @@ class HyperliquidAPIClient:
             if hyperliquid_symbol != symbol:
                 self.logger.info(f"🔄 Mapping {symbol} -> {hyperliquid_symbol} for data fetch")
             
-            self.logger.info(f"📈 Fetching OHLCV data for {hyperliquid_symbol} ({timeframe})")
-            self.logger.info(f"   Period: {start_time} to {end_time}")
+            # 期間情報を詳細に計算
+            period_days = (end_time - start_time).days
+            self.logger.info(f"📈 🔥 OHLCV FETCH START 🔥 Symbol: {hyperliquid_symbol} | Timeframe: {timeframe} | Period: {period_days}日間")
+            self.logger.info(f"   📅 Range: {start_time.strftime('%Y-%m-%d %H:%M')} → {end_time.strftime('%Y-%m-%d %H:%M')}")
             
             # タイムスタンプをミリ秒に変換
             start_ms = int(start_time.timestamp() * 1000)
@@ -185,8 +188,8 @@ class HyperliquidAPIClient:
                 current_ms += one_day_ms
                 day_count += 1
                 
-                # API制限を考慮した待機
-                await asyncio.sleep(0.1)
+                # API制限を考慮した待機（適度な間隔）
+                await asyncio.sleep(0.2)
             
             # 失敗日数が多すぎる場合はエラー
             if failed_days > max_allowed_failures:
@@ -205,7 +208,7 @@ class HyperliquidAPIClient:
             # 重複削除
             df = df.drop_duplicates(subset=['timestamp']).reset_index(drop=True)
             
-            self.logger.success(f"✅ ✅ Retrieved {len(df)} data points for {symbol}")
+            self.logger.success(f"✅ 🔥 OHLCV FETCH COMPLETE 🔥 Symbol: {symbol} | Timeframe: {timeframe} | Points: {len(df)} | Success Rate: {((total_days-failed_days)/total_days*100):.1f}%")
             
             return df
             
@@ -221,6 +224,8 @@ class HyperliquidAPIClient:
         # デフォルトの期間設定
         if days is None:
             days = self.timeframe_config.get(timeframe, {}).get('days', 90)
+        
+        self.logger.info(f"🎯 OHLCV REQUEST: {symbol} {timeframe} for {days} days (timeframe config)")
         
         end_time = datetime.now()
         start_time = end_time - timedelta(days=days)

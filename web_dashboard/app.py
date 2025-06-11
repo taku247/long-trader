@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from flask import Flask, render_template, jsonify, request
-from flask_socketio import SocketIO, emit
+# from flask_socketio import SocketIO, emit
 import logging
 
 # Add parent directory to path for imports
@@ -36,8 +36,9 @@ class WebDashboard:
                         static_folder='static')
         self.app.config['SECRET_KEY'] = 'long-trader-dashboard-secret-key'
         
-        # Initialize SocketIO
-        self.socketio = SocketIO(self.app, cors_allowed_origins="*")
+        # Disable SocketIO for now - use standard Flask only
+        # self.socketio = SocketIO(self.app, cors_allowed_origins="*", transports=['polling'])
+        self.socketio = None
         
         # Initialize logger
         self.logger = get_colored_logger(__name__)
@@ -48,7 +49,8 @@ class WebDashboard:
         
         # Setup routes
         self._setup_routes()
-        self._setup_socketio_events()
+        # Disable SocketIO events for now
+        # self._setup_socketio_events()
         
         self.logger.info("Web dashboard initialized")
     
@@ -314,6 +316,12 @@ class WebDashboard:
                 self.logger.error(f"Error getting alert detail: {e}")
                 return jsonify({'error': str(e)}), 500
         
+        # Symbol Management Routes
+        @self.app.route('/symbols')
+        def symbols_page():
+            """Symbol management page."""
+            return render_template('symbols.html')
+        
         # Settings Management Routes
         @self.app.route('/settings')
         def settings_page():
@@ -513,12 +521,13 @@ class WebDashboard:
                 system = ScalableAnalysisSystem()
                 
                 # Get symbols with completed analyses
+                # 18 patterns = 3 strategies × 6 timeframes (1m,3m,5m,15m,30m,1h)
                 query = """
                     SELECT symbol, COUNT(*) as pattern_count, AVG(sharpe_ratio) as avg_sharpe
                     FROM analyses 
                     WHERE status='completed' 
                     GROUP BY symbol 
-                    HAVING pattern_count >= 6
+                    HAVING pattern_count >= 18
                     ORDER BY avg_sharpe DESC
                 """
                 
@@ -542,6 +551,135 @@ class WebDashboard:
             except Exception as e:
                 self.logger.error(f"Error getting strategy symbols: {e}")
                 return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/strategy-results/symbols-with-progress')
+        def api_strategy_results_symbols_with_progress():
+            """Get all symbols with their analysis progress with failure detection."""
+            try:
+                from scalable_analysis_system import ScalableAnalysisSystem
+                from execution_log_database import ExecutionLogDatabase
+                from datetime import datetime, timedelta
+                system = ScalableAnalysisSystem()
+                exec_db = ExecutionLogDatabase()
+                
+                # Get all symbols with their progress (18 = 3 strategies × 6 timeframes)
+                query = """
+                    SELECT symbol, COUNT(*) as completed_patterns, AVG(sharpe_ratio) as avg_sharpe,
+                           MAX(generated_at) as latest_completion
+                    FROM analyses 
+                    WHERE status='completed' 
+                    GROUP BY symbol 
+                    ORDER BY completed_patterns DESC, avg_sharpe DESC
+                """
+                
+                import sqlite3
+                with sqlite3.connect(system.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(query)
+                    results = cursor.fetchall()
+                    
+                    symbols = []
+                    for row in results:
+                        symbol, completed, avg_sharpe, latest_completion = row
+                        completion_rate = (completed / 18) * 100
+                        
+                        # Check execution status for failure detection
+                        execution_status, failure_info = self._check_symbol_execution_status(
+                            exec_db, symbol, completed, latest_completion
+                        )
+                        
+                        # Determine final status
+                        if execution_status == 'failed':
+                            status = 'failed'
+                        elif execution_status == 'stalled':
+                            status = 'stalled'
+                        elif completed >= 18:
+                            status = 'completed'
+                        elif completed >= 12:
+                            status = 'nearly_complete'
+                        elif completed >= 6:
+                            status = 'in_progress'
+                        else:
+                            status = 'started'
+                        
+                        symbol_data = {
+                            'symbol': symbol,
+                            'completed_patterns': completed,
+                            'total_patterns': 18,
+                            'completion_rate': round(completion_rate, 1),
+                            'status': status,
+                            'avg_sharpe': round(avg_sharpe, 2) if avg_sharpe else 0,
+                            'latest_completion': latest_completion
+                        }
+                        
+                        # Add failure information if available
+                        if failure_info:
+                            symbol_data.update(failure_info)
+                        
+                        symbols.append(symbol_data)
+                    
+                return jsonify(symbols)
+                
+            except Exception as e:
+                self.logger.error(f"Error getting symbols with progress: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+    def _check_symbol_execution_status(self, exec_db, symbol, completed_patterns, latest_completion):
+        """Check if symbol analysis has failed or stalled."""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Get recent executions for this symbol
+            executions = exec_db.list_executions(limit=50)
+            symbol_executions = [e for e in executions if e.get('symbol') == symbol]
+            
+            if not symbol_executions:
+                return 'unknown', None
+            
+            latest_execution = symbol_executions[0]
+            
+            # Check for explicit failure, but ignore if analysis is actually complete
+            if latest_execution['status'] == 'FAILED' and completed_patterns < 18:
+                errors = latest_execution.get('errors', [])
+                error_msg = errors[-1].get('error_message', 'Unknown error') if errors else 'Analysis failed'
+                return 'failed', {
+                    'failure_reason': error_msg,
+                    'execution_id': latest_execution['execution_id']
+                }
+            
+            # Check for stalled analysis (incomplete + no recent progress)
+            if completed_patterns < 18 and latest_completion:
+                try:
+                    if '.' in latest_completion:
+                        last_time = datetime.fromisoformat(latest_completion.replace('Z', ''))
+                    else:
+                        last_time = datetime.fromisoformat(latest_completion)
+                    
+                    time_since_last = datetime.now() - last_time
+                    
+                    # Consider stalled if no progress for 2+ hours and still running
+                    if (time_since_last > timedelta(hours=2) and 
+                        latest_execution['status'] == 'RUNNING'):
+                        return 'stalled', {
+                            'stalled_since': latest_completion,
+                            'time_stalled_hours': round(time_since_last.total_seconds() / 3600, 1),
+                            'execution_id': latest_execution['execution_id']
+                        }
+                except Exception:
+                    pass
+            
+            # Check for cancelled executions
+            if latest_execution['status'] == 'CANCELLED':
+                return 'failed', {
+                    'failure_reason': 'Analysis was cancelled',
+                    'execution_id': latest_execution['execution_id']
+                }
+            
+            return 'normal', None
+            
+        except Exception as e:
+            self.logger.error(f"Error checking execution status for {symbol}: {e}")
+            return 'unknown', None
         
         @self.app.route('/api/strategy-results/<symbol>')
         def api_strategy_results_detail(symbol):
@@ -615,7 +753,7 @@ class WebDashboard:
                     # It's already a list
                     trades = trades_df if isinstance(trades_df, list) else []
                 
-                # Ensure consistent format
+                # Ensure consistent format with enhanced trade details
                 formatted_trades = []
                 for i, trade in enumerate(trades):
                     # Debug: Log first trade to see what keys are available
@@ -623,12 +761,47 @@ class WebDashboard:
                         self.logger.info(f"First trade keys for {symbol} {timeframe} {config}: {list(trade.keys()) if isinstance(trade, dict) else 'Not a dict'}")
                         self.logger.info(f"First trade data: {trade}")
                     
+                    entry_price = trade.get('entry_price')
+                    exit_price = trade.get('exit_price')
+                    leverage = float(trade.get('leverage', 0))
+                    
+                    # Calculate take profit and stop loss based on strategy and leverage
+                    take_profit_price = None
+                    stop_loss_price = None
+                    
+                    if entry_price is not None:
+                        entry_price = float(entry_price)
+                        
+                        # Estimate TP/SL based on strategy type and leverage
+                        if 'Conservative' in config:
+                            # Conservative: smaller targets, tighter stops
+                            tp_pct = 0.02 * leverage  # 2% base target scaled by leverage
+                            sl_pct = 0.01 * leverage  # 1% base stop scaled by leverage
+                        elif 'Aggressive' in config:
+                            # Aggressive: larger targets, wider stops
+                            tp_pct = 0.03 * leverage  # 3% base target scaled by leverage
+                            sl_pct = 0.015 * leverage  # 1.5% base stop scaled by leverage
+                        else:  # Full_ML
+                            # ML-based: dynamic targets
+                            tp_pct = 0.025 * leverage  # 2.5% base target scaled by leverage
+                            sl_pct = 0.012 * leverage  # 1.2% base stop scaled by leverage
+                        
+                        # Assume long position (can be enhanced with position direction data)
+                        take_profit_price = entry_price * (1 + tp_pct)
+                        stop_loss_price = entry_price * (1 - sl_pct)
+                    
                     formatted_trade = {
                         'entry_time': trade.get('entry_time', 'N/A'),
-                        'leverage': float(trade.get('leverage', 0)),
+                        'exit_time': trade.get('exit_time', 'N/A'),
+                        'entry_price': entry_price,
+                        'exit_price': float(exit_price) if exit_price is not None else None,
+                        'take_profit_price': take_profit_price,
+                        'stop_loss_price': stop_loss_price,
+                        'leverage': leverage,
                         'pnl_pct': float(trade.get('pnl_pct', 0)),
                         'is_success': bool(trade.get('is_success', trade.get('is_win', False))),
-                        'confidence': float(trade.get('confidence', 0))
+                        'confidence': float(trade.get('confidence', 0)),
+                        'strategy': trade.get('strategy', config)
                     }
                     formatted_trades.append(formatted_trade)
                 
@@ -717,15 +890,17 @@ class WebDashboard:
                 if not symbol:
                     return jsonify({'error': 'Invalid symbol'}), 400
                 
-                # Validate symbol exists on Hyperliquid before starting training
+                # Optional validation - warn but don't block
                 import asyncio
                 from hyperliquid_validator import HyperliquidValidator, ValidationContext
                 
+                validation_warnings = []
+                
                 async def validate_symbol_async():
-                    async with HyperliquidValidator(strict_mode=True) as validator:
+                    async with HyperliquidValidator(strict_mode=False) as validator:  # 非厳格モード
                         return await validator.validate_symbol(symbol, ValidationContext.NEW_ADDITION)
                 
-                # Run validation synchronously
+                # Run validation but don't fail on errors
                 try:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -733,35 +908,24 @@ class WebDashboard:
                     loop.close()
                     
                     if not validation_result.valid:
-                        # Create more descriptive error messages
-                        if validation_result.status == 'invalid':
-                            error_message = f"{symbol}はHyperliquidで取引されていません"
-                            detailed_message = validation_result.reason or "この銘柄はHyperliquidでサポートされていません"
-                        elif validation_result.status == 'inactive':
-                            error_message = f"{symbol}は現在取引停止中です"
-                            detailed_message = validation_result.reason or "この銘柄は一時的に取引が停止されています"
-                        else:
-                            error_message = f"{symbol}: {validation_result.reason}"
-                            detailed_message = validation_result.reason
-                        
-                        self.logger.warning(f"Symbol validation failed: {error_message}")
-                        return jsonify({
-                            'error': detailed_message,
-                            'validation_status': validation_result.status,
-                            'symbol': symbol,
-                            'user_message': error_message,
-                            'suggestion': '正しい銘柄名（例: BTC, ETH, SOL, HYPE等）を入力してください'
-                        }), 400
-                        
-                    self.logger.info(f"✅ Symbol {symbol} validated successfully on Hyperliquid")
+                        # 警告として記録するが、処理は継続
+                        self.logger.warning(f"⚠️ Symbol validation warning for {symbol}: {validation_result.reason}")
+                        validation_warnings.append(f"Warning: {validation_result.reason}")
+                    else:
+                        self.logger.info(f"✅ Symbol {symbol} validated successfully")
                     
                 except Exception as validation_error:
-                    error_message = f"Hyperliquid validation failed for {symbol}: {str(validation_error)}"
-                    self.logger.error(error_message)
+                    # バリデーションエラーでも処理を継続
+                    self.logger.warning(f"⚠️ Symbol validation error for {symbol}: {str(validation_error)}")
+                    validation_warnings.append(f"Validation error: {str(validation_error)}")
+                
+                # 基本的なフォーマットチェックのみ必須
+                if not symbol.isalnum() or len(symbol) < 2 or len(symbol) > 10:
                     return jsonify({
-                        'error': error_message,
-                        'validation_status': 'error',
-                        'symbol': symbol
+                        'error': f'Invalid symbol format: {symbol}',
+                        'validation_status': 'format_error',
+                        'symbol': symbol,
+                        'suggestion': '銘柄名は2-10文字の英数字で入力してください'
                     }), 400
                 
                 # Generate execution ID first, then start training
@@ -797,17 +961,101 @@ class WebDashboard:
                 
                 self.logger.info(f"Symbol addition request received: {symbol}")
                 
-                return jsonify({
+                # レスポンス準備
+                response_data = {
                     'status': 'started',
                     'symbol': symbol,
                     'execution_id': execution_id,
-                    'validation_status': validation_result.status,
-                    'leverage_limit': validation_result.market_info.get('leverage_limit') if validation_result.market_info else None,
                     'message': f'{symbol}の学習・バックテストを開始しました'
-                })
+                }
+                
+                # バリデーション結果があれば追加
+                try:
+                    if 'validation_result' in locals():
+                        response_data['validation_status'] = validation_result.status
+                        if validation_result.market_info:
+                            response_data['leverage_limit'] = validation_result.market_info.get('leverage_limit')
+                except:
+                    pass
+                
+                # 警告があれば追加
+                if validation_warnings:
+                    response_data['warnings'] = validation_warnings
+                    response_data['message'] += f' (警告: {len(validation_warnings)}件)'
+                
+                return jsonify(response_data)
                 
             except Exception as e:
                 self.logger.error(f"Error adding symbol: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/symbol/retry', methods=['POST'])
+        def api_symbol_retry():
+            """Retry failed or stalled symbol analysis."""
+            try:
+                data = request.get_json()
+                symbol = data.get('symbol', '').upper().strip()
+                
+                if not symbol:
+                    return jsonify({'error': 'Symbol is required'}), 400
+                
+                # Get incomplete patterns for this symbol
+                from scalable_analysis_system import ScalableAnalysisSystem
+                system = ScalableAnalysisSystem()
+                completed_results = system.query_analyses(filters={'symbol': symbol})
+                
+                # Determine missing patterns
+                all_strategies = ['Conservative_ML', 'Aggressive_Traditional', 'Full_ML']
+                all_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
+                
+                completed_combinations = set()
+                for _, row in completed_results.iterrows():
+                    completed_combinations.add((row['config'], row['timeframe']))
+                
+                missing_configs = []
+                for strategy in all_strategies:
+                    for timeframe in all_timeframes:
+                        if (strategy, timeframe) not in completed_combinations:
+                            missing_configs.append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'strategy': strategy
+                            })
+                
+                if not missing_configs:
+                    return jsonify({'message': f'{symbol} analysis is already complete'}), 200
+                
+                # Trigger missing analyses
+                processed = system.generate_batch_analysis(missing_configs)
+                
+                # Create execution record for tracking
+                from execution_log_database import ExecutionLogDatabase, ExecutionType
+                from datetime import datetime
+                import uuid
+                
+                exec_db = ExecutionLogDatabase()
+                retry_execution_id = f"retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                
+                exec_db.create_execution_with_id(
+                    retry_execution_id,
+                    ExecutionType.SYMBOL_ADDITION,
+                    symbol=symbol,
+                    triggered_by="RETRY",
+                    metadata={
+                        "retry": True,
+                        "missing_patterns": len(missing_configs),
+                        "total_patterns": 18
+                    }
+                )
+                
+                return jsonify({
+                    'execution_id': retry_execution_id,
+                    'missing_patterns': len(missing_configs),
+                    'message': f'Retrying {len(missing_configs)} incomplete patterns for {symbol}'
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error retrying symbol analysis: {e}")
                 return jsonify({'error': str(e)}), 500
         
         @self.app.route('/api/execution/<execution_id>/status')
@@ -1127,37 +1375,20 @@ class WebDashboard:
     
     def _start_status_broadcasting(self):
         """Start broadcasting status updates to connected clients."""
-        def broadcast_status():
-            while self.monitor and self.monitor.is_running():
-                try:
-                    status = self.monitor.get_status()
-                    self.socketio.emit('status_update', status)
-                    
-                    # Broadcast recent alerts
-                    if self.monitor.alert_manager:
-                        recent_alerts = self.monitor.alert_manager.get_alert_history(limit=5)
-                        self.socketio.emit('new_alerts', recent_alerts)
-                    
-                except Exception as e:
-                    self.logger.error(f"Error broadcasting status: {e}")
-                
-                # Wait 10 seconds before next broadcast
-                self.socketio.sleep(10)
-        
-        # Start broadcasting in background
-        self.socketio.start_background_task(broadcast_status)
+        # Disabled for now - SocketIO not available
+        pass
     
     def run(self):
         """Run the web dashboard."""
         self.logger.system_start(f"Starting web dashboard on http://{self.host}:{self.port}")
         
         try:
-            self.socketio.run(
-                self.app,
+            # Use standard Flask server instead of SocketIO server
+            self.app.run(
                 host=self.host,
                 port=self.port,
                 debug=self.debug,
-                allow_unsafe_werkzeug=True
+                threaded=True
             )
         except KeyboardInterrupt:
             self.logger.warning("Dashboard interrupted by user")

@@ -84,8 +84,8 @@ class HyperliquidDataFetcher:
                         }
                         csv_data.append(row)
                     
-                    # レート制限対策
-                    time.sleep(0.1)
+                    # レート制限対策（適度な間隔）
+                    time.sleep(0.2)
                     
                 except Exception as e:
                     print(f"日次データ取得エラー {i+1}/{days_to_fetch}: {e}")

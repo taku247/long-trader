@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Date Parsing Test</title>
+</head>
+<body>
+    <h1>Date Parsing Test</h1>
+    <div id="results"></div>
+
+    <script>
+        function parseJSTDate(dateTimeStr) {
+            if (!dateTimeStr || dateTimeStr === 'N/A') return null;
+            try {
+                // Remove JST timezone
+                let dateStr = dateTimeStr;
+                if (dateStr.includes(' JST')) {
+                    dateStr = dateStr.replace(' JST', '');
+                }
+                
+                // Try standard parsing first
+                let date = new Date(dateStr);
+                
+                // If that fails, try manual parsing
+                if (isNaN(date.getTime())) {
+                    const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+                    if (match) {
+                        const [, year, month, day, hour, minute, second] = match;
+                        date = new Date(year, month - 1, day, hour, minute, second);
+                    }
+                }
+                
+                return isNaN(date.getTime()) ? null : date;
+            } catch (e) {
+                console.warn('Date parsing error:', e);
+                return null;
+            }
+        }
+
+        function formatDateTime(dateTimeStr) {
+            if (!dateTimeStr || dateTimeStr === 'N/A') return 'N/A';
+            try {
+                const date = parseJSTDate(dateTimeStr);
+                
+                if (!date) return dateTimeStr;
+                
+                return date.toLocaleString('ja-JP', { 
+                    month: '2-digit', 
+                    day: '2-digit', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+            } catch (e) {
+                console.warn('Date formatting error:', e, 'for date:', dateTimeStr);
+                return dateTimeStr;
+            }
+        }
+
+        // Test with actual data
+        const testDates = [
+            '2025-03-13 19:51:22 JST',
+            '2025-03-13 20:42:22 JST',
+            '2025-03-17 15:03:22 JST'
+        ];
+
+        const resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = '<h2>Test Results:</h2>';
+
+        testDates.forEach((dateStr, i) => {
+            const parsed = parseJSTDate(dateStr);
+            const formatted = formatDateTime(dateStr);
+            
+            resultsDiv.innerHTML += `
+                <div style="margin: 10px 0; padding: 10px; border: 1px solid #ccc;">
+                    <strong>Test ${i + 1}:</strong><br>
+                    Original: ${dateStr}<br>
+                    Parsed: ${parsed ? parsed.toString() : 'null'}<br>
+                    Formatted: ${formatted}<br>
+                    Valid: ${parsed ? 'Yes' : 'No'}
+                </div>
+            `;
+        });
+    </script>
+</body>
+</html>

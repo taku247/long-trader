@@ -136,6 +136,12 @@ class StrategyResultsManager {
             const response = await fetch(`/api/strategy-results/${symbol}`);
             if (response.ok) {
                 const data = await response.json();
+                
+                // Validate data structure
+                if (!data || typeof data !== 'object') {
+                    throw new Error('Invalid response format');
+                }
+                
                 this.resultsData = data.results || [];
                 
                 if (this.resultsData.length === 0) {
@@ -163,70 +169,119 @@ class StrategyResultsManager {
     renderResults() {
         if (this.resultsData.length === 0) return;
 
-        // Sort results
-        const sortBy = document.getElementById('sort-by').value;
-        const sortedResults = [...this.resultsData].sort((a, b) => b[sortBy] - a[sortBy]);
+        try {
+            // Sort results with error handling
+            const sortBy = document.getElementById('sort-by').value;
+            const sortedResults = [...this.resultsData].sort((a, b) => {
+                const valueA = a[sortBy];
+                const valueB = b[sortBy];
+                
+                // Handle null/undefined values
+                if (valueA == null && valueB == null) return 0;
+                if (valueA == null) return 1;
+                if (valueB == null) return -1;
+                
+                // Handle non-numeric values
+                if (typeof valueA !== 'number' || typeof valueB !== 'number') {
+                    console.warn(`Non-numeric values found for ${sortBy}:`, valueA, valueB);
+                    return String(valueB).localeCompare(String(valueA));
+                }
+                
+                return valueB - valueA;
+            });
 
-        // Render best strategy recommendation
-        this.renderBestStrategy(sortedResults[0]);
+            // Render best strategy recommendation
+            this.renderBestStrategy(sortedResults[0]);
 
-        // Render summary cards
-        this.renderSummaryCards(sortedResults);
+            // Render summary cards
+            this.renderSummaryCards(sortedResults);
 
-        // Render chart
-        this.renderPerformanceChart(sortedResults);
+            // Render chart
+            this.renderPerformanceChart(sortedResults);
 
-        // Render table
-        this.renderResultsTable(sortedResults);
+            // Render table
+            this.renderResultsTable(sortedResults);
+        } catch (error) {
+            console.error('Error rendering results:', error);
+            this.showMessageBanner('結果の表示中にエラーが発生しました', 'error');
+        }
     }
 
     renderBestStrategy(bestStrategy) {
         const infoDiv = document.getElementById('best-strategy-info');
         
-        infoDiv.innerHTML = `
-            <div class="row">
-                <div class="col-md-6">
-                    <h6><i class="fas fa-clock"></i> 時間足</h6>
-                    <p class="h5 text-primary">${bestStrategy.timeframe}</p>
+        try {
+            // Safe value extraction with defaults
+            const sharpe = (bestStrategy.sharpe_ratio != null) ? bestStrategy.sharpe_ratio.toFixed(2) : 'N/A';
+            const winRate = (bestStrategy.win_rate != null) ? (bestStrategy.win_rate * 100).toFixed(1) : 'N/A';
+            const totalReturn = (bestStrategy.total_return != null) ? (bestStrategy.total_return * 100).toFixed(1) : 'N/A';
+            const maxDD = (bestStrategy.max_drawdown != null) ? (Math.abs(bestStrategy.max_drawdown) * 100).toFixed(1) : 'N/A';
+            
+            infoDiv.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-clock"></i> 時間足</h6>
+                        <p class="h5 text-primary">${bestStrategy.timeframe || 'N/A'}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-brain"></i> 戦略</h6>
+                        <p class="h5 text-primary">${this.formatStrategy(bestStrategy.config)}</p>
+                    </div>
                 </div>
-                <div class="col-md-6">
-                    <h6><i class="fas fa-brain"></i> 戦略</h6>
-                    <p class="h5 text-primary">${this.formatStrategy(bestStrategy.config)}</p>
+                <div class="row mt-3">
+                    <div class="col-md-3">
+                        <h6>シャープ比</h6>
+                        <p class="h5 text-success">${sharpe}</p>
+                    </div>
+                    <div class="col-md-3">
+                        <h6>勝率</h6>
+                        <p class="h5 text-success">${winRate}${winRate !== 'N/A' ? '%' : ''}</p>
+                    </div>
+                    <div class="col-md-3">
+                        <h6>総リターン</h6>
+                        <p class="h5 text-success">${totalReturn}${totalReturn !== 'N/A' ? '%' : ''}</p>
+                    </div>
+                    <div class="col-md-3">
+                        <h6>最大DD</h6>
+                        <p class="h5 text-warning">${maxDD}${maxDD !== 'N/A' ? '%' : ''}</p>
+                    </div>
                 </div>
-            </div>
-            <div class="row mt-3">
-                <div class="col-md-3">
-                    <h6>シャープ比</h6>
-                    <p class="h5 text-success">${bestStrategy.sharpe_ratio.toFixed(2)}</p>
-                </div>
-                <div class="col-md-3">
-                    <h6>勝率</h6>
-                    <p class="h5 text-success">${(bestStrategy.win_rate * 100).toFixed(1)}%</p>
-                </div>
-                <div class="col-md-3">
-                    <h6>総リターン</h6>
-                    <p class="h5 text-success">${(bestStrategy.total_return * 100).toFixed(1)}%</p>
-                </div>
-                <div class="col-md-3">
-                    <h6>最大DD</h6>
-                    <p class="h5 text-warning">${(Math.abs(bestStrategy.max_drawdown) * 100).toFixed(1)}%</p>
-                </div>
-            </div>
-        `;
+            `;
 
-        // Store best strategy for use button
-        this.bestStrategy = bestStrategy;
+            // Store best strategy for use button
+            this.bestStrategy = bestStrategy;
+        } catch (error) {
+            console.error('Error rendering best strategy:', error);
+            infoDiv.innerHTML = '<div class="alert alert-warning">最良戦略情報の表示でエラーが発生しました</div>';
+        }
     }
 
     renderSummaryCards(results) {
-        const avgSharpe = results.reduce((sum, r) => sum + r.sharpe_ratio, 0) / results.length;
-        const avgWinRate = results.reduce((sum, r) => sum + r.win_rate, 0) / results.length;
-        const avgReturn = results.reduce((sum, r) => sum + r.total_return, 0) / results.length;
+        try {
+            // Filter out invalid values and calculate averages safely
+            const validSharpe = results.filter(r => r.sharpe_ratio != null && typeof r.sharpe_ratio === 'number');
+            const validWinRate = results.filter(r => r.win_rate != null && typeof r.win_rate === 'number');
+            const validReturn = results.filter(r => r.total_return != null && typeof r.total_return === 'number');
+            
+            const avgSharpe = validSharpe.length > 0 ? 
+                validSharpe.reduce((sum, r) => sum + r.sharpe_ratio, 0) / validSharpe.length : 0;
+            const avgWinRate = validWinRate.length > 0 ? 
+                validWinRate.reduce((sum, r) => sum + r.win_rate, 0) / validWinRate.length : 0;
+            const avgReturn = validReturn.length > 0 ? 
+                validReturn.reduce((sum, r) => sum + r.total_return, 0) / validReturn.length : 0;
 
-        document.getElementById('avg-sharpe').textContent = avgSharpe.toFixed(2);
-        document.getElementById('avg-winrate').textContent = (avgWinRate * 100).toFixed(1) + '%';
-        document.getElementById('avg-return').textContent = (avgReturn * 100).toFixed(1) + '%';
-        document.getElementById('total-patterns').textContent = results.length.toString();
+            document.getElementById('avg-sharpe').textContent = avgSharpe.toFixed(2);
+            document.getElementById('avg-winrate').textContent = (avgWinRate * 100).toFixed(1) + '%';
+            document.getElementById('avg-return').textContent = (avgReturn * 100).toFixed(1) + '%';
+            document.getElementById('total-patterns').textContent = results.length.toString();
+        } catch (error) {
+            console.error('Error rendering summary cards:', error);
+            // Set fallback values
+            document.getElementById('avg-sharpe').textContent = 'N/A';
+            document.getElementById('avg-winrate').textContent = 'N/A';
+            document.getElementById('avg-return').textContent = 'N/A';
+            document.getElementById('total-patterns').textContent = '0';
+        }
     }
 
     renderPerformanceChart(results) {
@@ -450,42 +505,123 @@ class StrategyResultsManager {
     }
 
     showTradeDetailsModal(symbol, timeframe, config, trades) {
-        // Create modal for trade details (simplified implementation)
+        // Create enhanced modal for trade details with exit info and TP/SL
         const modalHtml = `
             <div class="modal fade" id="tradeDetailsModal" tabindex="-1">
                 <div class="modal-dialog modal-xl">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">${symbol} ${timeframe} ${this.formatStrategy(config)} - トレード詳細</h5>
+                            <h5 class="modal-title">
+                                <i class="fas fa-chart-line"></i> ${symbol} ${timeframe} ${this.formatStrategy(config)} - トレード詳細
+                            </h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
-                            <p>総トレード数: ${trades.length}</p>
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
+                            <div class="row mb-3">
+                                <div class="col-md-3">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h5 class="card-title">総トレード数</h5>
+                                            <h3 class="text-primary">${trades.length}</h3>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h5 class="card-title">勝率</h5>
+                                            <h3 class="text-success">${(trades.filter(t => t.is_success).length / trades.length * 100).toFixed(1)}%</h3>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h5 class="card-title">平均PnL</h5>
+                                            <h3 class="text-info">${(trades.reduce((sum, t) => sum + t.pnl_pct, 0) / trades.length * 100).toFixed(2)}%</h3>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="card bg-light">
+                                        <div class="card-body text-center">
+                                            <h5 class="card-title">平均レバレッジ</h5>
+                                            <h3 class="text-warning">${(trades.reduce((sum, t) => sum + t.leverage, 0) / trades.length).toFixed(1)}x</h3>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="trade-details-table">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-dark">
                                         <tr>
-                                            <th>No.</th>
-                                            <th>エントリー時刻</th>
-                                            <th>レバレッジ</th>
-                                            <th>PnL (%)</th>
-                                            <th>成功</th>
+                                            <th scope="col">No.</th>
+                                            <th scope="col">エントリー時刻</th>
+                                            <th scope="col">クローズ時刻</th>
+                                            <th scope="col">エントリー価格</th>
+                                            <th scope="col">クローズ価格</th>
+                                            <th scope="col">利確ライン</th>
+                                            <th scope="col">損切ライン</th>
+                                            <th scope="col">レバレッジ</th>
+                                            <th scope="col">PnL (%)</th>
+                                            <th scope="col">結果</th>
+                                            <th scope="col">信頼度</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${trades.slice(0, 50).map((trade, i) => `
-                                            <tr class="${trade.is_success ? 'table-success' : 'table-danger'}">
-                                                <td>${i + 1}</td>
-                                                <td>${trade.entry_time}</td>
-                                                <td>${trade.leverage.toFixed(1)}x</td>
-                                                <td class="${trade.pnl_pct >= 0 ? 'text-success' : 'text-danger'}">${(trade.pnl_pct * 100).toFixed(2)}%</td>
-                                                <td>${trade.is_success ? '✅' : '❌'}</td>
+                                        ${trades.slice(0, 100).map((trade, i) => {
+                                            const duration = trade.exit_time && trade.entry_time ? 
+                                                this.calculateDuration(trade.entry_time, trade.exit_time) : 'N/A';
+                                            const exitReason = this.determineExitReason(trade);
+                                            
+                                            return `
+                                            <tr class="${trade.is_success ? 'table-success' : 'table-danger'}" style="opacity: 0.9;">
+                                                <td><strong>${i + 1}</strong></td>
+                                                <td>
+                                                    <small>${this.formatDateTime(trade.entry_time)}</small>
+                                                </td>
+                                                <td>
+                                                    <small>${this.formatDateTime(trade.exit_time)}</small>
+                                                    ${duration !== 'N/A' ? `<br><span class="badge bg-secondary">${duration}</span>` : ''}
+                                                </td>
+                                                <td>
+                                                    ${trade.entry_price ? `$${trade.entry_price.toFixed(2)}` : 'N/A'}
+                                                </td>
+                                                <td>
+                                                    ${trade.exit_price ? `$${trade.exit_price.toFixed(2)}` : 'N/A'}
+                                                </td>
+                                                <td class="text-success">
+                                                    ${trade.take_profit_price ? `$${trade.take_profit_price.toFixed(2)}` : 'N/A'}
+                                                </td>
+                                                <td class="text-danger">
+                                                    ${trade.stop_loss_price ? `$${trade.stop_loss_price.toFixed(2)}` : 'N/A'}
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-warning text-dark">${trade.leverage.toFixed(1)}x</span>
+                                                </td>
+                                                <td class="${trade.pnl_pct >= 0 ? 'text-success' : 'text-danger'}">
+                                                    <strong>${(trade.pnl_pct * 100).toFixed(2)}%</strong>
+                                                </td>
+                                                <td>
+                                                    ${trade.is_success ? '✅ 利確' : '❌ 損切'}
+                                                    <br><small class="text-muted">${exitReason}</small>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-info">${(trade.confidence * 100).toFixed(0)}%</span>
+                                                </td>
                                             </tr>
-                                        `).join('')}
+                                        `;}).join('')}
                                     </tbody>
                                 </table>
                             </div>
-                            ${trades.length > 50 ? `<p class="text-muted">最初の50件のみ表示（全${trades.length}件）</p>` : ''}
+                            ${trades.length > 100 ? `<p class="text-muted">最初の100件のみ表示（全${trades.length}件）</p>` : ''}
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                            <button type="button" class="btn btn-primary" onclick="strategyResultsManager.exportTradeDetails('${symbol}', '${timeframe}', '${config}')">
+                                <i class="fas fa-download"></i> CSV出力
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -511,6 +647,174 @@ class StrategyResultsManager {
         
         const strategy = this.bestStrategy;
         await this.viewTradeDetails(strategy.symbol, strategy.timeframe, strategy.config);
+    }
+
+    // Helper methods for trade details display
+    formatDateTime(dateTimeStr) {
+        if (!dateTimeStr || dateTimeStr === 'N/A') return 'N/A';
+        try {
+            // Simple regex-based formatting for "YYYY-MM-DD HH:MM:SS JST" format
+            const match = dateTimeStr.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+            if (match) {
+                const [, year, month, day, hour, minute] = match;
+                return `${month}/${day} ${hour}:${minute}`;
+            }
+            
+            // Fallback: try to parse as date
+            const dateStr = dateTimeStr.replace(' JST', '');
+            const date = new Date(dateStr);
+            if (!isNaN(date.getTime())) {
+                return date.toLocaleString('ja-JP', { 
+                    month: '2-digit', 
+                    day: '2-digit', 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+            }
+            
+            // If all else fails, return original
+            return dateTimeStr;
+        } catch (e) {
+            console.warn('Date formatting error:', e, 'for date:', dateTimeStr);
+            return dateTimeStr;
+        }
+    }
+
+    calculateDuration(entryTime, exitTime) {
+        if (!entryTime || !exitTime || entryTime === 'N/A' || exitTime === 'N/A') return 'N/A';
+        try {
+            // Parse dates with JST handling
+            const entry = this.parseJSTDate(entryTime);
+            const exit = this.parseJSTDate(exitTime);
+            
+            if (!entry || !exit) return 'N/A';
+            
+            const durationMs = exit - entry;
+            
+            if (durationMs < 0) return 'N/A';
+            
+            const hours = Math.floor(durationMs / (1000 * 60 * 60));
+            const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+            
+            if (hours > 0) {
+                return `${hours}h${minutes}m`;
+            } else {
+                return `${minutes}m`;
+            }
+        } catch (e) {
+            console.warn('Duration calculation error:', e);
+            return 'N/A';
+        }
+    }
+
+    parseJSTDate(dateTimeStr) {
+        if (!dateTimeStr || dateTimeStr === 'N/A') return null;
+        try {
+            // Remove JST timezone
+            let dateStr = dateTimeStr;
+            if (dateStr.includes(' JST')) {
+                dateStr = dateStr.replace(' JST', '');
+            }
+            
+            // Try standard parsing first
+            let date = new Date(dateStr);
+            
+            // If that fails, try manual parsing
+            if (isNaN(date.getTime())) {
+                const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+                if (match) {
+                    const [, year, month, day, hour, minute, second] = match;
+                    date = new Date(year, month - 1, day, hour, minute, second);
+                }
+            }
+            
+            return isNaN(date.getTime()) ? null : date;
+        } catch (e) {
+            console.warn('Date parsing error:', e);
+            return null;
+        }
+    }
+
+    determineExitReason(trade) {
+        if (!trade.exit_price || !trade.entry_price || !trade.take_profit_price || !trade.stop_loss_price) {
+            return trade.is_success ? 'Target' : 'Stop';
+        }
+        
+        const exitPrice = trade.exit_price;
+        const entryPrice = trade.entry_price;
+        const tpPrice = trade.take_profit_price;
+        const slPrice = trade.stop_loss_price;
+        
+        // Check if exit price is closer to TP or SL
+        const distanceToTP = Math.abs(exitPrice - tpPrice);
+        const distanceToSL = Math.abs(exitPrice - slPrice);
+        
+        if (trade.is_success) {
+            if (distanceToTP < distanceToSL) {
+                return 'TP達成';
+            } else {
+                return '手動利確';
+            }
+        } else {
+            if (distanceToSL < distanceToTP) {
+                return 'SL発動';
+            } else {
+                return '手動損切';
+            }
+        }
+    }
+
+    async exportTradeDetails(symbol, timeframe, config) {
+        try {
+            this.showMessageBanner(`${symbol} ${timeframe} ${this.formatStrategy(config)} のトレード詳細をエクスポート中...`, 'info');
+            
+            const response = await fetch(`/api/strategy-results/${symbol}/${timeframe}/${config}/trades`);
+            if (response.ok) {
+                const trades = await response.json();
+                
+                // Create CSV content
+                const csvHeaders = [
+                    'No.', 'エントリー時刻', 'クローズ時刻', 'エントリー価格', 'クローズ価格', 
+                    '利確ライン', '損切ライン', 'レバレッジ', 'PnL(%)', '結果', '信頼度'
+                ];
+                
+                const csvRows = trades.map((trade, i) => [
+                    i + 1,
+                    trade.entry_time || 'N/A',
+                    trade.exit_time || 'N/A',
+                    trade.entry_price ? trade.entry_price.toFixed(2) : 'N/A',
+                    trade.exit_price ? trade.exit_price.toFixed(2) : 'N/A',
+                    trade.take_profit_price ? trade.take_profit_price.toFixed(2) : 'N/A',
+                    trade.stop_loss_price ? trade.stop_loss_price.toFixed(2) : 'N/A',
+                    trade.leverage.toFixed(1),
+                    (trade.pnl_pct * 100).toFixed(2),
+                    trade.is_success ? '利確' : '損切',
+                    (trade.confidence * 100).toFixed(0)
+                ]);
+                
+                const csvContent = [csvHeaders, ...csvRows]
+                    .map(row => row.map(cell => `"${cell}"`).join(','))
+                    .join('\n');
+                
+                // Download CSV
+                const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${symbol}_${timeframe}_${config}_trades.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                this.showMessageBanner('トレード詳細CSVをダウンロードしました', 'success');
+            } else {
+                throw new Error('Failed to export trade details');
+            }
+        } catch (error) {
+            console.error('Error exporting trade details:', error);
+            this.showMessageBanner('トレード詳細のエクスポートに失敗しました', 'error');
+        }
     }
 }
 

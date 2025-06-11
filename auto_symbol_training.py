@@ -217,6 +217,7 @@ class AutoSymbolTrainer:
                 
                 api_client = HyperliquidAPIClient()
                 try:
+                    self.logger.info(f"🚀 STARTING OHLCV DATA VALIDATION for {symbol}")
                     # 1時間足、90日分のデータを取得
                     ohlcv_data = await api_client.get_ohlcv_data_with_period(symbol, '1h', days=90)
                     

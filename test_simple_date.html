@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Date Test</title>
+</head>
+<body>
+    <h1>Simple Date Parsing Test</h1>
+    <div id="results"></div>
+
+    <script>
+        function formatDateTime(dateTimeStr) {
+            if (!dateTimeStr || dateTimeStr === 'N/A') return 'N/A';
+            try {
+                // Simple regex-based formatting for "YYYY-MM-DD HH:MM:SS JST" format
+                const match = dateTimeStr.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+                if (match) {
+                    const [, year, month, day, hour, minute] = match;
+                    return `${month}/${day} ${hour}:${minute}`;
+                }
+                
+                // Fallback: try to parse as date
+                const dateStr = dateTimeStr.replace(' JST', '');
+                const date = new Date(dateStr);
+                if (!isNaN(date.getTime())) {
+                    return date.toLocaleString('ja-JP', { 
+                        month: '2-digit', 
+                        day: '2-digit', 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                    });
+                }
+                
+                // If all else fails, return original
+                return dateTimeStr;
+            } catch (e) {
+                console.warn('Date formatting error:', e, 'for date:', dateTimeStr);
+                return dateTimeStr;
+            }
+        }
+
+        // Test with actual data
+        const testDates = [
+            '2025-03-13 19:51:22 JST',
+            '2025-03-13 20:42:22 JST',
+            '2025-03-17 15:03:22 JST'
+        ];
+
+        const resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = '<h2>Simple Regex Test Results:</h2>';
+
+        testDates.forEach((dateStr, i) => {
+            const formatted = formatDateTime(dateStr);
+            
+            resultsDiv.innerHTML += `
+                <div style="margin: 10px 0; padding: 10px; border: 1px solid #ccc;">
+                    <strong>Test ${i + 1}:</strong><br>
+                    Original: ${dateStr}<br>
+                    Formatted: ${formatted}
+                </div>
+            `;
+        });
+    </script>
+</body>
+</html>

@@ -84,10 +84,12 @@ class ExtendedDataFetcher:
         config = self.timeframe_config[timeframe]
         days_to_fetch = custom_days if custom_days else config['days']
         
-        print(f"\n📊 Fetching {symbol} data")
+        print(f"\n📊 🔥 EXTENDED OHLCV FETCH START 🔥")
+        print(f"🪙 Symbol: {symbol}")
         print(f"⏰ Timeframe: {timeframe}")
         print(f"📅 Period: {days_to_fetch} days")
         print(f"🎯 Target samples: ~{days_to_fetch * config['intervals_per_day']}")
+        print(f"🔧 Config: {config}")
         
         # Calculate time range
         now_ms = int(time.time() * 1000)
@@ -140,10 +142,12 @@ class ExtendedDataFetcher:
         df = df.drop_duplicates(subset=['timestamp'])
         df = df.reset_index(drop=True)
         
-        print(f"✅ Data fetch complete")
+        print(f"✅ 🔥 EXTENDED OHLCV FETCH COMPLETE 🔥")
+        print(f"🪙 Symbol: {symbol} | ⏰ Timeframe: {timeframe}")
         print(f"📊 Total samples: {len(df)}")
         print(f"📅 Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-        print(f"❌ Failed days: {failed_days}")
+        print(f"❌ Failed days: {failed_days} / {day_count}")
+        print(f"✅ Success rate: {((day_count-failed_days)/day_count*100):.1f}%")
         
         # Validate data quality
         self._validate_data_quality(df, config)

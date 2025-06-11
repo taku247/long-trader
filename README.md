@@ -208,16 +208,37 @@ python scalable_analysis_system.py
 ```
 
 ### 2. 🎯 結果の可視化・確認
-```bash
-# Webダッシュボード起動
-python dashboard.py
 
-# または完全版（詳細分析付き）
+#### 📊 ダッシュボード種類別使い分け
+
+```bash
+# 🌐 リアルタイム監視ダッシュボード（ポート5001）
+python demo_dashboard.py
+# → 監視状況、アラート履歴、WebSocket更新
+
+# 🔧 全機能Webダッシュボード（ポート5000）  
+python web_dashboard/app.py
+# → 銘柄管理、分析、設定、実行ログ
+
+# 📈 バックテスト結果ダッシュボード（ポート8050）
+python dashboard.py
+# → 戦略分析結果の可視化（軽量版）
+
+# 🔍 完全版分析ダッシュボード（ポート8050）
 python run_with_analysis.py
+# → 詳細トレード分析付き（推奨）
 ```
 
+#### 🎯 目的別推奨コマンド
+
+| 目的 | コマンド | URL |
+|------|---------|-----|
+| **リアルタイム監視・アラート確認** | `python demo_dashboard.py` | http://localhost:5001 |
+| **銘柄追加・設定管理** | `python web_dashboard/app.py` | http://localhost:5000 |
+| **戦略分析結果の確認** | `python run_with_analysis.py` | http://localhost:8050 |
+
 ### 3. 👀 結果の閲覧
-- ブラウザで `http://127.0.0.1:8050` を開く
+- 各ダッシュボードの用途に応じて上記URLを開く
 - フィルターで戦略を絞り込み
 - 詳細チャートで個別分析を確認
 
@@ -841,7 +862,8 @@ python demo_dashboard.py
 ```
 
 **🌐 アクセス方法**
-- URL: `http://localhost:5000`
+- **推奨URL**: `http://localhost:8081` (シンプルAPI版)
+- **従来URL**: `http://localhost:5000` (SocketIO版) ※Appleユーザーは注意
 - 機能: システム監視、アラート管理、リアルタイム更新
 - 対応: デスクトップ・モバイル両方のレスポンシブ対応
 

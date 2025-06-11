@@ -407,6 +407,37 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         
         return data
     
+    def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML") -> Dict:
+        """
+        シンボル分析（リアルタイム監視システム用）
+        
+        Args:
+            symbol: 分析対象シンボル
+            timeframe: 時間足
+            strategy: 戦略名
+            
+        Returns:
+            Dict: 分析結果辞書
+        """
+        
+        recommendation = self.analyze_leverage_opportunity(symbol, timeframe)
+        
+        return {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'strategy': strategy,
+            'leverage': recommendation.recommended_leverage,
+            'confidence': recommendation.confidence_level * 100,  # パーセント変換
+            'current_price': recommendation.market_conditions.current_price,
+            'entry_price': recommendation.market_conditions.current_price,
+            'target_price': recommendation.take_profit_price,
+            'stop_loss': recommendation.stop_loss_price,
+            'risk_reward_ratio': recommendation.risk_reward_ratio,
+            'timestamp': datetime.now(),
+            'position_size': 100.0,  # デフォルト
+            'risk_level': max(0, 100 - recommendation.confidence_level * 100)  # リスクレベル
+        }
+    
     # === プラグイン設定メソッド ===
     
     def set_support_resistance_analyzer(self, analyzer: ISupportResistanceAnalyzer):

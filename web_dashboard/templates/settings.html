@@ -23,8 +23,14 @@
                     <a href="/" class="btn btn-outline-light btn-sm me-2">
                         <i class="fas fa-arrow-left"></i> ダッシュボード
                     </a>
+                    <a href="/symbols" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-coins"></i> 銘柄管理
+                    </a>
                     <a href="/analysis" class="btn btn-outline-light btn-sm me-2">
                         <i class="fas fa-chart-line"></i> 履歴分析
+                    </a>
+                    <a href="/strategy-results" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-chart-bar"></i> 戦略結果
                     </a>
                     <button id="btn-save-settings" class="btn btn-success btn-sm me-2">
                         <i class="fas fa-save"></i> 設定保存
@@ -41,44 +47,21 @@
 
         <!-- Settings Content -->
         <div class="row mt-3">
-            <!-- Symbol Management -->
+            <!-- Quick Access to Symbol Management -->
             <div class="col-lg-6">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="card border-primary">
+                    <div class="card-header bg-primary text-white">
                         <h5 class="card-title mb-0">
-                            <i class="fas fa-coins"></i> 監視銘柄管理
+                            <i class="fas fa-coins"></i> 銘柄管理
                         </h5>
-                        <button id="btn-add-symbol" class="btn btn-primary btn-sm">
-                            <i class="fas fa-plus"></i> 銘柄追加
-                        </button>
                     </div>
-                    <div class="card-body">
-                        <div id="symbols-list" class="symbols-container">
-                            <!-- 動的に生成される銘柄リスト -->
-                        </div>
-                        
-                        <!-- 新規銘柄追加フォーム -->
-                        <div id="add-symbol-form" class="add-symbol-form" style="display: none;">
-                            <div class="row align-items-center">
-                                <div class="col-md-8">
-                                    <input type="text" class="form-control" id="new-symbol-input" 
-                                           placeholder="銘柄名を入力 (例: HYPE, SOL, PEPE)" maxlength="10">
-                                    <div class="form-text">
-                                        <i class="fas fa-info-circle text-primary"></i> 
-                                        全時間足・全戦略で自動学習・バックテストを実行します
-                                    </div>
-                                    <div class="form-text">
-                                        <i class="fas fa-coins text-success"></i> 
-                                        <strong>有効な銘柄例:</strong> BTC, ETH, SOL, AVAX, DOGE, HYPE, WIF, PEPE, BONK, ARB, OP
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <button id="btn-confirm-add" class="btn btn-success w-100">
-                                        <i class="fas fa-plus"></i> 銘柄追加・分析開始
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                    <div class="card-body text-center">
+                        <p class="text-muted mb-3">
+                            銘柄の追加・分析・管理は専用ページで行えます
+                        </p>
+                        <a href="/symbols" class="btn btn-primary btn-lg">
+                            <i class="fas fa-arrow-right"></i> 銘柄管理ページに移動
+                        </a>
                     </div>
                 </div>
 
@@ -195,70 +178,6 @@
                             <div id="scheduler-empty-state" class="text-center text-muted py-3" style="display: none;">
                                 <i class="fas fa-calendar-times fa-2x mb-2"></i>
                                 <p>スケジュールされたタスクがありません</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Migration System -->
-                <div class="card mt-3">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">
-                            <i class="fas fa-database"></i> 既存設定マイグレーション
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="migration-info mb-3 p-3 bg-light rounded">
-                            <div class="d-flex align-items-center mb-2">
-                                <i class="fas fa-info-circle text-info me-2"></i>
-                                <strong>マイグレーション機能について</strong>
-                            </div>
-                            <p class="small mb-0">
-                                既存のconfig.jsonファイルから銘柄設定を新しい管理システムに安全に移行します。
-                                バックアップを作成してから実行するため、既存設定に影響はありません。
-                            </p>
-                        </div>
-                        
-                        <!-- Migration Status -->
-                        <div class="migration-status mb-3">
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <small class="text-muted">マイグレーション状況</small>
-                                    <div id="migration-status" class="fw-bold">
-                                        <span class="badge bg-secondary">未確認</span>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <small class="text-muted">バックアップディレクトリ</small>
-                                    <div id="migration-backup-dir" class="fw-bold small">-</div>
-                                </div>
-                                <div class="col-md-4">
-                                    <small class="text-muted">最新マイグレーション</small>
-                                    <div id="migration-last-run" class="fw-bold small">-</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Migration Actions -->
-                        <div class="migration-actions">
-                            <button id="btn-migration-check" class="btn btn-outline-primary me-2">
-                                <i class="fas fa-search"></i> 移行可能銘柄をチェック
-                            </button>
-                            <button id="btn-migration-execute" class="btn btn-success me-2" disabled>
-                                <i class="fas fa-play"></i> マイグレーション実行
-                            </button>
-                            <button id="btn-migration-history" class="btn btn-outline-info">
-                                <i class="fas fa-history"></i> 履歴表示
-                            </button>
-                        </div>
-                        
-                        <!-- Migration Results -->
-                        <div id="migration-results" class="migration-results mt-3" style="display: none;">
-                            <h6 class="mb-3">
-                                <i class="fas fa-list-check"></i> マイグレーション結果
-                            </h6>
-                            <div id="migration-results-content">
-                                <!-- 動的に生成される -->
                             </div>
                         </div>
                     </div>

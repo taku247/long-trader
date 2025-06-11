@@ -338,16 +338,27 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
     
     def __init__(self):
         self.predictor = None
-        try:
-            # 既存のBTC相関予測システムを初期化
-            self.predictor = BTCAltcoinCorrelationPredictor()
-        except Exception as e:
-            print(f"BTC相関アダプター初期化エラー: {e}")
+        self._initialized = False
+        # 初期化時はBTCAltcoinCorrelationPredictorを作成しない（429エラー回避）
+    
+    def _lazy_init(self):
+        """遅延初期化（初めて使用される時に初期化）"""
+        if not self._initialized:
+            try:
+                # 既存のBTC相関予測システムを初期化
+                self.predictor = BTCAltcoinCorrelationPredictor()
+                self._initialized = True
+            except Exception as e:
+                print(f"BTC相関アダプター遅延初期化エラー: {e}")
+                self._initialized = False
     
     def analyze_correlation(self, btc_data: pd.DataFrame, alt_data: pd.DataFrame) -> float:
         """
         BTC-アルトコイン相関を分析
         """
+        # 遅延初期化
+        self._lazy_init()
+        
         try:
             # 価格変化率を計算
             btc_returns = btc_data['close'].pct_change().dropna()
@@ -374,6 +385,9 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
         """
         BTC下落時のアルトコイン影響を予測
         """
+        # 遅延初期化
+        self._lazy_init()
+        
         try:
             if self.predictor is None:
                 # フォールバック予測
@@ -408,6 +422,9 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
     
     def train_correlation_model(self, symbol: str) -> bool:
         """相関予測モデルを訓練"""
+        # 遅延初期化
+        self._lazy_init()
+        
         try:
             if self.predictor is None:
                 return False

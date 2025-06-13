@@ -538,7 +538,11 @@ class MultiExchangeAPIClient:
                 )
                 
                 if not ohlcv:
-                    self.logger.warning(f"⚠️ No data returned for {gateio_symbol} from {datetime.fromtimestamp(current_since/1000)}")
+                    # 最新データが存在しない場合は警告を出すが継続（取引所の最新データがまだ生成されていない可能性）
+                    if current_since >= end_timestamp - (1000 * 60 * 60):  # 最後の1時間以内
+                        self.logger.debug(f"No data for {gateio_symbol} at {datetime.fromtimestamp(current_since/1000)} (might be too recent)")
+                    else:
+                        self.logger.warning(f"⚠️ No data returned for {gateio_symbol} from {datetime.fromtimestamp(current_since/1000)}")
                     break
                 
                 all_ohlcv.extend(ohlcv)
@@ -565,7 +569,12 @@ class MultiExchangeAPIClient:
             # 不要な列を削除
             df = df.drop('timestamp_ms', axis=1)
             
-            # 指定期間でフィルタリング
+            # 指定期間でフィルタリング（タイムゾーン対応）
+            # start_timeとend_timeがタイムゾーン情報を持つ場合の処理
+            if hasattr(start_time, 'tzinfo') and start_time.tzinfo is not None:
+                # DataFrameのタイムスタンプをUTCとして扱う
+                df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize('UTC')
+            
             df = df[(df['timestamp'] >= start_time) & (df['timestamp'] <= end_time)]
             
             # 型変換

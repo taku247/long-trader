@@ -10,7 +10,7 @@ import os
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import warnings
 
 # プロジェクトルートをパスに追加
@@ -131,10 +131,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             market_data = self._fetch_market_data(symbol, timeframe)
             
             if market_data.empty:
-                return self._create_error_recommendation(
-                    f"{symbol}の市場データ取得に失敗",
-                    1000.0  # フォールバック価格
-                )
+                raise Exception(f"{symbol}の市場データ取得に失敗 - 実データが必要です")
             
             print(f"📊 データ取得完了: {len(market_data)}件")
             
@@ -191,24 +188,32 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             
         except Exception as e:
             print(f"❌ 分析エラー: {e}")
-            return self._create_error_recommendation(
-                f"分析中にエラーが発生: {str(e)}",
-                1000.0
-            )
+            raise Exception(f"分析中にエラーが発生: {str(e)} - フォールバックは使用しません")
     
     def _fetch_market_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
-        """市場データを取得（新しいdata_fetcherを使用）"""
+        """市場データを取得（マルチ取引所APIクライアントを使用）"""
         
         try:
-            # 新しいdata_fetcher.pyの機能を使用
-            from data_fetcher import fetch_data
+            # マルチ取引所APIクライアントを使用
+            from hyperliquid_api_client import MultiExchangeAPIClient
+            import asyncio
             
-            # データ取得
-            data = fetch_data(
-                symbol=symbol,
-                timeframe=timeframe,
-                limit=1000  # 十分なデータ量
-            )
+            # 取引所設定を読み込んでクライアントを初期化
+            api_client = MultiExchangeAPIClient()
+            
+            # 90日間のデータを取得（UTC時刻を使用）
+            end_time = datetime.now(timezone.utc)
+            start_time = end_time - timedelta(days=90)
+            
+            # 非同期でデータを取得
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                data = loop.run_until_complete(
+                    api_client.get_ohlcv_data(symbol, timeframe, start_time, end_time)
+                )
+            finally:
+                loop.close()
             
             if data is not None and not data.empty:
                 return data
@@ -218,8 +223,8 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             
         except Exception as e:
             print(f"データ取得エラー: {e}")
-            # フォールバックとしてサンプルデータを生成
-            return self._generate_sample_data()
+            # フォールバックは使用せず、例外を再発生
+            raise Exception(f"市場データ取得に失敗: {e} - 実データが必要です")
     
     def _analyze_support_resistance(self, data: pd.DataFrame, is_short_timeframe: bool = False) -> tuple:
         """サポート・レジスタンス分析"""
@@ -254,7 +259,9 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                         resistance_levels.append(level)
             
             # 現在価格に近い順にソート
-            current_price = data['close'].iloc[-1] if not data.empty else 1000.0
+            if data.empty:
+                raise Exception("市場データが空のためサポレジ分析できません")
+            current_price = data['close'].iloc[-1]
             
             support_levels.sort(key=lambda x: abs(x.price - current_price))
             resistance_levels.sort(key=lambda x: abs(x.price - current_price))
@@ -317,9 +324,11 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         except Exception as e:
             print(f"市場コンテキスト分析エラー: {e}")
         
-        # フォールバックコンテキスト
-        current_price = data['close'].iloc[-1] if not data.empty else 1000.0
-        volume_24h = data['volume'].sum() if not data.empty else 1000000.0
+        # データ検証とコンテキスト作成
+        if data.empty:
+            raise Exception("市場データが空のためコンテキスト分析できません")
+        current_price = data['close'].iloc[-1]
+        volume_24h = data['volume'].sum()
         
         return MarketContext(
             current_price=current_price,
@@ -327,7 +336,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             volatility=0.02,
             trend_direction='SIDEWAYS',
             market_phase='ACCUMULATION',
-            timestamp=datetime.now()
+            timestamp=datetime.now(timezone.utc)
         )
     
     def _display_analysis_summary(self, recommendation: LeverageRecommendation):
@@ -361,7 +370,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             volatility=0.05,
             trend_direction='SIDEWAYS',
             market_phase='ACCUMULATION',
-            timestamp=datetime.now()
+            timestamp=datetime.now(timezone.utc)
         )
         
         return LeverageRecommendation(
@@ -437,7 +446,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             'target_price': recommendation.take_profit_price,
             'stop_loss': recommendation.stop_loss_price,
             'risk_reward_ratio': recommendation.risk_reward_ratio,
-            'timestamp': datetime.now(),
+            'timestamp': datetime.now(timezone.utc),
             'position_size': 100.0,  # デフォルト
             'risk_level': max(0, 100 - recommendation.confidence_level * 100)  # リスクレベル
         }

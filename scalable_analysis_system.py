@@ -163,8 +163,9 @@ class ScalableAnalysisSystem:
         try:
             trades_data = self._generate_real_analysis(symbol, timeframe, config)
         except Exception as e:
-            logger.warning(f"Real analysis failed for {symbol}: {e}, using sample data")
-            trades_data = self._generate_sample_trades(symbol, timeframe, config)
+            logger.error(f"Real analysis failed for {symbol} {timeframe} {config}: {e}")
+            logger.error(f"Analysis terminated - no fallback to sample data")
+            return False
         
         # メトリクス計算
         metrics = self._calculate_metrics(trades_data)
@@ -267,12 +268,8 @@ class ScalableAnalysisSystem:
                                 time.sleep(5)  # 5秒待機してリトライ
                             else:
                                 print(f"   ❌ 分析失敗 (最大リトライ数に到達): {str(e)[:100]}...")
-                                # フォールバック: テスト版で代替
-                                from engines.test_high_leverage_bot_orchestrator import TestHighLeverageBotOrchestrator
-                                fallback_bot = TestHighLeverageBotOrchestrator()
-                                result = fallback_bot.analyze_symbol(symbol, timeframe, config)
-                                print(f"   🔄 フォールバック分析で継続")
-                                break
+                                logger.error(f"Real analysis failed for {symbol} {timeframe} {config} after {max_retries} retries: {e}")
+                                raise Exception(f"Analysis failed after {max_retries} retries: {e}")
                     
                     # 進捗表示（10回ごと）
                     if (i + 1) % 10 == 0:
@@ -282,7 +279,10 @@ class ScalableAnalysisSystem:
                     leverage = result.get('leverage', 5.0)
                     confidence = result.get('confidence', 70.0) / 100.0
                     risk_reward = result.get('risk_reward_ratio', 2.0)
-                    current_price = 100.0  # Base price for simulation
+                    current_price = result.get('current_price')
+                    if current_price is None:
+                        logger.error(f"No current_price in analysis result for {symbol}")
+                        raise Exception(f"Missing current_price in analysis result for {symbol}")
                     
                     # TP/SL計算機能を使用
                     from engines.stop_loss_take_profit_calculators import DefaultSLTPCalculator, ConservativeSLTPCalculator, AggressiveSLTPCalculator

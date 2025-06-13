@@ -47,13 +47,17 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
     データ取得 → サポレジ分析 → ML予測 → BTC相関分析 → 統合判定 → レバレッジ推奨
     """
     
-    def __init__(self, use_default_plugins: bool = True):
+    def __init__(self, use_default_plugins: bool = True, exchange: str = None):
         """
         初期化
         
         Args:
             use_default_plugins: デフォルトプラグインを使用するか
+            exchange: 使用する取引所 (hyperliquid, gateio)
         """
+        
+        # 取引所設定を保存
+        self.exchange = exchange
         
         # プラグインの初期化
         self.support_resistance_analyzer: Optional[ISupportResistanceAnalyzer] = None

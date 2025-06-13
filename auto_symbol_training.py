@@ -128,8 +128,9 @@ class AutoSymbolTrainer:
             step_start = datetime.now()
             
             # 進捗更新
+            exchange = self._get_exchange_from_config()
             step_display_names = {
-                'data_fetch': 'Hyperliquid銘柄確認・データ取得',
+                'data_fetch': f'{exchange.capitalize()}銘柄確認・データ取得',
                 'backtest': '全戦略バックテスト実行',
                 'ml_training': 'ML学習実行',
                 'result_save': '結果保存・ランキング更新'
@@ -181,84 +182,101 @@ class AutoSymbolTrainer:
             
             raise
     
+    def _get_exchange_from_config(self) -> str:
+        """設定ファイルから取引所を取得"""
+        import json
+        import os
+        
+        # 1. 設定ファイルから読み込み
+        try:
+            if os.path.exists('exchange_config.json'):
+                with open('exchange_config.json', 'r') as f:
+                    config = json.load(f)
+                    return config.get('default_exchange', 'hyperliquid').lower()
+        except Exception as e:
+            self.logger.warning(f"Failed to load exchange config: {e}")
+        
+        # 2. 環境変数から読み込み
+        env_exchange = os.getenv('EXCHANGE_TYPE', '').lower()
+        if env_exchange in ['hyperliquid', 'gateio']:
+            return env_exchange
+        
+        # 3. デフォルト: Hyperliquid
+        return 'hyperliquid'
+    
     async def _fetch_and_validate_data(self, symbol: str) -> Dict:
         """データ取得と検証（Hyperliquidバリデーション統合）"""
         
         try:
-            # 1. Hyperliquid銘柄バリデーション（厳格モード）
-            from hyperliquid_validator import HyperliquidValidator, ValidationContext
+            # 1. マルチ取引所銘柄バリデーション（厳格モード）
+            exchange = self._get_exchange_from_config()
             
-            self.logger.info(f"Validating {symbol} on Hyperliquid...")
+            self.logger.info(f"Validating {symbol} on {exchange}...")
             
-            async with HyperliquidValidator(strict_mode=True) as validator:
-                validation_result = await validator.validate_symbol(
-                    symbol, 
-                    ValidationContext.NEW_ADDITION
-                )
+            # マルチ取引所対応バリデーション
+            from hyperliquid_api_client import MultiExchangeAPIClient
+            api_client = MultiExchangeAPIClient(exchange_type=exchange)
+            
+            validation_result = await api_client.validate_symbol_real(symbol)
+            
+            if not validation_result['valid']:
+                # バリデーション失敗時は明確なエラーを投げる
+                status = validation_result.get('status', 'unknown')
+                reason = validation_result.get('reason', 'Unknown error')
                 
-                if not validation_result.valid:
-                    # バリデーション失敗時は明確なエラーを投げる
-                    if validation_result.status == "invalid":
-                        from hyperliquid_validator import InvalidSymbolError
-                        raise InvalidSymbolError(f"{symbol}: {validation_result.reason}")
-                    elif validation_result.status == "inactive":
-                        from hyperliquid_validator import InactiveSymbolError
-                        raise InactiveSymbolError(f"{symbol}: {validation_result.reason}")
-                    else:
-                        raise Exception(f"{symbol} validation failed: {validation_result.reason}")
+                if status == "invalid":
+                    raise ValueError(f"{symbol}: {reason}")
+                elif status == "inactive":
+                    raise ValueError(f"{symbol}: {reason}")
+                else:
+                    # その他のエラー
+                    raise ValueError(f"Validation failed for {symbol}: {reason}")
+            
+            self.logger.success(f"✅ {symbol} validated on {exchange}")
+            
+            # 2. 履歴データ取得
+            self.logger.info(f"Fetching historical data for {symbol}")
+            
+            try:
+                self.logger.info(f"🚀 STARTING OHLCV DATA VALIDATION for {symbol}")
+                # 1時間足、90日分のデータを取得
+                ohlcv_data = await api_client.get_ohlcv_data_with_period(symbol, '1h', days=90)
                 
-                self.logger.success(f"✅ {symbol} validated on Hyperliquid")
-                
-                # 2. 履歴データ取得
-                self.logger.info(f"Fetching historical data for {symbol}")
-                
-                # 実際のHyperliquid APIデータ取得
-                from hyperliquid_api_client import HyperliquidAPIClient
-                
-                api_client = HyperliquidAPIClient()
-                try:
-                    self.logger.info(f"🚀 STARTING OHLCV DATA VALIDATION for {symbol}")
-                    # 1時間足、90日分のデータを取得
-                    ohlcv_data = await api_client.get_ohlcv_data_with_period(symbol, '1h', days=90)
-                    
-                    data_info = {
-                        'records': len(ohlcv_data),
-                        'date_range': {
-                            'start': ohlcv_data['timestamp'].min().strftime('%Y-%m-%d') if len(ohlcv_data) > 0 else 'N/A',
-                            'end': ohlcv_data['timestamp'].max().strftime('%Y-%m-%d') if len(ohlcv_data) > 0 else 'N/A'
-                        }
+                data_info = {
+                    'records': len(ohlcv_data),
+                    'date_range': {
+                        'start': ohlcv_data['timestamp'].min().strftime('%Y-%m-%d') if len(ohlcv_data) > 0 else 'N/A',
+                        'end': ohlcv_data['timestamp'].max().strftime('%Y-%m-%d') if len(ohlcv_data) > 0 else 'N/A'
                     }
-                except Exception as api_error:
-                    self.logger.error(f"❌ Failed to fetch OHLCV data for {symbol}: {api_error}")
-                    
-                    # データ取得失敗時は詳細なエラーメッセージで処理を停止
-                    error_msg = str(api_error)
-                    if "No data retrieved" in error_msg:
-                        from hyperliquid_validator import InvalidSymbolError
-                        raise InvalidSymbolError(f"{symbol}のOHLCVデータが取得できませんでした。Hyperliquidで取引されていない可能性があります。")
-                    elif "Too many failed requests" in error_msg:
-                        raise ValueError(f"{symbol}のデータ取得で多数のリクエストが失敗しました。銘柄が存在しないか、一時的にデータが利用できません。")
-                    else:
-                        raise ValueError(f"{symbol}のOHLCVデータ取得に失敗: {error_msg}")
+                }
                 
                 # 3. データ品質チェック
                 if data_info['records'] < 1000:
-                    from hyperliquid_validator import InsufficientDataError
-                    raise InsufficientDataError(
-                        f"{symbol}: Only {data_info['records']} data points available (minimum: 1000)"
-                    )
+                    raise ValueError(f"{symbol}: Only {data_info['records']} data points available (minimum: 1000)")
                 
                 self.logger.success(f"📊 Data fetched: {data_info['records']} records for {symbol}")
                 
                 return {
                     'symbol': symbol,
-                    'validation_status': validation_result.status,
-                    'validation_valid': validation_result.valid,
+                    'validation_status': validation_result.get('status', 'valid'),
+                    'validation_valid': validation_result.get('valid', True),
                     'records_fetched': data_info['records'],
                     'date_range': data_info['date_range'],
                     'data_quality': 'HIGH',
-                    'leverage_limit': validation_result.market_info.get('leverage_limit', 10) if validation_result.market_info else 10
+                    'leverage_limit': validation_result.get('market_info', {}).get('leverage_limit', 10)
                 }
+                
+            except Exception as api_error:
+                self.logger.error(f"❌ Failed to fetch OHLCV data for {symbol}: {api_error}")
+                
+                # データ取得失敗時は詳細なエラーメッセージで処理を停止
+                error_msg = str(api_error)
+                if "No data retrieved" in error_msg:
+                    raise ValueError(f"{symbol}のOHLCVデータが取得できませんでした。{exchange}で取引されていない可能性があります。")
+                elif "Too many failed requests" in error_msg:
+                    raise ValueError(f"{symbol}のデータ取得で多数のリクエストが失敗しました。銘柄が存在しないか、一時的にデータが利用できません。")
+                else:
+                    raise ValueError(f"{symbol}のOHLCVデータ取得に失敗: {error_msg}")
                 
         except Exception as e:
             self.logger.error(f"❌ Data fetch/validation failed for {symbol}: {e}")

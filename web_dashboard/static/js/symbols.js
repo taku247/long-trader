@@ -492,3 +492,67 @@ window.addEventListener('beforeunload', () => {
         clearInterval(symbolManager.updateInterval);
     }
 });
+
+// Exchange switching functions
+async function loadCurrentExchange() {
+    try {
+        const response = await fetch('/api/exchange/current');
+        const data = await response.json();
+        
+        if (data.current_exchange) {
+            const exchangeElement = document.getElementById('current-exchange');
+            if (exchangeElement) {
+                exchangeElement.textContent = data.current_exchange === 'hyperliquid' ? 'Hyperliquid' : 'Gate.io';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading current exchange:', error);
+    }
+}
+
+async function switchExchange(exchange) {
+    try {
+        const response = await fetch('/api/exchange/switch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ exchange: exchange })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Update UI
+            const exchangeElement = document.getElementById('current-exchange');
+            if (exchangeElement) {
+                exchangeElement.textContent = exchange === 'hyperliquid' ? 'Hyperliquid' : 'Gate.io';
+            }
+            
+            // Show success notification
+            if (symbolManager) {
+                symbolManager.showMessage(data.message, 'success');
+            }
+            
+            // Refresh the page after a short delay to ensure all systems use new exchange
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+            
+        } else {
+            if (symbolManager) {
+                symbolManager.showMessage(data.error || 'Failed to switch exchange', 'error');
+            }
+        }
+    } catch (error) {
+        console.error('Error switching exchange:', error);
+        if (symbolManager) {
+            symbolManager.showMessage('Error switching exchange', 'error');
+        }
+    }
+}
+
+// Load current exchange on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadCurrentExchange();
+});

@@ -182,16 +182,41 @@ class ScalableAnalysisSystem:
         
         return True
     
+    def _get_exchange_from_config(self, config) -> str:
+        """設定から取引所を取得"""
+        import json
+        import os
+        
+        # 1. 設定ファイルから読み込み
+        try:
+            if os.path.exists('exchange_config.json'):
+                with open('exchange_config.json', 'r') as f:
+                    exchange_config = json.load(f)
+                    return exchange_config.get('default_exchange', 'hyperliquid').lower()
+        except Exception as e:
+            logger.warning(f"Failed to load exchange config: {e}")
+        
+        # 2. 環境変数から読み込み
+        env_exchange = os.getenv('EXCHANGE_TYPE', '').lower()
+        if env_exchange in ['hyperliquid', 'gateio']:
+            return env_exchange
+        
+        # 3. デフォルト: Hyperliquid
+        return 'hyperliquid'
+    
     def _generate_real_analysis(self, symbol, timeframe, config, num_trades=50):  # 高精度のため50回維持
         """ハイレバレッジボットを使用した実分析"""
         try:
             # 本格的な戦略分析のため、実際のAPIデータを使用
             from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
             
-            print(f"🎯 実データによる戦略分析を開始: {symbol} {timeframe} {config}")
+            # 取引所設定を取得
+            exchange = self._get_exchange_from_config(config)
+            
+            print(f"🎯 実データによる戦略分析を開始: {symbol} {timeframe} {config} ({exchange})")
             print("   ⏳ データ取得とML分析のため、処理に数分かかる場合があります...")
             
-            bot = HighLeverageBotOrchestrator(use_default_plugins=True)
+            bot = HighLeverageBotOrchestrator(use_default_plugins=True, exchange=exchange)
             
             # 複数回分析を実行してトレードデータを生成（完全ログ抑制）
             trades = []

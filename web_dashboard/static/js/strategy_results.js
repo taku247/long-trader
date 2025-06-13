@@ -598,7 +598,12 @@ class StrategyResultsManager {
                                                     ${trade.stop_loss_price ? `$${trade.stop_loss_price.toFixed(2)}` : 'N/A'}
                                                 </td>
                                                 <td>
-                                                    <span class="badge bg-warning text-dark">${trade.leverage.toFixed(1)}x</span>
+                                                    <span class="badge bg-warning text-dark leverage-clickable" 
+                                                          onclick="strategyResultsManager.showLeverageCalculator(${trade.entry_price}, '${i}')" 
+                                                          style="cursor: pointer;" 
+                                                          title="クリックして他のレバレッジでの損益計算を表示">
+                                                        ${trade.leverage.toFixed(1)}x
+                                                    </span>
                                                 </td>
                                                 <td class="${trade.pnl_pct >= 0 ? 'text-success' : 'text-danger'}">
                                                     <strong>${(trade.pnl_pct * 100).toFixed(2)}%</strong>
@@ -816,6 +821,123 @@ class StrategyResultsManager {
             console.error('Error exporting trade details:', error);
             this.showMessageBanner('トレード詳細のエクスポートに失敗しました', 'error');
         }
+    }
+
+    showLeverageCalculator(entryPrice, tradeIndex) {
+        if (!entryPrice || entryPrice <= 0) {
+            alert('エントリー価格が不正です');
+            return;
+        }
+
+        const modal = document.createElement('div');
+        modal.className = 'modal fade';
+        modal.id = 'leverageCalculatorModal';
+        modal.innerHTML = `
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-calculator"></i> レバレッジ計算機
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">エントリー価格</label>
+                                <input type="number" class="form-control" id="calc-entry-price" value="${entryPrice}" step="0.01">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">選択レバレッジ</label>
+                                <select class="form-select" id="calc-leverage">
+                                    <option value="1">1x</option>
+                                    <option value="2">2x</option>
+                                    <option value="3">3x</option>
+                                    <option value="5">5x</option>
+                                    <option value="10">10x</option>
+                                    <option value="15">15x</option>
+                                    <option value="20">20x</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">ストップロス (%)</label>
+                                <input type="number" class="form-control" id="calc-sl-pct" value="3" step="0.1" min="0.1" max="50">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">テイクプロフィット (%)</label>
+                                <input type="number" class="form-control" id="calc-tp-pct" value="5" step="0.1" min="0.1" max="100">
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <h6>計算結果:</h6>
+                            <div id="calc-results">
+                                <!-- Dynamic calculation results -->
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        
+        const bootstrapModal = new bootstrap.Modal(modal);
+        bootstrapModal.show();
+
+        // Add event listeners for real-time calculation
+        const updateCalculation = () => {
+            const entry = parseFloat(document.getElementById('calc-entry-price').value);
+            const leverage = parseFloat(document.getElementById('calc-leverage').value);
+            const slPct = parseFloat(document.getElementById('calc-sl-pct').value);
+            const tpPct = parseFloat(document.getElementById('calc-tp-pct').value);
+
+            if (entry > 0 && leverage > 0 && slPct > 0 && tpPct > 0) {
+                const slPrice = entry * (1 - slPct / 100);
+                const tpPrice = entry * (1 + tpPct / 100);
+                const slPnl = -slPct * leverage;
+                const tpPnl = tpPct * leverage;
+
+                document.getElementById('calc-results').innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <strong class="text-danger">ストップロス</strong><br>
+                            価格: $${slPrice.toFixed(4)}<br>
+                            損失: <span class="text-danger">${slPnl.toFixed(2)}%</span>
+                        </div>
+                        <div class="col-md-6">
+                            <strong class="text-success">テイクプロフィット</strong><br>
+                            価格: $${tpPrice.toFixed(4)}<br>
+                            利益: <span class="text-success">+${tpPnl.toFixed(2)}%</span>
+                        </div>
+                    </div>
+                    <hr>
+                    <small class="text-muted">
+                        ${leverage}倍レバレッジでの損益倍率表示<br>
+                        リスク/リワード比: 1:${(tpPct/slPct).toFixed(2)}
+                    </small>
+                `;
+            }
+        };
+
+        // Initial calculation
+        setTimeout(updateCalculation, 100);
+
+        // Real-time updates
+        ['calc-entry-price', 'calc-leverage', 'calc-sl-pct', 'calc-tp-pct'].forEach(id => {
+            document.getElementById(id).addEventListener('input', updateCalculation);
+        });
+
+        // Cleanup on modal close
+        modal.addEventListener('hidden.bs.modal', () => {
+            document.body.removeChild(modal);
+        });
     }
 }
 

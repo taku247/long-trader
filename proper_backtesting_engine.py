@@ -30,13 +30,15 @@ class ProperBacktestingEngine:
     
     def __init__(self, 
                  results_dir: str = "proper_backtest_results",
-                 cache_dir: str = "data_cache"):
+                 cache_dir: str = "data_cache",
+                 exchange: str = None):
         """
         Initialize the backtesting engine
         
         Args:
             results_dir: Directory to store results
             cache_dir: Directory to cache data
+            exchange: Exchange to use ('hyperliquid' or 'gateio'). If None, uses config file
         """
         self.results_dir = Path(results_dir)
         self.cache_dir = Path(cache_dir)
@@ -45,17 +47,55 @@ class ProperBacktestingEngine:
         self.results_dir.mkdir(exist_ok=True)
         self.cache_dir.mkdir(exist_ok=True)
         
-        # Initialize components
-        self.data_fetcher = ExtendedDataFetcher()
+        # Set exchange
+        self.exchange = self._determine_exchange(exchange)
+        
+        # Initialize components with exchange
+        self.data_fetcher = ExtendedDataFetcher(exchange=self.exchange)
         self.ts_backtester = TimeSeriesBacktester()
         self.walk_forward_engine = WalkForwardEngine()
         
         # Configuration storage
         self.strategy_configs = self._load_default_strategies()
-        self.supported_symbols = ['HYPE', 'SOL', 'BTC', 'ETH', 'BONK', 'WIF', 'PEPE']
+        self.supported_symbols = self._get_supported_symbols()
         self.supported_timeframes = ['5m', '15m', '30m', '1h']
         
-        logger.info("Proper Backtesting Engine initialized")
+        logger.info(f"Proper Backtesting Engine initialized with {self.exchange}")
+    
+    def _determine_exchange(self, exchange: str = None) -> str:
+        """取引所を決定（設定ファイル優先）"""
+        import json
+        import os
+        
+        # 1. 引数で指定された場合
+        if exchange:
+            return exchange.lower()
+        
+        # 2. 設定ファイルから読み込み
+        try:
+            if os.path.exists('exchange_config.json'):
+                with open('exchange_config.json', 'r') as f:
+                    config = json.load(f)
+                    return config.get('default_exchange', 'hyperliquid').lower()
+        except Exception as e:
+            logger.warning(f"Failed to load exchange config: {e}")
+        
+        # 3. 環境変数から読み込み
+        env_exchange = os.getenv('EXCHANGE_TYPE', '').lower()
+        if env_exchange in ['hyperliquid', 'gateio']:
+            return env_exchange
+        
+        # 4. デフォルト: Hyperliquid
+        return 'hyperliquid'
+    
+    def _get_supported_symbols(self) -> List[str]:
+        """取引所に応じたサポート銘柄を取得"""
+        if self.exchange == 'gateio':
+            # Gate.ioで確実に利用可能な銘柄
+            return ['BTC', 'ETH', 'SOL', 'AVAX', 'DOGE', 'LINK', 'UNI', 'AAVE', 'MATIC']
+        else:
+            # Hyperliquid
+            return ['HYPE', 'SOL', 'BTC', 'ETH', 'BONK', 'WIF', 'PEPE']
     
     def _load_default_strategies(self) -> Dict[str, Dict[str, Any]]:
         """

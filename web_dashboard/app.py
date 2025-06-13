@@ -25,7 +25,7 @@ from real_time_system.utils.colored_log import get_colored_logger
 class WebDashboard:
     """Web dashboard for monitoring system."""
     
-    def __init__(self, host='localhost', port=5000, debug=False):
+    def __init__(self, host='localhost', port=5001, debug=False):
         self.host = host
         self.port = port
         self.debug = debug
@@ -164,6 +164,73 @@ class WebDashboard:
                 return jsonify(safe_config)
             except Exception as e:
                 self.logger.error(f"Error getting config: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        # Exchange Management Routes
+        @self.app.route('/api/exchange/current')
+        def api_exchange_current():
+            """Get current exchange configuration."""
+            try:
+                config_path = 'exchange_config.json'
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                        return jsonify({
+                            'current_exchange': config.get('default_exchange', 'hyperliquid'),
+                            'last_updated': config.get('last_updated', None),
+                            'updated_via': config.get('updated_via', 'unknown')
+                        })
+                else:
+                    return jsonify({
+                        'current_exchange': 'hyperliquid',
+                        'last_updated': None,
+                        'updated_via': 'default'
+                    })
+            except Exception as e:
+                self.logger.error(f"Error getting exchange config: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/exchange/switch', methods=['POST'])
+        def api_exchange_switch():
+            """Switch exchange configuration."""
+            try:
+                data = request.get_json()
+                new_exchange = data.get('exchange', '').lower()
+                
+                if new_exchange not in ['hyperliquid', 'gateio']:
+                    return jsonify({'error': 'Invalid exchange. Must be hyperliquid or gateio'}), 400
+                
+                # Save new configuration
+                config = {
+                    "default_exchange": new_exchange,
+                    "exchanges": {
+                        "hyperliquid": {
+                            "enabled": True,
+                            "rate_limit_delay": 0.5
+                        },
+                        "gateio": {
+                            "enabled": True,
+                            "rate_limit_delay": 0.1,
+                            "futures_only": True
+                        }
+                    },
+                    "last_updated": datetime.now().isoformat(),
+                    "updated_via": "web_dashboard"
+                }
+                
+                with open('exchange_config.json', 'w') as f:
+                    json.dump(config, f, indent=2)
+                
+                self.logger.info(f"Exchange switched to {new_exchange} via web dashboard")
+                
+                return jsonify({
+                    'status': 'success',
+                    'new_exchange': new_exchange,
+                    'message': f'Exchange switched to {new_exchange.capitalize()}'
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error switching exchange: {e}")
                 return jsonify({'error': str(e)}), 500
         
         # Alert History Analysis Routes
@@ -584,9 +651,13 @@ class WebDashboard:
                         completion_rate = (completed / 18) * 100
                         
                         # Check execution status for failure detection
-                        execution_status, failure_info = self._check_symbol_execution_status(
-                            exec_db, symbol, completed, latest_completion
-                        )
+                        try:
+                            execution_status, failure_info = self._check_symbol_execution_status(
+                                exec_db, symbol, completed, latest_completion
+                            )
+                        except Exception as check_error:
+                            self.logger.warning(f"Error checking execution status for {symbol}: {check_error}")
+                            execution_status, failure_info = 'unknown', None
                         
                         # Determine final status
                         if execution_status == 'failed':
@@ -623,63 +694,6 @@ class WebDashboard:
             except Exception as e:
                 self.logger.error(f"Error getting symbols with progress: {e}")
                 return jsonify({'error': str(e)}), 500
-        
-    def _check_symbol_execution_status(self, exec_db, symbol, completed_patterns, latest_completion):
-        """Check if symbol analysis has failed or stalled."""
-        try:
-            from datetime import datetime, timedelta
-            
-            # Get recent executions for this symbol
-            executions = exec_db.list_executions(limit=50)
-            symbol_executions = [e for e in executions if e.get('symbol') == symbol]
-            
-            if not symbol_executions:
-                return 'unknown', None
-            
-            latest_execution = symbol_executions[0]
-            
-            # Check for explicit failure, but ignore if analysis is actually complete
-            if latest_execution['status'] == 'FAILED' and completed_patterns < 18:
-                errors = latest_execution.get('errors', [])
-                error_msg = errors[-1].get('error_message', 'Unknown error') if errors else 'Analysis failed'
-                return 'failed', {
-                    'failure_reason': error_msg,
-                    'execution_id': latest_execution['execution_id']
-                }
-            
-            # Check for stalled analysis (incomplete + no recent progress)
-            if completed_patterns < 18 and latest_completion:
-                try:
-                    if '.' in latest_completion:
-                        last_time = datetime.fromisoformat(latest_completion.replace('Z', ''))
-                    else:
-                        last_time = datetime.fromisoformat(latest_completion)
-                    
-                    time_since_last = datetime.now() - last_time
-                    
-                    # Consider stalled if no progress for 2+ hours and still running
-                    if (time_since_last > timedelta(hours=2) and 
-                        latest_execution['status'] == 'RUNNING'):
-                        return 'stalled', {
-                            'stalled_since': latest_completion,
-                            'time_stalled_hours': round(time_since_last.total_seconds() / 3600, 1),
-                            'execution_id': latest_execution['execution_id']
-                        }
-                except Exception:
-                    pass
-            
-            # Check for cancelled executions
-            if latest_execution['status'] == 'CANCELLED':
-                return 'failed', {
-                    'failure_reason': 'Analysis was cancelled',
-                    'execution_id': latest_execution['execution_id']
-                }
-            
-            return 'normal', None
-            
-        except Exception as e:
-            self.logger.error(f"Error checking execution status for {symbol}: {e}")
-            return 'unknown', None
         
         @self.app.route('/api/strategy-results/<symbol>')
         def api_strategy_results_detail(symbol):
@@ -1297,6 +1311,63 @@ class WebDashboard:
                 self.logger.error(f"Error in migration execution: {e}")
                 return jsonify({'error': str(e)}), 500
     
+    def _check_symbol_execution_status(self, exec_db, symbol, completed_patterns, latest_completion):
+        """Check if symbol analysis has failed or stalled."""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Get recent executions for this symbol
+            executions = exec_db.list_executions(limit=50)
+            symbol_executions = [e for e in executions if e.get('symbol') == symbol]
+            
+            if not symbol_executions:
+                return 'unknown', None
+            
+            latest_execution = symbol_executions[0]
+            
+            # Check for explicit failure, but ignore if analysis is actually complete
+            if latest_execution['status'] == 'FAILED' and completed_patterns < 18:
+                errors = latest_execution.get('errors', [])
+                error_msg = errors[-1].get('error_message', 'Unknown error') if errors else 'Analysis failed'
+                return 'failed', {
+                    'failure_reason': error_msg,
+                    'execution_id': latest_execution['execution_id']
+                }
+            
+            # Check for stalled analysis (incomplete + no recent progress)
+            if completed_patterns < 18 and latest_completion:
+                try:
+                    if '.' in latest_completion:
+                        last_time = datetime.fromisoformat(latest_completion.replace('Z', ''))
+                    else:
+                        last_time = datetime.fromisoformat(latest_completion)
+                    
+                    time_since_last = datetime.now() - last_time
+                    
+                    # Consider stalled if no progress for 2+ hours and still running
+                    if (time_since_last > timedelta(hours=2) and 
+                        latest_execution['status'] == 'RUNNING'):
+                        return 'stalled', {
+                            'stalled_since': latest_completion,
+                            'time_stalled_hours': round(time_since_last.total_seconds() / 3600, 1),
+                            'execution_id': latest_execution['execution_id']
+                        }
+                except Exception:
+                    pass
+            
+            # Check for cancelled executions
+            if latest_execution['status'] == 'CANCELLED':
+                return 'failed', {
+                    'failure_reason': 'Analysis was cancelled',
+                    'execution_id': latest_execution['execution_id']
+                }
+            
+            return 'normal', None
+            
+        except Exception as e:
+            self.logger.error(f"Error checking execution status for {symbol}: {e}")
+            return 'unknown', None
+    
     def _setup_socketio_events(self):
         """Setup SocketIO events."""
         
@@ -1390,7 +1461,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Long Trader Web Dashboard')
     parser.add_argument('--host', default='localhost', help='Host to bind to')
-    parser.add_argument('--port', type=int, default=5000, help='Port to bind to')
+    parser.add_argument('--port', type=int, default=5001, help='Port to bind to')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     
     args = parser.parse_args()

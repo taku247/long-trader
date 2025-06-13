@@ -14,45 +14,28 @@ class Dashboard {
     }
     
     init() {
-        this.initializeSocket();
+        // Skip socket initialization - using HTTP polling instead
+        // this.initializeSocket();
         this.attachEventListeners();
         this.updateStatus();
+        this.loadCurrentExchange(); // Load current exchange on startup
         
-        // Update status every 30 seconds as fallback
+        // Update status every 10 seconds using HTTP polling
         setInterval(() => {
-            if (!this.isConnected) {
-                this.updateStatus();
-            }
-        }, 30000);
+            this.updateStatus();
+        }, 10000);
+        
+        // Update alerts every 5 seconds
+        setInterval(() => {
+            this.loadAlerts();
+        }, 5000);
     }
     
     initializeSocket() {
-        this.socket = io();
-        
-        this.socket.on('connect', () => {
-            console.log('Connected to server');
-            this.isConnected = true;
-            this.updateConnectionStatus('connected', '接続済み');
-            this.socket.emit('subscribe_updates');
-        });
-        
-        this.socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            this.isConnected = false;
-            this.updateConnectionStatus('disconnected', '切断');
-        });
-        
-        this.socket.on('status_update', (status) => {
-            this.updateSystemStatus(status);
-        });
-        
-        this.socket.on('new_alerts', (alerts) => {
-            this.addNewAlerts(alerts);
-        });
-        
-        this.socket.on('status', (data) => {
-            console.log('Status message:', data.message);
-        });
+        // SocketIO disabled - using HTTP polling instead
+        console.log('Using HTTP polling mode instead of WebSocket');
+        this.isConnected = true;
+        this.updateConnectionStatus('connected', 'HTTP接続');
     }
     
     attachEventListeners() {
@@ -428,9 +411,81 @@ class Dashboard {
         };
         return labels[type] || type;
     }
+    
+    // Exchange Management Methods
+    async loadCurrentExchange() {
+        try {
+            const response = await fetch('/api/exchange/current');
+            const data = await response.json();
+            
+            if (data.current_exchange) {
+                const exchangeElement = document.getElementById('current-exchange');
+                if (exchangeElement) {
+                    exchangeElement.textContent = data.current_exchange === 'hyperliquid' ? 'Hyperliquid' : 'Gate.io';
+                }
+            }
+        } catch (error) {
+            console.error('Error loading current exchange:', error);
+        }
+    }
+    
+    async loadAlerts() {
+        try {
+            const response = await fetch(`/api/alerts?limit=${this.alertsLimit}`);
+            if (response.ok) {
+                const alerts = await response.json();
+                this.displayAlerts(alerts);
+            }
+        } catch (error) {
+            console.error('Error loading alerts:', error);
+        }
+    }
+    
+    async switchExchange(exchange) {
+        try {
+            const response = await fetch('/api/exchange/switch', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ exchange: exchange })
+            });
+            
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                // Update UI
+                const exchangeElement = document.getElementById('current-exchange');
+                if (exchangeElement) {
+                    exchangeElement.textContent = exchange === 'hyperliquid' ? 'Hyperliquid' : 'Gate.io';
+                }
+                
+                // Show success notification
+                this.showNotification(data.message, 'success');
+                
+                // Refresh the page after a short delay to ensure all systems use new exchange
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+                
+            } else {
+                this.showNotification(data.error || 'Failed to switch exchange', 'error');
+            }
+        } catch (error) {
+            console.error('Error switching exchange:', error);
+            this.showNotification('Error switching exchange', 'error');
+        }
+    }
 }
 
 // Initialize dashboard when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.dashboard = new Dashboard();
 });
+
+// Global function for HTML onclick handlers
+function switchExchange(exchange) {
+    if (window.dashboard) {
+        window.dashboard.switchExchange(exchange);
+    }
+}

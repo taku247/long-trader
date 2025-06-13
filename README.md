@@ -2,6 +2,24 @@
 
 ハイレバレッジ取引における最適な戦略を見つけるための包括的なバックテスト・分析システム
 
+## 🎯 重要な起動方法
+
+### 🌐 Webダッシュボード（メイン）
+```bash
+# 正しい起動方法
+cd web_dashboard
+python app.py
+
+# ブラウザで http://localhost:5001 にアクセス
+```
+
+⚠️ **注意**: `demo_dashboard.py`は古いデモ版です。**必ず`web_dashboard/app.py`を使用してください。**
+
+### 🔄 取引所切り替え機能
+- **Hyperliquid** ⇄ **Gate.io** をワンクリックで切り替え
+- ナビゲーションバーの「🔄 取引所切り替えボタン」から選択
+- システム全体に即座に反映
+
 ## 🚀 クイックスタート - ハイレバレッジ判定Bot
 
 ### 🎯 メイン実行コマンド (high_leverage_bot.py)
@@ -1709,10 +1727,65 @@ cp large_scale_analysis/compressed/*.pkl.gz backup_before_reanalysis_$(date +%Y%
 # → 戦略結果ページ → トレード詳細で価格整合性をチェック
 ```
 
+## 🔄 マルチ取引所API統合（2025年6月13日追加）
+
+### ✅ **ccxtを使ったGate.io先物OHLCV取得とフラグ切り替えシステム**
+
+フラグ1つでHyperliquid ⇄ Gate.io を切り替え可能なマルチ取引所APIシステムを実装しました。
+
+#### **🚀 主要機能**
+- **統合APIクライアント**: `MultiExchangeAPIClient`（`HyperliquidAPIClient`の上位互換）
+- **フラグ切り替え**: 設定ファイル、環境変数、直接指定で取引所選択
+- **自動シンボルマッピング**: PEPE ⇄ kPEPE など取引所固有形式に自動変換
+- **ccxt統合**: Gate.io先物データ取得にccxtライブラリを使用
+
+#### **🔧 使用方法**
+```python
+# 基本的な使用（後方互換性あり）
+from hyperliquid_api_client import HyperliquidAPIClient  # エイリアス
+client = HyperliquidAPIClient()  # デフォルト: Hyperliquid
+
+# 明示的な取引所指定
+from hyperliquid_api_client import MultiExchangeAPIClient
+client = MultiExchangeAPIClient(exchange_type="gateio")  # Gate.io使用
+
+# 動的切り替え（ユーザーが明示的に指定した場合のみ）
+client.switch_exchange("gateio")  # Gate.ioに切り替え
+```
+
+#### **📁 コマンドライン切り替え**
+```bash
+# Gate.ioに切り替え
+python exchange_switcher.py gateio
+
+# Hyperliquidに切り替え
+python exchange_switcher.py hyperliquid
+
+# 統合テストUI
+streamlit run test_gateio_ohlcv.py
+```
+
+#### **⚠️ 重要な設計原則**
+- **明示的切り替えのみ**: 取引所の切り替えはユーザーが明示的に指定した場合のみ実行
+- **自動切り替えなし**: エラーが発生しても自動的な取引所切り替えは行われません
+- **安定性優先**: 処理の途中で予期しない切り替えが発生することはありません
+
+#### **🎯 Hyperliquid 429エラー対策**
+Hyperliquidでレート制限が発生した場合の対処法：
+
+1. **手動切り替え**: `python exchange_switcher.py gateio`
+2. **設定変更**: `exchange_config.json`で`"default_exchange": "gateio"`
+3. **一時的使用**: `MultiExchangeAPIClient(exchange_type="gateio")`
+
+Gate.ioは独立したAPIなので、Hyperliquidのレート制限の影響を受けません。
+
 ## 📚 関連ドキュメント
 
 - `README_dashboard.md`: ダッシュボード詳細
 - `high_leverage_bot_design.md`: システム設計書
+- `database_er_diagram.md`: **データベース構造 ER図** 🗄️
+- `exchange_switcher.py`: 取引所切り替えユーティリティ
+- `demo_exchange_switching.py`: マルチ取引所デモ
 
 ---
 

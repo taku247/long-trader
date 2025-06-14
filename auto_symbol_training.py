@@ -44,6 +44,18 @@ class AutoSymbolTrainer:
         try:
             self.logger.info(f"Starting automatic training for symbol: {symbol}")
             
+            # 重複実行チェック
+            existing_executions = self.execution_db.list_executions(limit=20)
+            running_symbols = [
+                exec_item['symbol'] for exec_item in existing_executions 
+                if exec_item.get('status') == 'RUNNING' and exec_item.get('symbol') == symbol
+            ]
+            
+            if running_symbols:
+                error_msg = f"Symbol {symbol} is already being processed. Cancel existing execution first."
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
+            
             # データベースに実行記録を作成
             if execution_id is None:
                 execution_id = self.execution_db.create_execution(

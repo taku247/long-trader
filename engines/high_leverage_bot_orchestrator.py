@@ -193,6 +193,10 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
     def _fetch_market_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
         """市場データを取得（マルチ取引所APIクライアントを使用）"""
         
+        # キャッシュされたデータがあれば使用
+        if hasattr(self, '_cached_data') and not self._cached_data.empty:
+            return self._cached_data
+        
         try:
             # マルチ取引所APIクライアントを使用
             from hyperliquid_api_client import MultiExchangeAPIClient
@@ -218,8 +222,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             if data is not None and not data.empty:
                 return data
             else:
-                print(f"⚠️ {symbol}のデータが取得できませんでした")
-                return pd.DataFrame()
+                raise Exception(f"{symbol}のOHLCVデータが空です - 実データが必要です")
             
         except Exception as e:
             print(f"データ取得エラー: {e}")
@@ -388,37 +391,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             market_conditions=market_context
         )
     
-    def _generate_sample_data(self) -> pd.DataFrame:
-        """サンプルデータを生成（フォールバック用）"""
-        
-        print("⚠️ サンプルデータを生成中...")
-        
-        # 簡単なランダムウォークデータ
-        dates = pd.date_range(start='2024-01-01', periods=1000, freq='1H')
-        
-        # 初期価格
-        base_price = 1000.0
-        prices = [base_price]
-        
-        # ランダムウォーク生成
-        np.random.seed(42)
-        for _ in range(999):
-            change = np.random.normal(0, 0.01)  # 1%の標準偏差
-            new_price = prices[-1] * (1 + change)
-            prices.append(new_price)
-        
-        data = pd.DataFrame({
-            'timestamp': dates,
-            'open': prices,
-            'high': [p * (1 + abs(np.random.normal(0, 0.005))) for p in prices],
-            'low': [p * (1 - abs(np.random.normal(0, 0.005))) for p in prices],
-            'close': prices,
-            'volume': np.random.uniform(1000, 10000, 1000)
-        })
-        
-        data.set_index('timestamp', inplace=True)
-        
-        return data
+    # _generate_sample_data method removed - no fallback data allowed
     
     def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML") -> Dict:
         """

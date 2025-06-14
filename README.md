@@ -1779,6 +1779,257 @@ Hyperliquidでレート制限が発生した場合の対処法：
 
 Gate.ioは独立したAPIなので、Hyperliquidのレート制限の影響を受けません。
 
+## 🧪 テストスイート・品質監視システム
+
+Long Traderには包括的なテスト環境と継続的品質監視システムが実装されており、システムの信頼性と価格データの整合性を保証します。
+
+### 🔍 ハードコード値検知システム
+
+**目的**: バックテストエンジンでハードコード値（100.0, 105.0, 97.62等）が使用されていないことを自動検知
+
+```bash
+# ハードコード値検知テストの実行
+python tests/test_hardcoded_value_detection.py
+
+# 期待される検知内容:
+# ✅ エントリー価格のハードコード値検出
+# ✅ TP/SL価格のハードコード値検出  
+# ✅ 価格変動不足の検出
+# ✅ 同一価格パターンの検出
+```
+
+**検知機能**:
+- **既知のハードコード値**: 100.0, 105.0, 97.62, 0.04705等
+- **価格変動係数**: CV < 0.001で変動不足を検出
+- **市場価格乖離**: 現在価格から30%以上乖離した価格を検出
+- **同一パターン**: 複数戦略で同じ(Entry, TP, SL)パターンを検出
+
+### 📊 継続的品質監視システム
+
+**目的**: 新規銘柄追加時と定期的な品質チェックで動的価格生成を保証
+
+```bash
+# 品質監視テストの実行
+python tests/test_continuous_quality_monitor.py
+
+# 監視項目:
+# ✅ 全戦略の動的価格設定確認
+# ✅ バックテスト結果の現実性チェック
+# ✅ 価格計算の一貫性検証
+# ✅ 新規銘柄の価格分布検証
+```
+
+**品質基準**:
+- **最小固有価格数**: 戦略あたり5種類以上の価格
+- **変動係数**: CV ≥ 0.01（適切な価格変動）
+- **勝率上限**: 95%以下（非現実的な高勝率を防止）
+- **戦略間価格差**: 平均価格の10%以内の一貫性
+
+### 🚀 銘柄追加パイプライン単体テスト
+
+**目的**: 銘柄追加プロセス全体の完全性とデータ分離を保証
+
+```bash
+# 銘柄追加パイプライン全体テスト
+python tests/test_symbol_addition_pipeline.py
+
+# テスト対象:
+# ✅ ExecutionLogDatabase操作
+# ✅ 銘柄バリデーション処理
+# ✅ AutoSymbolTrainer動作
+# ✅ ScalableAnalysisSystem処理
+# ✅ Web API統合機能
+```
+
+**データ分離設計**:
+- **テスト用DB**: `test_*.db`ファイルで本番DBと完全分離
+- **一時ディレクトリ**: 本番データへの影響を完全に防止
+- **モック外部API**: 実際のAPI呼び出しを安全にシミュレート
+
+### 🔧 統合テストスイート
+
+**目的**: エンドツーエンドの銘柄追加フローと例外処理を検証
+
+```bash
+# 統合テスト実行
+python tests/test_integration.py
+
+# テストシナリオ:
+# ✅ 完全な銘柄追加パイプライン
+# ✅ 無効シンボルのエラーハンドリング
+# ✅ データ不足時の処理
+# ✅ API接続エラー時の復旧
+```
+
+### 📋 テスト実行コマンド一覧
+
+```bash
+# 1. ハードコード値の緊急チェック
+python tests/test_hardcoded_value_detection.py
+
+# 2. 新規銘柄追加後の品質確認
+python tests/test_continuous_quality_monitor.py
+
+# 3. 銘柄追加機能の動作確認
+python tests/test_symbol_addition_pipeline.py
+
+# 4. システム全体の統合テスト
+python tests/test_integration.py
+
+# 5. 全テスト一括実行
+python -m pytest tests/ -v
+```
+
+### 💡 CI/CD統合とレポート機能
+
+**品質レポート自動生成**:
+```bash
+# 品質レポートJSONファイルが自動生成される
+quality_report_20250614_115402.json
+```
+
+**CI/CDパイプライン統合**:
+- **終了コード**: テスト失敗時は1を返してCI/CDを停止
+- **品質ゲート**: ハードコード値検出時は自動的にブロック
+- **アラート機能**: Slack/メール通知との連携可能
+
+### 🎯 開発者向けベストプラクティス
+
+**新機能開発時**:
+1. 機能実装後、必ずハードコード値検知テストを実行
+2. 銘柄追加パイプラインに変更を加えた場合は統合テストを実行
+3. 本番デプロイ前に品質監視テストで全体チェック
+
+**定期メンテナンス**:
+- **毎週**: 品質監視テストで既存データの健全性確認
+- **毎月**: 全テストスイートを実行してシステム全体を検証
+
+## 🚨 ハードコード値バグ修正TODO
+
+**2025年6月14日 テストコードによる包括的分析結果**
+
+### 📊 **検出された問題の詳細**
+
+- **ハードコード値違反**: 2,475件
+- **静的価格設定戦略**: 1,161件（HIGH: 1,143件）
+- **価格一貫性問題**: 22件
+- **影響銘柄**: TOKEN001-010, HYPE, GMT, CAKE, FIL等
+
+### 🎯 **緊急対応が必要な項目**
+
+#### **1. 既存データファイルのクリーンアップ（優先度: HIGH）**
+```bash
+# 問題のあるデータファイルを特定・削除
+# 対象: large_scale_analysis/compressed/*.pkl.gz
+# 実行前にバックアップ必須
+```
+
+**詳細作業:**
+- [ ] **データバックアップ作成**
+  ```bash
+  mkdir -p backup_before_cleanup_$(date +%Y%m%d_%H%M)
+  cp -r large_scale_analysis/compressed/ backup_before_cleanup_$(date +%Y%m%d_%H%M)/
+  ```
+
+- [ ] **ハードコード値ファイルの特定・削除**
+  ```bash
+  # テストコードで特定されたファイルを削除
+  python debug_hardcoded_analysis.py --output-delete-list
+  # 出力されたファイルリストを確認後、削除実行
+  ```
+
+- [ ] **影響を受けた銘柄の再分析**
+  - TOKEN001-010 (存在しない銘柄のため削除のみ)
+  - HYPE, GMT, CAKE, FIL (実在銘柄のため再分析)
+
+#### **2. データ生成ロジックの根本修正（優先度: HIGH）**
+
+- [ ] **scalable_analysis_system.py の修正**
+  - 行354: `entry_price = current_price` の値検証を強化
+  - `_generate_single_analysis` メソッドでのエラーハンドリング改善
+  - フォールバック機構の完全除去確認
+
+- [ ] **TestHighLeverageBotOrchestrator 使用箇所の排除**
+  ```bash
+  # 以下のファイルで TestHighLeverageBotOrchestrator を使用中
+  grep -r "TestHighLeverageBotOrchestrator" --include="*.py" .
+  ```
+  - `real_time_system/monitor.py:28`
+  - その他のインポート箇所をすべて本番用に変更
+
+- [ ] **price calculation の検証強化**
+  - TP/SL計算ロジックで1000.0が生成される箇所の特定
+  - `MarketContext` の `volume_24h=1000000.0` 設定の妥当性確認
+
+#### **3. 品質保証システムの導入（優先度: MEDIUM）**
+
+- [ ] **CI/CD パイプラインへのテスト統合**
+  ```bash
+  # 銘柄追加前の自動チェック
+  python tests/test_hardcoded_value_detection.py
+  python tests/test_continuous_quality_monitor.py
+  ```
+
+- [ ] **定期監視スケジュールの設定**
+  ```bash
+  # crontab設定例
+  0 */6 * * * cd /path/to/long-trader && python tests/test_continuous_quality_monitor.py
+  ```
+
+- [ ] **アラート機能の実装**
+  - ハードコード値検出時のSlack/メール通知
+  - 品質レポートの自動生成・送信
+
+#### **4. データ整合性の検証・修正（優先度: MEDIUM）**
+
+- [ ] **価格一貫性の修正**
+  - 同一銘柄・時間足で戦略間価格差が平均の10%以上の22件を修正
+  - 戦略別価格計算ロジックの統一
+
+- [ ] **非現実的バックテスト結果の修正**
+  - 勝率95%以上の戦略の見直し
+  - 平均利益50%以上の結果の再検証
+
+### 📋 **修正作業の実行順序**
+
+1. **Phase 1: 緊急クリーンアップ（即時実行）**
+   - データバックアップ作成
+   - ハードコード値ファイルの削除
+   - TestHighLeverageBotOrchestrator使用箇所の修正
+
+2. **Phase 2: コード修正（1-2日）**
+   - scalable_analysis_system.py の根本修正
+   - 価格計算ロジックの検証・修正
+   - エラーハンドリングの強化
+
+3. **Phase 3: 再構築・検証（2-3日）**
+   - クリーンなデータでの銘柄再分析
+   - 品質監視システムの導入
+   - 全システムでの動作確認
+
+### 🔍 **修正後の検証方法**
+
+```bash
+# 1. ハードコード値の完全除去確認
+python tests/test_hardcoded_value_detection.py
+
+# 2. 動的価格生成の確認
+python tests/test_continuous_quality_monitor.py
+
+# 3. 新規銘柄での正常動作確認
+python test_real_symbol_analysis.py
+
+# 4. 統合テストでの完全性確認
+python tests/test_integration.py
+```
+
+### ⚠️ **注意事項**
+
+- **作業前のバックアップは必須**
+- **本番環境での作業は段階的に実行**
+- **各修正後にテストコードでの検証を必ず実行**
+- **ユーザーには事前にメンテナンス通知を実施**
+
 ## 📚 関連ドキュメント
 
 - `README_dashboard.md`: ダッシュボード詳細
@@ -1786,6 +2037,7 @@ Gate.ioは独立したAPIなので、Hyperliquidのレート制限の影響を�
 - `database_er_diagram.md`: **データベース構造 ER図** 🗄️
 - `exchange_switcher.py`: 取引所切り替えユーティリティ
 - `demo_exchange_switching.py`: マルチ取引所デモ
+- `tests/`: **包括的テストスイート** 🧪
 
 ---
 

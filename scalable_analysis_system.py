@@ -103,17 +103,32 @@ class ScalableAnalysisSystem:
                 future = executor.submit(self._process_chunk, chunk, i)
                 futures.append(future)
             
-            # 結果収集
+            # 結果収集（タイムアウト付き）
             total_processed = 0
-            for future in futures:
-                processed_count = future.result()
-                total_processed += processed_count
+            for i, future in enumerate(futures):
+                try:
+                    # 各チャンクに30分のタイムアウトを設定
+                    processed_count = future.result(timeout=1800)  # 30 minutes
+                    total_processed += processed_count
+                    logger.info(f"チャンク {i+1}/{len(futures)} 完了: {processed_count}パターン処理")
+                except Exception as e:
+                    logger.error(f"チャンク {i+1} 処理エラー: {e}")
+                    # エラーが発生してもプロセスプールを破損させない
+                    if "BrokenProcessPool" in str(e):
+                        logger.error("プロセスプール破損検出 - 残りのチャンクをスキップ")
+                        break
         
         logger.info(f"バッチ分析完了: {total_processed}パターン処理完了")
         return total_processed
     
     def _process_chunk(self, configs_chunk, chunk_id):
         """チャンクを処理（プロセス内で実行）"""
+        import time
+        import random
+        
+        # プロセス間の競合を防ぐため、わずかにランダムな遅延を追加
+        time.sleep(random.uniform(0.1, 0.5))
+        
         processed = 0
         for config in configs_chunk:
             try:
@@ -217,7 +232,27 @@ class ScalableAnalysisSystem:
             print(f"🎯 実データによる戦略分析を開始: {symbol} {timeframe} {config} ({exchange})")
             print("   ⏳ データ取得とML分析のため、処理に数分かかる場合があります...")
             
-            bot = HighLeverageBotOrchestrator(use_default_plugins=True, exchange=exchange)
+            # マルチプロセシング競合を防ぐため、一度だけボットを初期化
+            if not hasattr(self, '_bot_cache'):
+                self._bot_cache = {}
+            
+            bot_key = f"{exchange}_{symbol}"
+            if bot_key not in self._bot_cache:
+                bot = HighLeverageBotOrchestrator(use_default_plugins=True, exchange=exchange)
+                # データを一度だけ取得してキャッシュ
+                try:
+                    market_data = bot._fetch_market_data(symbol, timeframe)
+                    if market_data.empty:
+                        raise Exception(f"No market data available for {symbol}")
+                    bot._cached_data = market_data
+                    self._bot_cache[bot_key] = bot
+                    print(f"✅ {symbol} データキャッシュ完了: {len(market_data)} points")
+                except Exception as e:
+                    logger.error(f"Failed to cache data for {symbol}: {e}")
+                    raise
+            else:
+                bot = self._bot_cache[bot_key]
+                print(f"🔄 {symbol} キャッシュ済みデータを使用")
             
             # 複数回分析を実行してトレードデータを生成（完全ログ抑制）
             trades = []
@@ -255,21 +290,16 @@ class ScalableAnalysisSystem:
                     retry_count = 0
                     max_retries = 3
                     
-                    while retry_count < max_retries:
-                        try:
-                            # 完全なログ抑制で分析実行
-                            with suppress_all_output():
-                                result = bot.analyze_symbol(symbol, timeframe, config)
-                            break  # 成功したらループを抜ける
-                        except Exception as e:
-                            retry_count += 1
-                            if retry_count < max_retries:
-                                print(f"   ⚠️ 分析エラー (リトライ {retry_count}/{max_retries}): {str(e)[:100]}...")
-                                time.sleep(5)  # 5秒待機してリトライ
-                            else:
-                                print(f"   ❌ 分析失敗 (最大リトライ数に到達): {str(e)[:100]}...")
-                                logger.error(f"Real analysis failed for {symbol} {timeframe} {config} after {max_retries} retries: {e}")
-                                raise Exception(f"Analysis failed after {max_retries} retries: {e}")
+                    # リトライループを削除し、失敗時は即座に終了
+                    try:
+                        # キャッシュされたデータを使用してより高速に分析
+                        result = bot.analyze_symbol(symbol, timeframe, config)
+                        if not result or 'current_price' not in result:
+                            raise Exception(f"Invalid analysis result for {symbol}")
+                    except Exception as e:
+                        print(f"   ❌ 分析失敗: {str(e)[:100]}...")
+                        logger.error(f"Real analysis failed for {symbol} {timeframe} {config}: {e}")
+                        raise Exception(f"Analysis failed: {e} - no fallback allowed")
                     
                     # 進捗表示（10回ごと）
                     if (i + 1) % 10 == 0:

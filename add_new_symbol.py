@@ -53,8 +53,8 @@ def main():
             print(f"📊 {symbol} テスト実行中 ({i}/{len(symbols)})")
             print(f"{'='*40}")
             
-            # 戦略テスト実行
-            results_df = tester.test_all_strategies_on_symbol(symbol, use_scalable_system=False)
+            # 戦略テスト実行（実際のAPIデータを使用）
+            results_df = tester.test_all_strategies_on_symbol(symbol, use_scalable_system=True)
             
             # 結果保存
             tester.update_main_results_csv(results_df)

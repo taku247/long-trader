@@ -43,6 +43,20 @@ class WebDashboard:
         # Initialize logger
         self.logger = get_colored_logger(__name__)
         
+        # システムログの表示設定
+        import sys
+        if not debug:
+            # プロダクションモードでも重要なログは表示
+            import logging
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.StreamHandler(sys.stdout),
+                    logging.FileHandler('system.log', encoding='utf-8')
+                ]
+            )
+        
         # Monitor reference
         self.monitor: Optional[RealTimeMonitor] = None
         self.monitor_thread: Optional[threading.Thread] = None
@@ -1440,6 +1454,11 @@ class WebDashboard:
         
         try:
             # Use standard Flask server instead of SocketIO server
+            # Suppress Flask/Werkzeug access logs by setting log level
+            if not self.debug:
+                werkzeug_logger = logging.getLogger('werkzeug')
+                werkzeug_logger.setLevel(logging.WARNING)
+            
             self.app.run(
                 host=self.host,
                 port=self.port,

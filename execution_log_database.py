@@ -162,7 +162,7 @@ class ExecutionLogDatabase:
                 
                 conn.commit()
                 
-            self.logger.info(f"📊 Execution log database initialized: {self.db_path}")
+            self.logger.debug(f"📊 Execution log database initialized: {self.db_path}")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize database: {e}")

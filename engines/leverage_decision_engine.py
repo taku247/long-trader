@@ -397,8 +397,13 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         support_max_leverage = downside_analysis['max_leverage_from_support']
         
         # 2. リスクリワード比からの制約
-        profit_potential = max(0.01, upside_analysis['total_profit_potential'])  # 最低1%
-        downside_risk = max(0.01, downside_analysis['nearest_support_distance'])  # 最低1%
+        profit_potential = upside_analysis['total_profit_potential']
+        downside_risk = downside_analysis['nearest_support_distance']
+        
+        # 実際の市場データに基づく最小値を使用（ハードコード値は避ける）
+        if profit_potential <= 0 or downside_risk <= 0:
+            reasoning.append("⚠️ 不正なリスク・リワードデータ - 分析をスキップ")
+            return None
         
         risk_reward_ratio = profit_potential / downside_risk
         risk_reward_ratio = max(0.1, min(10.0, risk_reward_ratio))  # 0.1-10に制限
@@ -431,8 +436,12 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         
         max_safe_leverage = min(constraint_leverages)
         
-        # === 推奨レバレッジは最大安全レバレッジの70% ===
-        recommended_leverage = max_safe_leverage * 0.7
+        # === 推奨レバレッジは市場条件に基づく調整 ===
+        # 市場の状況に応じて保守的さを調整（固定70%ではなく）
+        market_conservatism = 0.5 + (market_context['volatility'] * 0.3)  # 0.5-0.8の範囲
+        market_conservatism = max(0.5, min(0.9, market_conservatism))
+        
+        recommended_leverage = max_safe_leverage * market_conservatism
         
         # === 最小・最大制限の適用 ===
         recommended_leverage = max(1.0, min(recommended_leverage, self.max_leverage))

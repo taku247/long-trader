@@ -220,6 +220,18 @@ class ScalableAnalysisSystem:
         # 3. デフォルト: Hyperliquid
         return 'hyperliquid'
     
+    def _load_timeframe_config(self, timeframe):
+        """時間足設定ファイルから設定を読み込み"""
+        try:
+            config_path = 'config/timeframe_conditions.json'
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                    return config_data.get('timeframe_configs', {}).get(timeframe, {})
+        except Exception as e:
+            logger.warning(f"時間足設定読み込みエラー: {e}")
+        return {}
+    
     def _generate_real_analysis(self, symbol, timeframe, config, evaluation_period_days=90):
         """条件ベースのハイレバレッジ分析 - 市場条件を満たした場合のみシグナル生成"""
         try:
@@ -282,19 +294,23 @@ class ScalableAnalysisSystem:
             end_time = datetime.now()
             start_time = end_time - timedelta(days=evaluation_period_days)
             
-            # 時間足に応じた評価間隔を設定
-            evaluation_intervals = {
-                '1m': timedelta(minutes=5),   # 5分おきに評価
-                '3m': timedelta(minutes=15),  # 15分おきに評価
-                '5m': timedelta(minutes=30),  # 30分おきに評価
-                '15m': timedelta(hours=1),    # 1時間おきに評価
-                '30m': timedelta(hours=2),    # 2時間おきに評価
-                '1h': timedelta(hours=4),     # 4時間おきに評価
-                '4h': timedelta(hours=12),    # 12時間おきに評価
-                '1d': timedelta(days=1)       # 1日おきに評価
-            }
+            # 時間足設定から評価間隔を取得
+            tf_config = self._load_timeframe_config(timeframe)
             
-            evaluation_interval = evaluation_intervals.get(timeframe, timedelta(hours=4))
+            # 設定ファイルから評価間隔を読み込み（分単位）
+            evaluation_interval_minutes = tf_config.get('evaluation_interval_minutes')
+            
+            if evaluation_interval_minutes:
+                evaluation_interval = timedelta(minutes=evaluation_interval_minutes)
+            else:
+                # フォールバック: デフォルト間隔
+                default_intervals = {
+                    '1m': timedelta(minutes=5),   '3m': timedelta(minutes=15),
+                    '5m': timedelta(minutes=30),  '15m': timedelta(hours=1),
+                    '30m': timedelta(hours=2),    '1h': timedelta(hours=4),
+                    '4h': timedelta(hours=12),    '1d': timedelta(days=1)
+                }
+                evaluation_interval = default_intervals.get(timeframe, timedelta(hours=4))
             
             # 条件ベースの分析実行
             current_time = start_time
@@ -302,14 +318,17 @@ class ScalableAnalysisSystem:
             signals_generated = 0
             
             # 時間足設定から最大評価回数を取得
-            tf_config = self.get_timeframe_config(timeframe) if hasattr(self, 'get_timeframe_config') else {}
-            max_evaluations = tf_config.get('max_evaluations', 50)  # デフォルト50回
+            max_evaluations = tf_config.get('max_evaluations', 100)  # フォールバック値
             
             print(f"🔍 条件ベース分析: {start_time.strftime('%Y-%m-%d')} から {end_time.strftime('%Y-%m-%d')}")
             print(f"📊 評価間隔: {evaluation_interval} ({timeframe}足最適化)")
             print(f"🛡️ 最大評価回数: {max_evaluations}回")
             
-            while current_time <= end_time and total_evaluations < max_evaluations:
+            max_signals = max_evaluations // 2  # 評価回数の半分まで（例：20評価で最大10シグナル）
+            
+            while (current_time <= end_time and 
+                   total_evaluations < max_evaluations and 
+                   signals_generated < max_signals):
                 total_evaluations += 1
                 try:
                     # 出力抑制で市場条件の評価

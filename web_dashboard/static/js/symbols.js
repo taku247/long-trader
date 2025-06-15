@@ -287,6 +287,9 @@ class SymbolManager {
         document.getElementById('modal-symbol-name').textContent = symbol;
         document.getElementById('btn-view-strategy-results').href = `/strategy-results?symbol=${symbol}`;
         
+        // Set current symbol for global access
+        window.currentSymbol = symbol;
+        
         const contentDiv = document.getElementById('modal-symbol-content');
         contentDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> 読み込み中...</div>';
         

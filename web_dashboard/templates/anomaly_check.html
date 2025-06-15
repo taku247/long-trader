@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>トレードデータ異常チェック - {{ symbol if symbol else '' }}</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 10px;
+        }
+        .alert {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .alert-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .alert-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .metric {
+            display: inline-block;
+            margin: 10px 20px 10px 0;
+        }
+        .metric-label {
+            font-weight: bold;
+            color: #666;
+        }
+        .metric-value {
+            font-size: 1.2em;
+            color: #333;
+        }
+        .anomaly-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-left: 4px solid #dc3545;
+        }
+        .normal-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-left: 4px solid #28a745;
+        }
+        .back-link {
+            display: inline-block;
+            margin: 20px 0;
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .back-link:hover {
+            background: #0056b3;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        .sample-trades {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 id="page-title">🔍 トレードデータ異常チェック</h1>
+        
+        <a href="/symbols" class="back-link">← 銘柄一覧に戻る</a>
+        
+        <div id="loading" class="alert alert-info">
+            <strong>読み込み中...</strong> データを分析しています
+        </div>
+        
+        <div id="error" class="alert alert-danger" style="display: none;">
+            <strong>エラー:</strong> <span id="error-message"></span>
+        </div>
+        
+        <div id="content" style="display: none;"></div>
+        
+        <a href="/symbols" class="back-link">← 銘柄一覧に戻る</a>
+    </div>
+
+    <script>
+        // Get symbol from URL path
+        const pathParts = window.location.pathname.split('/');
+        const symbol = pathParts[pathParts.length - 1];
+        
+        // Update page title
+        document.getElementById('page-title').textContent = `🔍 トレードデータ異常チェック: ${symbol}`;
+        
+        // Fetch anomaly data
+        fetch(`/api/anomaly-check/${symbol}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                
+                if (data.error) {
+                    document.getElementById('error-message').textContent = data.error;
+                    document.getElementById('error').style.display = 'block';
+                } else {
+                    renderAnomalyData(data);
+                    document.getElementById('content').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error-message').textContent = error.message;
+                document.getElementById('error').style.display = 'block';
+            });
+        
+        function renderAnomalyData(data) {
+            const content = document.getElementById('content');
+            
+            const html = `
+                <div class="section">
+                    <h2>📊 基本統計</h2>
+                    <div class="metric">
+                        <span class="metric-label">総取引数:</span>
+                        <span class="metric-value">${data.basic_stats.total_trades}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">勝率:</span>
+                        <span class="metric-value">${(data.basic_stats.win_rate * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">総リターン:</span>
+                        <span class="metric-value">${data.basic_stats.total_return.toFixed(2)}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">平均レバレッジ:</span>
+                        <span class="metric-value">${data.basic_stats.avg_leverage.toFixed(1)}x</span>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2>🚨 異常検出結果</h2>
+                    
+                    ${data.anomalies.length > 0 ? `
+                        <div class="alert alert-danger">
+                            <strong>⚠️ ${data.anomalies.length}件の異常が検出されました</strong>
+                        </div>
+                        
+                        ${data.anomalies.map(anomaly => `
+                            <div class="anomaly-item">
+                                <strong>${anomaly.type}:</strong> ${anomaly.description}
+                                <br>
+                                <small>詳細: ${anomaly.details}</small>
+                            </div>
+                        `).join('')}
+                    ` : `
+                        <div class="alert alert-success">
+                            <strong>✅ 異常は検出されませんでした</strong>
+                        </div>
+                    `}
+                </div>
+                
+                <div class="section">
+                    <h2>📈 詳細分析</h2>
+                    
+                    <h3>レバレッジ分析</h3>
+                    <div class="metric">
+                        <span class="metric-label">ユニーク値数:</span>
+                        <span class="metric-value">${data.leverage_stats.unique_count}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">標準偏差:</span>
+                        <span class="metric-value">${data.leverage_stats.std.toFixed(4)}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">最小値:</span>
+                        <span class="metric-value">${data.leverage_stats.min.toFixed(2)}x</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">最大値:</span>
+                        <span class="metric-value">${data.leverage_stats.max.toFixed(2)}x</span>
+                    </div>
+                    
+                    <h3>価格分析</h3>
+                    <div class="metric">
+                        <span class="metric-label">エントリー価格の多様性:</span>
+                        <span class="metric-value">${data.entry_price_stats.unique_count}/${data.entry_price_stats.total} (${(data.entry_price_stats.diversity_ratio * 100).toFixed(1)}%)</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">価格範囲:</span>
+                        <span class="metric-value">${data.entry_price_stats.min.toFixed(2)} - ${data.entry_price_stats.max.toFixed(2)}</span>
+                    </div>
+                    
+                    <h3>PnL分析</h3>
+                    <div class="metric">
+                        <span class="metric-label">平均PnL:</span>
+                        <span class="metric-value">${(data.pnl_stats.mean * 100).toFixed(2)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">最大利益:</span>
+                        <span class="metric-value">${(data.pnl_stats.max * 100).toFixed(2)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">最大損失:</span>
+                        <span class="metric-value">${(data.pnl_stats.min * 100).toFixed(2)}%</span>
+                    </div>
+                </div>
+                
+                ${data.sample_trades.length > 0 ? `
+                <div class="section">
+                    <h2>📋 全トレードデータ (${data.sample_trades.length}件)</h2>
+                    <div class="sample-trades">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>エントリー時刻</th>
+                                    <th>エントリー価格</th>
+                                    <th>エグジット価格</th>
+                                    <th>レバレッジ</th>
+                                    <th>PnL</th>
+                                    <th>勝敗</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.sample_trades.map((trade, index) => `
+                                    <tr>
+                                        <td>${index + 1}</td>
+                                        <td>${trade.entry_time}</td>
+                                        <td>${trade.entry_price.toFixed(2)}</td>
+                                        <td>${trade.exit_price.toFixed(2)}</td>
+                                        <td>${trade.leverage.toFixed(1)}x</td>
+                                        <td>${(trade.pnl_pct * 100).toFixed(2)}%</td>
+                                        <td>
+                                            ${trade.is_success ? 
+                                                '<span style="color: green;">✅</span>' : 
+                                                '<span style="color: red;">❌</span>'
+                                            }
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                ` : ''}
+                
+                <div class="section">
+                    <h2>✅ 正常チェック項目</h2>
+                    ${data.normal_checks.map(check => `
+                        <div class="normal-item">
+                            <strong>${check.type}:</strong> ${check.description}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            
+            content.innerHTML = html;
+        }
+    </script>
+</body>
+</html>

@@ -901,6 +901,215 @@ class WebDashboard:
             except Exception as e:
                 self.logger.error(f"Error getting trade details for {symbol} {timeframe} {config}: {e}")
                 return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/anomaly-check/<symbol>')
+        def api_anomaly_check(symbol):
+            """Perform anomaly detection on trading data for a specific symbol."""
+            try:
+                from scalable_analysis_system import ScalableAnalysisSystem
+                import numpy as np
+                
+                system = ScalableAnalysisSystem()
+                
+                # Get all analysis results for the symbol
+                results_df = system.query_analyses(filters={'symbol': symbol})
+                
+                if results_df.empty:
+                    return jsonify({'error': f'No data found for symbol {symbol}'}), 404
+                
+                # Collect all trades from all timeframes and configs
+                all_trades = []
+                for _, row in results_df.iterrows():
+                    trades_df = system.load_compressed_trades(row['symbol'], row['timeframe'], row['config'])
+                    if trades_df is not None and not (hasattr(trades_df, 'empty') and trades_df.empty):
+                        if hasattr(trades_df, 'to_dict'):
+                            trades = trades_df.to_dict('records')
+                        else:
+                            trades = trades_df if isinstance(trades_df, list) else []
+                        all_trades.extend(trades)
+                
+                if not all_trades:
+                    return jsonify({'error': f'No trade data found for symbol {symbol}'}), 404
+                
+                # Basic statistics
+                total_trades = len(all_trades)
+                win_count = sum(1 for t in all_trades if t.get('is_success', t.get('is_win', False)))
+                win_rate = win_count / total_trades if total_trades > 0 else 0
+                
+                leverages = [float(t.get('leverage', 0)) for t in all_trades]
+                entry_prices = [float(t.get('entry_price', 0)) for t in all_trades if t.get('entry_price')]
+                pnl_pcts = [float(t.get('pnl_pct', 0)) for t in all_trades]
+                
+                total_return = sum(pnl_pcts)
+                avg_leverage = np.mean(leverages) if leverages else 0
+                
+                basic_stats = {
+                    'total_trades': total_trades,
+                    'win_rate': win_rate,
+                    'total_return': total_return,
+                    'avg_leverage': avg_leverage
+                }
+                
+                # Anomaly detection
+                anomalies = []
+                normal_checks = []
+                
+                # 1. Check leverage diversity
+                leverage_unique = len(set(leverages)) if leverages else 0
+                leverage_std = np.std(leverages) if leverages else 0
+                
+                if leverage_unique == 1 and total_trades > 10:
+                    anomalies.append({
+                        'type': 'レバレッジ固定',
+                        'description': f'全{total_trades}取引で同一レバレッジ({leverages[0]:.1f}x)が使用されています',
+                        'details': f'多様性が期待される場合、レバレッジが固定値である可能性があります'
+                    })
+                elif leverage_std < 0.1 and total_trades > 10:
+                    anomalies.append({
+                        'type': 'レバレッジ分散異常',
+                        'description': f'レバレッジの標準偏差が極めて小さい({leverage_std:.4f})',
+                        'details': f'動的レバレッジ計算が正常に機能していない可能性があります'
+                    })
+                else:
+                    normal_checks.append({
+                        'type': 'レバレッジ多様性',
+                        'description': f'{leverage_unique}種類のレバレッジが使用されています（標準偏差: {leverage_std:.4f}）'
+                    })
+                
+                # 2. Check entry price diversity
+                entry_price_unique = len(set(entry_prices)) if entry_prices else 0
+                entry_price_diversity_ratio = entry_price_unique / len(entry_prices) if entry_prices else 0
+                
+                if entry_price_unique == 1 and len(entry_prices) > 10:
+                    anomalies.append({
+                        'type': 'エントリー価格固定',
+                        'description': f'全{len(entry_prices)}取引で同一エントリー価格({entry_prices[0]:.2f})が使用されています',
+                        'details': 'ハードコードされた価格値が使用されている可能性があります'
+                    })
+                elif entry_price_diversity_ratio < 0.1 and len(entry_prices) > 20:
+                    anomalies.append({
+                        'type': 'エントリー価格多様性不足',
+                        'description': f'エントリー価格の多様性が低い({entry_price_diversity_ratio:.1%})',
+                        'details': '限られた価格レンジでのみ取引が発生している可能性があります'
+                    })
+                else:
+                    normal_checks.append({
+                        'type': 'エントリー価格多様性',
+                        'description': f'{entry_price_unique}種類のエントリー価格（多様性: {entry_price_diversity_ratio:.1%}）'
+                    })
+                
+                # 3. Check win rate anomaly
+                if win_rate > 0.9 and total_trades > 50:
+                    anomalies.append({
+                        'type': '勝率異常',
+                        'description': f'勝率が異常に高い({win_rate:.1%})',
+                        'details': '実際の市場条件では達成困難な勝率である可能性があります'
+                    })
+                elif win_rate < 0.2 and total_trades > 50:
+                    anomalies.append({
+                        'type': '勝率異常',
+                        'description': f'勝率が異常に低い({win_rate:.1%})',
+                        'details': '戦略に重大な問題がある可能性があります'
+                    })
+                else:
+                    normal_checks.append({
+                        'type': '勝率範囲',
+                        'description': f'勝率は正常範囲内です({win_rate:.1%})'
+                    })
+                
+                # 4. Check PnL distribution
+                pnl_std = np.std(pnl_pcts) if pnl_pcts else 0
+                pnl_mean = np.mean(pnl_pcts) if pnl_pcts else 0
+                
+                if pnl_std < 0.001 and total_trades > 10:
+                    anomalies.append({
+                        'type': 'PnL分散異常',
+                        'description': f'PnLの標準偏差が極めて小さい({pnl_std:.6f})',
+                        'details': '固定的なPnL計算が行われている可能性があります'
+                    })
+                else:
+                    normal_checks.append({
+                        'type': 'PnL分散',
+                        'description': f'PnL分散は正常です（標準偏差: {pnl_std:.4f}）'
+                    })
+                
+                # 5. Check entry time duplication
+                entry_times = [t.get('entry_time', 'N/A') for t in all_trades]
+                entry_time_unique = len(set(entry_times))
+                entry_time_duplicates = len(entry_times) - entry_time_unique
+                
+                if entry_time_duplicates > total_trades * 0.1:  # 10%以上重複
+                    anomalies.append({
+                        'type': 'エントリー時刻重複異常',
+                        'description': f'{entry_time_duplicates}件の重複エントリー時刻が検出されました',
+                        'details': f'同一時刻での複数取引は通常発生しません。データ生成に問題がある可能性があります'
+                    })
+                elif entry_time_duplicates > 0:
+                    anomalies.append({
+                        'type': 'エントリー時刻軽微重複',
+                        'description': f'{entry_time_duplicates}件の重複エントリー時刻があります',
+                        'details': f'少数の重複は許容範囲ですが、確認をお勧めします'
+                    })
+                else:
+                    normal_checks.append({
+                        'type': 'エントリー時刻',
+                        'description': f'全エントリー時刻がユニークです（{entry_time_unique}件）'
+                    })
+                
+                # Detailed statistics for display
+                leverage_stats = {
+                    'unique_count': leverage_unique,
+                    'std': leverage_std,
+                    'min': min(leverages) if leverages else 0,
+                    'max': max(leverages) if leverages else 0
+                }
+                
+                entry_price_stats = {
+                    'unique_count': entry_price_unique,
+                    'total': len(entry_prices),
+                    'diversity_ratio': entry_price_diversity_ratio,
+                    'min': min(entry_prices) if entry_prices else 0,
+                    'max': max(entry_prices) if entry_prices else 0
+                }
+                
+                pnl_stats = {
+                    'mean': pnl_mean,
+                    'std': pnl_std,
+                    'min': min(pnl_pcts) if pnl_pcts else 0,
+                    'max': max(pnl_pcts) if pnl_pcts else 0
+                }
+                
+                # Sample trades (all trades)
+                sample_trades = []
+                for i, trade in enumerate(all_trades):
+                    sample_trades.append({
+                        'entry_time': trade.get('entry_time', 'N/A'),
+                        'entry_price': float(trade.get('entry_price', 0)),
+                        'exit_price': float(trade.get('exit_price', 0)),
+                        'leverage': float(trade.get('leverage', 0)),
+                        'pnl_pct': float(trade.get('pnl_pct', 0)),
+                        'is_success': bool(trade.get('is_success', trade.get('is_win', False)))
+                    })
+                
+                return jsonify({
+                    'symbol': symbol,
+                    'basic_stats': basic_stats,
+                    'anomalies': anomalies,
+                    'normal_checks': normal_checks,
+                    'leverage_stats': leverage_stats,
+                    'entry_price_stats': entry_price_stats,
+                    'pnl_stats': pnl_stats,
+                    'sample_trades': sample_trades
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error performing anomaly check for {symbol}: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/anomaly-check/<symbol>')
+        def anomaly_check_page(symbol):
+            """Anomaly check page for a specific symbol."""
+            return render_template('anomaly_check.html', symbol=symbol)
         
         @self.app.route('/api/strategy-results/<symbol>/export')
         def api_strategy_results_export(symbol):

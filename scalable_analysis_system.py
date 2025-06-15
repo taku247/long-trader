@@ -529,14 +529,26 @@ class ScalableAnalysisSystem:
     
     def _analysis_exists(self, analysis_id):
         """分析が既に存在するかチェック"""
-        symbol, timeframe, config = analysis_id.split('_', 2)
-        
+        # ハッシュIDの場合はDBから直接検索
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                'SELECT COUNT(*) FROM analyses WHERE symbol=? AND timeframe=? AND config=?',
-                (symbol, timeframe, config)
-            )
+            
+            # まずハッシュIDで検索を試行
+            if len(analysis_id) == 32:  # MD5ハッシュの場合
+                cursor.execute(
+                    'SELECT COUNT(*) FROM analyses WHERE symbol || "_" || timeframe || "_" || config = ?',
+                    (analysis_id,)
+                )
+            else:
+                # 従来の形式の場合
+                try:
+                    symbol, timeframe, config = analysis_id.split('_', 2)
+                    cursor.execute(
+                        'SELECT COUNT(*) FROM analyses WHERE symbol=? AND timeframe=? AND config=?',
+                        (symbol, timeframe, config)
+                    )
+                except ValueError:
+                    return False
             return cursor.fetchone()[0] > 0
     
     def _generate_sample_trades(self, symbol, timeframe, config, num_trades=100):

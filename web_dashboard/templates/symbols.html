@@ -251,6 +251,9 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                        <button type="button" class="btn btn-warning" onclick="checkAnomalies()">
+                            <i class="fas fa-exclamation-triangle"></i> 異常チェック
+                        </button>
                         <button type="button" class="btn btn-info progress-checker-btn" onclick="checkSymbolProgress()">
                             <i class="fas fa-chart-line"></i> 進捗詳細確認
                         </button>
@@ -276,6 +279,15 @@
         function checkSymbolProgress() {
             if (currentSymbol && typeof progressChecker !== 'undefined') {
                 progressChecker.checkProgress(currentSymbol);
+            } else {
+                alert('銘柄が選択されていません');
+            }
+        }
+        
+        function checkAnomalies() {
+            const symbol = window.currentSymbol || currentSymbol;
+            if (symbol) {
+                window.open(`/anomaly-check/${symbol}`, '_blank');
             } else {
                 alert('銘柄が選択されていません');
             }

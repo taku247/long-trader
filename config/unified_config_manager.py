@@ -14,24 +14,46 @@ from datetime import datetime
 import copy
 
 class UnifiedConfigManager:
-    """統合設定管理クラス"""
+    """統合設定管理クラス（シングルトン）"""
+    
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self, trading_config_file: Optional[str] = None, 
                  timeframe_config_file: Optional[str] = None):
         """
-        初期化
+        初期化（シングルトン）
         
         Args:
             trading_config_file: トレーディング条件設定ファイルパス
             timeframe_config_file: 時間足設定ファイルパス
         """
+        # 既に初期化済みの場合はスキップ
+        if UnifiedConfigManager._initialized:
+            return
+        
         self.trading_config_file = trading_config_file or self._get_default_trading_config_path()
         self.timeframe_config_file = timeframe_config_file or self._get_default_timeframe_config_path()
         
         self.trading_config = {}
         self.timeframe_config = {}
         
+        # 厳しさレベル管理システムを統合
+        try:
+            from .strictness_manager import StrictnessManager
+            self.strictness_manager = StrictnessManager()
+            print(f"✅ 厳しさレベル管理システムを統合")
+        except Exception as e:
+            print(f"⚠️ 厳しさレベル管理システム読み込みエラー: {e}")
+            self.strictness_manager = None
+        
         self.load_configs()
+        UnifiedConfigManager._initialized = True
     
     def _get_default_trading_config_path(self) -> str:
         """デフォルトトレーディング設定ファイルパスを取得"""
@@ -81,17 +103,52 @@ class UnifiedConfigManager:
         
         return copy.deepcopy(strategies.get(strategy, {}))
     
-    def get_entry_conditions(self, timeframe: str, strategy: Optional[str] = None) -> Dict[str, Any]:
+    def get_entry_conditions(self, timeframe: str, strategy: Optional[str] = None, 
+                            strictness_level: Optional[str] = None) -> Dict[str, Any]:
         """
-        エントリー条件を取得（時間足と戦略を考慮）
+        エントリー条件を取得（時間足、戦略、厳しさレベルを考慮）
         
         Args:
             timeframe: 時間足
             strategy: 戦略名（オプション）
+            strictness_level: 厳しさレベル（オプション、指定なしの場合は現在のレベル）
             
         Returns:
             エントリー条件辞書
         """
+        # 厳しさレベルが利用可能な場合は優先使用
+        if self.strictness_manager and strictness_level != 'disabled':
+            try:
+                level = strictness_level or self.strictness_manager.get_current_level()
+                strictness_conditions = self.strictness_manager.get_adjusted_conditions(timeframe, level)
+                
+                # 戦略による調整を適用
+                if strategy:
+                    strategy_config = self.get_strategy_config(strategy)
+                    
+                    # 信頼度ブースト適用
+                    if 'confidence_boost' in strategy_config and 'min_confidence' in strictness_conditions:
+                        strictness_conditions['min_confidence'] += strategy_config['confidence_boost']
+                        strictness_conditions['min_confidence'] = max(0.1, min(1.0, strictness_conditions['min_confidence']))
+                    
+                    # リスク乗数適用
+                    if 'risk_multiplier' in strategy_config and 'min_risk_reward' in strictness_conditions:
+                        strictness_conditions['min_risk_reward'] *= strategy_config['risk_multiplier']
+                    
+                    # レバレッジキャップ適用
+                    if 'leverage_cap' in strategy_config:
+                        strictness_conditions['max_leverage'] = strategy_config['leverage_cap']
+                
+                # メタデータ追加
+                strictness_conditions['using_strictness_system'] = True
+                strictness_conditions['applied_strategy'] = strategy
+                
+                return strictness_conditions
+                
+            except Exception as e:
+                print(f"⚠️ 厳しさレベル条件取得エラー: {e}, フォールバック条件を使用")
+        
+        # フォールバック: 従来の方法
         # 基本条件を時間足設定から取得
         tf_config = self.timeframe_config.get('timeframe_configs', {}).get(timeframe, {})
         base_conditions = tf_config.get('entry_conditions', {})
@@ -119,6 +176,10 @@ class UnifiedConfigManager:
             # レバレッジキャップ適用
             if 'leverage_cap' in strategy_config:
                 merged_conditions['max_leverage'] = strategy_config['leverage_cap']
+        
+        # メタデータ追加
+        merged_conditions['using_strictness_system'] = False
+        merged_conditions['applied_strategy'] = strategy
         
         return merged_conditions
     
@@ -223,6 +284,52 @@ class UnifiedConfigManager:
                 
                 if 'max_leverage' in conditions:
                     print(f"     最大レバレッジ: {conditions.get('max_leverage')}x")
+    
+    def set_strictness_level(self, level: str) -> None:
+        """
+        厳しさレベルを設定
+        
+        Args:
+            level: 設定する厳しさレベル
+        """
+        if self.strictness_manager:
+            self.strictness_manager.set_current_level(level)
+        else:
+            print("⚠️ 厳しさレベル管理システムが利用できません")
+    
+    def get_current_strictness_level(self) -> str:
+        """現在の厳しさレベルを取得"""
+        if self.strictness_manager:
+            return self.strictness_manager.get_current_level()
+        return 'disabled'
+    
+    def print_strictness_comparison(self, timeframe: str = "15m", strategy: str = "Aggressive_ML") -> None:
+        """厳しさレベル別比較を表示"""
+        if not self.strictness_manager:
+            print("⚠️ 厳しさレベル管理システムが利用できません")
+            return
+        
+        print(f"\n📊 厳しさレベル別条件比較 ({timeframe} {strategy})")
+        print("=" * 80)
+        
+        levels = ['development', 'testing', 'conservative', 'standard', 'strict']
+        current_level = self.get_current_strictness_level()
+        
+        for level in levels:
+            try:
+                conditions = self.get_entry_conditions(timeframe, strategy, level)
+                level_config = self.strictness_manager.config_data['strictness_levels'][level]
+                
+                marker = "👉" if level == current_level else "  "
+                print(f"\n{marker} {level_config['color']} {level.upper()}: {level_config['description']}")
+                print(f"     最小レバレッジ: {conditions['min_leverage']:.1f}x")
+                print(f"     最小信頼度: {conditions['min_confidence'] * 100:.0f}%")
+                print(f"     最小RR比: {conditions['min_risk_reward']:.1f}")
+                if 'max_leverage' in conditions:
+                    print(f"     最大レバレッジ: {conditions['max_leverage']}x")
+                    
+            except Exception as e:
+                print(f"⚠️ レベル {level} の条件取得エラー: {e}")
 
 
 def main():

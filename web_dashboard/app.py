@@ -633,6 +633,84 @@ class WebDashboard:
                 self.logger.error(f"Error getting strategy symbols: {e}")
                 return jsonify({'error': str(e)}), 500
         
+        @self.app.route('/api/symbol/<symbol>/progress')
+        def api_symbol_progress(symbol):
+            """Get detailed progress for a specific symbol."""
+            try:
+                from scalable_analysis_system import ScalableAnalysisSystem
+                from execution_log_database import ExecutionLogDatabase
+                from datetime import datetime
+                
+                system = ScalableAnalysisSystem()
+                exec_db = ExecutionLogDatabase()
+                
+                # 指定銘柄の分析結果を取得
+                results = system.query_analyses(filters={'symbol': symbol})
+                
+                # 戦略別・時間軸別の進捗を計算
+                strategies = ['Conservative_ML', 'Aggressive_Traditional', 'Full_ML']
+                timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
+                
+                strategy_progress = {}
+                total_completed = len(results)
+                total_patterns = len(strategies) * len(timeframes)  # 18パターン
+                
+                for strategy in strategies:
+                    strategy_results = results[results['config'] == strategy]
+                    completed_timeframes = len(strategy_results)
+                    strategy_progress[strategy] = {
+                        'completed': completed_timeframes,
+                        'total': len(timeframes),
+                        'completion_rate': (completed_timeframes / len(timeframes)) * 100,
+                        'timeframes': list(strategy_results['timeframe']) if len(strategy_results) > 0 else []
+                    }
+                
+                # 実行状況をチェック
+                executions = exec_db.list_executions(limit=10)
+                symbol_executions = [e for e in executions if e.get('symbol') == symbol]
+                
+                latest_execution = symbol_executions[0] if symbol_executions else None
+                
+                # ステータス判定
+                if total_completed >= total_patterns:
+                    status = 'completed'
+                elif latest_execution and latest_execution.get('status') == 'FAILED':
+                    status = 'failed'
+                elif latest_execution and latest_execution.get('status') == 'RUNNING':
+                    status = 'in_progress'
+                elif total_completed >= total_patterns * 0.8:
+                    status = 'nearly_complete'
+                elif total_completed > 0:
+                    status = 'started'
+                else:
+                    status = 'not_started'
+                
+                # 品質スコアを計算
+                avg_sharpe = results['sharpe_ratio'].mean() if len(results) > 0 else 0
+                
+                progress_data = {
+                    'symbol': symbol,
+                    'status': status,
+                    'completion_rate': round((total_completed / total_patterns) * 100, 1),
+                    'completed_patterns': total_completed,
+                    'total_patterns': total_patterns,
+                    'avg_sharpe': round(avg_sharpe, 2) if avg_sharpe else 0,
+                    'strategy_progress': strategy_progress,
+                    'latest_execution': {
+                        'execution_id': latest_execution.get('execution_id') if latest_execution else None,
+                        'status': latest_execution.get('status') if latest_execution else None,
+                        'started_at': latest_execution.get('started_at') if latest_execution else None
+                    },
+                    'recent_executions': symbol_executions[:5],
+                    'last_updated': datetime.now().isoformat()
+                }
+                
+                return jsonify(progress_data)
+                
+            except Exception as e:
+                self.logger.error(f"Error getting symbol progress: {e}")
+                return jsonify({'error': str(e)}), 500
+
         @self.app.route('/api/strategy-results/symbols-with-progress')
         def api_strategy_results_symbols_with_progress():
             """Get all symbols with their analysis progress with failure detection."""

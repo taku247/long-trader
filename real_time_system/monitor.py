@@ -23,17 +23,8 @@ try:
     from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
     print("✅ Using production HighLeverageBotOrchestrator")
 except ImportError:
-    print("⚠️ Could not import production orchestrator, trying test version")
-    try:
-        from engines.test_high_leverage_bot_orchestrator import TestHighLeverageBotOrchestrator as HighLeverageBotOrchestrator
-        print("✅ Using test HighLeverageBotOrchestrator")
-    except ImportError:
-        print("Warning: Could not import test orchestrator either, using mock")
-        try:
-            from mock_high_leverage_bot import MockHighLeverageBotOrchestrator as HighLeverageBotOrchestrator
-        except ImportError:
-            print("Warning: Could not import mock bot either")
-            HighLeverageBotOrchestrator = None
+    print("❌ Could not import production orchestrator - no fallback allowed")
+    HighLeverageBotOrchestrator = None
 
 from real_time_system.alert_manager import AlertManager, AlertType, AlertPriority
 from real_time_system.utils.scheduler_utils import TaskScheduler, RateLimiter

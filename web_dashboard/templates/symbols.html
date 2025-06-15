@@ -48,6 +48,17 @@
             margin-top: 1rem;
         }
         
+        .progress-checker-btn {
+            background: linear-gradient(45deg, #007bff, #0056b3);
+            border: none;
+            transition: all 0.3s ease;
+        }
+        
+        .progress-checker-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+        }
+        
         .execution-item {
             border-left: 3px solid #0d6efd;
             padding-left: 1rem;
@@ -240,6 +251,9 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                        <button type="button" class="btn btn-info progress-checker-btn" onclick="checkSymbolProgress()">
+                            <i class="fas fa-chart-line"></i> 進捗詳細確認
+                        </button>
                         <a id="btn-view-strategy-results" href="#" class="btn btn-primary">
                             <i class="fas fa-chart-bar"></i> 戦略結果を見る
                         </a>
@@ -252,6 +266,34 @@
     <!-- JavaScript Dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.5.0/dist/socket.io.min.js"></script>
+    <script src="/static/js/progress_checker.js"></script>
     <script src="{{ url_for('static', filename='js/symbols.js') }}"></script>
+    
+    <script>
+        // 進捗詳細確認のグローバル関数
+        let currentSymbol = null;
+        
+        function checkSymbolProgress() {
+            if (currentSymbol && typeof progressChecker !== 'undefined') {
+                progressChecker.checkProgress(currentSymbol);
+            } else {
+                alert('銘柄が選択されていません');
+            }
+        }
+        
+        // 銘柄詳細モーダルが開かれた時に現在の銘柄を記録
+        document.addEventListener('DOMContentLoaded', function() {
+            const symbolDetailsModal = document.getElementById('symbolDetailsModal');
+            if (symbolDetailsModal) {
+                symbolDetailsModal.addEventListener('show.bs.modal', function(event) {
+                    const button = event.relatedTarget;
+                    if (button) {
+                        currentSymbol = button.getAttribute('data-symbol');
+                        document.getElementById('modal-symbol-name').textContent = currentSymbol;
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html>

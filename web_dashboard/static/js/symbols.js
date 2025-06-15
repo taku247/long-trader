@@ -155,6 +155,8 @@ class SymbolManager {
     createSymbolCard(symbol) {
         const card = document.createElement('div');
         card.className = 'card symbol-card';
+        card.style.cursor = 'pointer';
+        card.onclick = () => this.viewDetails(symbol.symbol);
         
         // Status badge configuration
         const statusConfig = {

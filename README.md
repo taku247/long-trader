@@ -2399,6 +2399,243 @@ UNIFIED_TIME_SERIES_CONFIG = {
 
 このシステム構成により、用途に応じた適切な棲み分けが行われていますが、最も重要な運用システムであるscalable_analysis_system.pyの修正が最優先課題となっています。
 
+## 🚨 条件ベースシグナル生成への修正タスク
+
+### **現在の問題：混在するシグナル生成アプローチ**
+
+システム全体の詳細調査の結果、**条件ベースと強制回数生成の混在**が確認されました。これは本来のトレードロジックに反する実装です。
+
+#### **🔍 調査結果サマリー**
+
+**✅ 正しい条件ベース実装（保持すべき）：**
+- `high_leverage_bot_orchestrator.py` - 純粋な条件ベース分析
+- `time_series_backtest.py` - ML予測+信頼度閾値ベース
+- `real_time_system/monitor.py` - リアルタイム条件監視
+- `proper_backtesting_engine.py` - 適切な信号生成
+- `walk_forward_system.py` - 時系列整合性保持
+
+**🚨 問題のある強制回数生成（修正必要）：**
+- `scalable_analysis_system.py` - **`num_trades=50`で強制的に50回トレード生成**
+- `improved_scalable_analysis_system.py` - **`trades_per_day`による回数指定**
+
+#### **📋 修正すべき具体的箇所**
+
+##### **1. scalable_analysis_system.py（最優先）**
+```python
+# ❌ 現在の問題実装（286-413行目）
+for i in range(num_trades):  # 50回強制実行
+    # 条件無視でトレード生成
+    
+# ✅ 修正後の条件ベース実装
+for timestamp in market_data:
+    signal = analyze_market_conditions(timestamp)
+    if signal.should_enter():
+        execute_trade(signal)
+```
+
+##### **2. improved_scalable_analysis_system.py**
+```python
+# ❌ 現在の問題実装
+'trades_per_day': 20,  # 1日20回強制
+num_trades = int(trades_per_day * data_days)
+
+# ✅ 修正後の条件ベース実装  
+while timestamp < end_time:
+    conditions = evaluate_entry_conditions(timestamp)
+    if conditions.is_favorable():
+        signal = generate_trade_signal(conditions)
+        trades.append(signal)
+```
+
+#### **🛠️ 修正計画**
+
+##### **Phase 1: 即座修正（1-2日）**
+1. **scalable_analysis_system.pyの修正**
+   - `num_trades=50`パラメータの削除
+   - 条件ベースのシグナル生成ロジックに置換
+   - 既存のhigh_leverage_bot_orchestratorとの統合
+
+2. **テストコードによる検証**
+   - 強制回数生成の検知テスト追加
+   - 条件ベース実装の動作確認
+
+##### **Phase 2: 統合改善（3-5日）**
+1. **improved_scalable_analysis_system.pyの修正**
+   - `trades_per_day`概念の削除
+   - 純粋な条件評価システムへの変更
+
+2. **システム統一**
+   - 全コンポーネントでの条件ベースアプローチ統一
+   - 設定ファイルでの閾値・条件パラメータ管理
+
+##### **Phase 3: 検証・最適化（5-7日）**
+1. **品質保証**
+   - 修正後の動作確認テスト
+   - パフォーマンス比較（修正前vs修正後）
+
+2. **ドキュメント更新**
+   - 修正内容の文書化
+   - 条件ベースシグナル生成ガイドの作成
+
+#### **🎯 期待される改善効果**
+
+1. **現実的なトレード結果**
+   - 勝率96%のような非現実的な結果の排除
+   - 実際の市場条件に基づく自然なトレード頻度
+
+2. **システムの整合性向上**
+   - 全コンポーネントでの統一されたアプローチ
+   - メンテナンス性の向上
+
+3. **信頼性のあるバックテスト**
+   - 条件を満たした場合のみのトレード実行
+   - より現実的なパフォーマンス評価
+
+#### **📊 定期実行システムとの関係**
+
+**既存の定期実行スケジュール：**
+- 1分足: 毎時実行 (`scheduled_execution_system.py`)
+- 15分足: 4時間毎実行
+- 1時間足: 日次実行
+- ML学習: 週次、戦略最適化: 月次
+
+**修正後の動作：**
+- 各実行時に条件評価を実施
+- 条件を満たした場合のみシグナル生成
+- トレード回数は結果であり、事前指定なし
+
+この修正により、システム全体が純粋な条件ベースのトレードシステムとなり、より現実的で信頼性の高い結果を提供できるようになります。
+
+## 🐛 発見・修正された重大バグ
+
+### **⚠️ 実際に発生していた問題**
+
+#### **1. NameErrorバグ（Critical）**
+```python
+# scalable_analysis_system.py:265
+print(f"🔄 {symbol} {timeframe} {config}: 高精度分析実行中 (0/{num_trades})")
+# ❌ NameError: name 'num_trades' is not defined
+```
+
+**影響:**
+- 全ての銘柄追加処理が初期段階で失敗
+- エラーが例外処理で隠蔽され「0パターン処理完了」と誤報告
+- テストでも検出されない状態
+
+#### **2. 無限ループ的長時間処理（Critical）**
+```python
+# 実際の処理回数計算
+evaluation_period_days = 90  # 90日間のバックテスト
+evaluation_interval = 4時間  # 1h足での評価間隔
+実際の評価回数 = 90日 × 24時間 ÷ 4時間 = 540回
+
+# 18パターンの銘柄追加では
+総評価回数 = 540回 × 18パターン = 9,720回
+推定処理時間 = 9,720回 × 4秒/回 = 38,880秒 = 10.8時間
+```
+
+**影響:**
+- ETH追加で18パターン → 10.8時間の処理時間
+- 実用不可能な処理時間
+- 大量ログ出力でシステムリソース圧迫
+
+### **✅ 実装された修正**
+
+#### **1. NameErrorバグ修正**
+```python
+# ❌ 修正前
+print(f"🔄 {symbol} {timeframe} {config}: 高精度分析実行中 (0/{num_trades})")
+
+# ✅ 修正後  
+print(f"🔄 {symbol} {timeframe} {config}: 条件ベース分析開始")
+```
+
+#### **2. 処理時間制限の実装**
+```python
+# ✅ 評価回数制限の追加
+max_evaluations = 50  # 540回 → 50回に制限
+
+while current_time <= end_time and total_evaluations < max_evaluations:
+    total_evaluations += 1
+    
+    # 出力抑制で重い分析処理
+    with suppress_all_output():
+        result = bot.analyze_symbol(symbol, timeframe, config)
+```
+
+#### **3. 改善された処理時間**
+```python
+# 修正後の処理時間
+50回 × 18パターン = 900回
+推定処理時間 = 900回 × 4秒/回 ÷ 4並列 = 15分
+実用的な処理時間を実現
+```
+
+### **🧪 バグ検知テストの強化**
+
+#### **1. NameError検知テスト**
+```python
+def test_condition_based_signal_generation(self):
+    try:
+        system._generate_real_analysis('BTC', '1h', 'Conservative_ML')
+    except NameError as ne:
+        self.fail(f"条件ベース分析でNameError: {ne}")
+```
+
+#### **2. 無限ループ検知テスト**
+```python
+def test_no_infinite_loop_in_analysis(self):
+    # 30秒タイムアウトでテスト実行
+    timeout_seconds = 30
+    completed = analysis_completed.wait(timeout=timeout_seconds)
+    
+    if not completed:
+        self.fail(f"条件ベース分析が{timeout_seconds}秒以内に完了しませんでした")
+```
+
+### **🎯 最大評価回数の考察**
+
+#### **現在の設定: 50回**
+```python
+max_evaluations = 50
+処理時間: 約3-4分（18パターン合計）
+評価期間: 90日間の約9%をカバー
+```
+
+#### **代替案の検討**
+
+**A. 100回設定**
+- 処理時間: 約6-8分
+- 評価期間: 約18%をカバー
+- より多くのシグナル機会をキャッチ
+
+**B. 200回設定**  
+- 処理時間: 約12-15分
+- 評価期間: 約37%をカバー
+- 詳細なバックテスト（デイリー実行向け）
+
+**C. 動的設定**
+```python
+# 時間足に応じた最適な評価回数
+max_evaluations_by_timeframe = {
+    '1m': 100,   # 高頻度取引
+    '5m': 80,    # 中頻度取引  
+    '15m': 60,   # スイング取引
+    '1h': 50,    # ポジション取引
+}
+```
+
+#### **推奨設定**
+- **本番環境**: 100回（6-8分）- バランス良い
+- **開発・テスト**: 50回（3-4分）- 高速フィードバック
+- **詳細分析**: 200回（12-15分）- 週末一括実行
+
+**⚙️ 設定変更方法:**
+```python
+# scalable_analysis_system.py:303
+max_evaluations = 100  # 必要に応じて調整
+```
+
 ## 📚 関連ドキュメント
 
 - `README_dashboard.md`: ダッシュボード詳細

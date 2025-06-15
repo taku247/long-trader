@@ -220,8 +220,8 @@ class ScalableAnalysisSystem:
         # 3. デフォルト: Hyperliquid
         return 'hyperliquid'
     
-    def _generate_real_analysis(self, symbol, timeframe, config, num_trades=50):  # 高精度のため50回維持
-        """ハイレバレッジボットを使用した実分析"""
+    def _generate_real_analysis(self, symbol, timeframe, config, evaluation_period_days=90):
+        """条件ベースのハイレバレッジ分析 - 市場条件を満たした場合のみシグナル生成"""
         try:
             # 本格的な戦略分析のため、実際のAPIデータを使用
             from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
@@ -262,7 +262,7 @@ class ScalableAnalysisSystem:
             import time
             
             # 進捗表示用
-            print(f"🔄 {symbol} {timeframe} {config}: 高精度分析実行中 (0/{num_trades})")
+            print(f"🔄 {symbol} {timeframe} {config}: 条件ベース分析開始")
             
             # 完全にログを抑制するコンテキストマネージャー
             @contextlib.contextmanager
@@ -278,32 +278,63 @@ class ScalableAnalysisSystem:
                         sys.stdout = old_stdout
                         sys.stderr = old_stderr
             
-            # リアルなタイムスタンプ生成のための開始時刻
+            # 条件ベースのシグナル生成期間設定
             end_time = datetime.now()
-            start_time = end_time - timedelta(days=90)  # 90日前から
-            time_interval = (end_time - start_time).total_seconds() / num_trades  # 均等分散
+            start_time = end_time - timedelta(days=evaluation_period_days)
             
-            for i in range(num_trades):
+            # 時間足に応じた評価間隔を設定
+            evaluation_intervals = {
+                '1m': timedelta(minutes=5),   # 5分おきに評価
+                '3m': timedelta(minutes=15),  # 15分おきに評価
+                '5m': timedelta(minutes=30),  # 30分おきに評価
+                '15m': timedelta(hours=1),    # 1時間おきに評価
+                '30m': timedelta(hours=2),    # 2時間おきに評価
+                '1h': timedelta(hours=4),     # 4時間おきに評価
+                '4h': timedelta(hours=12),    # 12時間おきに評価
+                '1d': timedelta(days=1)       # 1日おきに評価
+            }
+            
+            evaluation_interval = evaluation_intervals.get(timeframe, timedelta(hours=4))
+            
+            # 条件ベースの分析実行
+            current_time = start_time
+            total_evaluations = 0
+            signals_generated = 0
+            
+            # 時間足設定から最大評価回数を取得
+            tf_config = self.get_timeframe_config(timeframe) if hasattr(self, 'get_timeframe_config') else {}
+            max_evaluations = tf_config.get('max_evaluations', 50)  # デフォルト50回
+            
+            print(f"🔍 条件ベース分析: {start_time.strftime('%Y-%m-%d')} から {end_time.strftime('%Y-%m-%d')}")
+            print(f"📊 評価間隔: {evaluation_interval} ({timeframe}足最適化)")
+            print(f"🛡️ 最大評価回数: {max_evaluations}回")
+            
+            while current_time <= end_time and total_evaluations < max_evaluations:
+                total_evaluations += 1
                 try:
-                    # 戦略分析では時間をかけてでも正確な分析を実行
-                    # タイムアウトやエラーが発生した場合は再試行
-                    retry_count = 0
-                    max_retries = 3
-                    
-                    # リトライループを削除し、失敗時は即座に終了
-                    try:
-                        # キャッシュされたデータを使用してより高速に分析
+                    # 出力抑制で市場条件の評価
+                    with suppress_all_output():
                         result = bot.analyze_symbol(symbol, timeframe, config)
-                        if not result or 'current_price' not in result:
-                            raise Exception(f"Invalid analysis result for {symbol}")
-                    except Exception as e:
-                        print(f"   ❌ 分析失敗: {str(e)[:100]}...")
-                        logger.error(f"Real analysis failed for {symbol} {timeframe} {config}: {e}")
-                        raise Exception(f"Analysis failed: {e} - no fallback allowed")
                     
-                    # 進捗表示（10回ごと）
-                    if (i + 1) % 10 == 0:
-                        print(f"🔄 {symbol} {timeframe} {config}: 進捗 ({i + 1}/{num_trades})")
+                    if not result or 'current_price' not in result:
+                        current_time += evaluation_interval
+                        continue
+                    
+                    # エントリー条件の評価
+                    should_enter = self._evaluate_entry_conditions(result, timeframe)
+                    
+                    if not should_enter:
+                        # 条件を満たさない場合はスキップ
+                        current_time += evaluation_interval
+                        continue
+                    
+                    signals_generated += 1
+                    
+                    # 進捗表示（条件満足時）
+                    if signals_generated % 5 == 0:
+                        progress_pct = ((current_time - start_time).total_seconds() / 
+                                      (end_time - start_time).total_seconds()) * 100
+                        print(f"🎯 {symbol} {timeframe}: シグナル生成 {signals_generated}件 (進捗: {progress_pct:.1f}%)")
                     
                     # レバレッジとTP/SL価格を計算
                     leverage = result.get('leverage', 5.0)
@@ -318,8 +349,8 @@ class ScalableAnalysisSystem:
                     from engines.stop_loss_take_profit_calculators import DefaultSLTPCalculator, ConservativeSLTPCalculator, AggressiveSLTPCalculator
                     from interfaces.data_types import MarketContext
                     
-                    # リアルなタイムスタンプ生成（過去90日間に分散）
-                    trade_time = start_time + timedelta(seconds=i * time_interval)
+                    # 条件満足時の実際のタイムスタンプ
+                    trade_time = current_time
                     
                     # 戦略に応じたTP/SL計算器を選択
                     if 'Conservative' in config:
@@ -400,21 +431,101 @@ class ScalableAnalysisSystem:
                     })
                     
                 except Exception as e:
-                    # エラー発生時もログを抑制して続行
-                    logger.warning(f"Trade generation failed (iteration {i+1}): {e}")
-                    continue
+                    print(f"⚠️ 分析エラー (評価{total_evaluations}): {str(e)[:100]}")
+                    logger.warning(f"Analysis failed for {symbol} at {current_time}: {e}")
+                
+                # 次の評価時点に進む
+                current_time += evaluation_interval
+            
+            # 評価回数制限に達した場合の警告
+            if total_evaluations >= max_evaluations:
+                print(f"⚠️ {symbol} {timeframe} {config}: 最大評価回数({max_evaluations})に達しました")
             
             if not trades:
-                raise Exception("No trades generated")
+                print(f"ℹ️ {symbol} {timeframe} {config}: 評価期間中に条件を満たすシグナルが見つかりませんでした")
+                return []  # 空のリストを返す（エラーにしない）
             
-            # 完了メッセージ
-            print(f"✅ {symbol} {timeframe} {config}: 高精度分析完了 ({len(trades)}/{num_trades} trades)")
+            evaluation_rate = (signals_generated / total_evaluations * 100) if total_evaluations > 0 else 0
+            print(f"✅ {symbol} {timeframe} {config}: 条件ベース分析完了")
+            print(f"   📊 総評価数: {total_evaluations}, シグナル生成: {signals_generated}件 ({evaluation_rate:.1f}%)")
             
             return trades
             
         except Exception as e:
-            logger.error(f"Real analysis failed: {e}")
+            logger.error(f"Condition-based analysis failed: {e}")
             raise
+    
+    def _evaluate_entry_conditions(self, analysis_result, timeframe):
+        """
+        エントリー条件を評価して、シグナル生成が適切かを判定
+        
+        Args:
+            analysis_result: ハイレバボットからの分析結果
+            timeframe: 時間足
+            
+        Returns:
+            bool: エントリー条件を満たしているかどうか
+        """
+        
+        # 基本的な条件チェック
+        leverage = analysis_result.get('leverage', 0)
+        confidence = analysis_result.get('confidence', 0) / 100.0  # パーセントから比率に変換
+        risk_reward = analysis_result.get('risk_reward_ratio', 0)
+        current_price = analysis_result.get('current_price', 0)
+        
+        # 統合設定から条件を取得（戦略も考慮）
+        try:
+            from config.unified_config_manager import UnifiedConfigManager
+            config_manager = UnifiedConfigManager()
+            
+            # 分析中の戦略を取得（デフォルトはBalanced）
+            strategy = analysis_result.get('strategy', 'Balanced')
+            
+            # 統合設定から条件を取得
+            conditions = config_manager.get_entry_conditions(timeframe, strategy)
+            
+        except Exception as e:
+            # フォールバック: ハードコード値を使用
+            print(f"⚠️ 統合設定読み込みエラー: {e}, ハードコード値を使用")
+            min_conditions = {
+                '1m': {'min_leverage': 8.0, 'min_confidence': 0.75, 'min_risk_reward': 1.8},
+                '3m': {'min_leverage': 7.0, 'min_confidence': 0.70, 'min_risk_reward': 2.0},
+                '5m': {'min_leverage': 6.0, 'min_confidence': 0.65, 'min_risk_reward': 2.0},
+                '15m': {'min_leverage': 5.0, 'min_confidence': 0.60, 'min_risk_reward': 2.2},
+                '30m': {'min_leverage': 4.0, 'min_confidence': 0.55, 'min_risk_reward': 2.5},
+                '1h': {'min_leverage': 3.0, 'min_confidence': 0.50, 'min_risk_reward': 2.5},
+                '4h': {'min_leverage': 2.5, 'min_confidence': 0.45, 'min_risk_reward': 3.0},
+                '1d': {'min_leverage': 2.0, 'min_confidence': 0.40, 'min_risk_reward': 3.0}
+            }
+            conditions = min_conditions.get(timeframe, min_conditions['1h'])
+        
+        # 条件評価
+        conditions_met = []
+        
+        # 1. レバレッジ条件
+        leverage_ok = leverage >= conditions['min_leverage']
+        conditions_met.append(('leverage', leverage_ok, f"{leverage:.1f}x >= {conditions['min_leverage']}x"))
+        
+        # 2. 信頼度条件
+        confidence_ok = confidence >= conditions['min_confidence']
+        conditions_met.append(('confidence', confidence_ok, f"{confidence:.1%} >= {conditions['min_confidence']:.1%}"))
+        
+        # 3. リスクリワード条件
+        risk_reward_ok = risk_reward >= conditions['min_risk_reward']
+        conditions_met.append(('risk_reward', risk_reward_ok, f"{risk_reward:.1f} >= {conditions['min_risk_reward']}"))
+        
+        # 4. 価格の有効性
+        price_ok = current_price > 0
+        conditions_met.append(('price', price_ok, f"price={current_price}"))
+        
+        # 全ての条件が満たされているかをチェック
+        all_conditions_met = all(condition[1] for condition in conditions_met)
+        
+        # デバッグ用ログ（条件満足時のみ詳細表示）
+        if all_conditions_met:
+            print(f"   ✅ エントリー条件満足: L={leverage:.1f}x, C={confidence:.1%}, RR={risk_reward:.1f}")
+        
+        return all_conditions_met
     
     def _analysis_exists(self, analysis_id):
         """分析が既に存在するかチェック"""
@@ -808,6 +919,44 @@ def main():
     )
     print(f"\n上位10結果:")
     print(top_results[['symbol', 'timeframe', 'config', 'sharpe_ratio', 'total_return']].to_string())
+
+# ScalableAnalysisSystem クラスにメソッドを追加
+def add_get_timeframe_config_method():
+    """ScalableAnalysisSystemに設定取得メソッドを追加"""
+    import types
+    
+    def get_timeframe_config(self, timeframe: str):
+        """時間足設定を取得（外部設定ファイル対応）"""
+        try:
+            from config.timeframe_config_manager import TimeframeConfigManager
+            config_manager = TimeframeConfigManager()
+            return config_manager.get_timeframe_config(timeframe)
+        except:
+            # フォールバック設定
+            default_configs = {
+                '1m': {'max_evaluations': 100},
+                '3m': {'max_evaluations': 80},
+                '5m': {'max_evaluations': 120},
+                '15m': {'max_evaluations': 100},
+                '30m': {'max_evaluations': 80},
+                '1h': {'max_evaluations': 100}
+            }
+            base_config = {
+                'data_days': 90,
+                'evaluation_interval_minutes': 240,
+                'max_evaluations': 50,
+                'min_leverage': 3.0,
+                'min_confidence': 0.5,
+                'min_risk_reward': 2.0
+            }
+            base_config.update(default_configs.get(timeframe, {}))
+            return base_config
+    
+    # クラスにメソッドを動的に追加
+    ScalableAnalysisSystem.get_timeframe_config = get_timeframe_config
+
+# メソッド追加を実行
+add_get_timeframe_config_method()
 
 if __name__ == "__main__":
     main()

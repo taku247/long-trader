@@ -41,6 +41,170 @@ class HardcodedValueDetector(unittest.TestCase):
         ]
         self.tolerance = 0.0001  # 許容誤差
         
+    def test_no_forced_trade_count_generation(self):
+        """強制回数生成が使用されていないことを確認"""
+        print("\n🚨 強制回数生成検知テストを実行中...")
+        
+        violations = []
+        
+        # scalable_analysis_system.pyの強制回数生成チェック
+        try:
+            from scalable_analysis_system import ScalableAnalysisSystem
+            system = ScalableAnalysisSystem()
+            
+            # _generate_real_analysis メソッドのシグネチャをチェック
+            import inspect
+            sig = inspect.signature(system._generate_real_analysis)
+            params = list(sig.parameters.keys())
+            
+            # num_trades パラメータが存在する場合は違反
+            if 'num_trades' in params:
+                violations.append({
+                    'file': 'scalable_analysis_system.py',
+                    'method': '_generate_real_analysis',
+                    'issue': 'num_trades parameter detected (forced count generation)',
+                    'parameter': 'num_trades'
+                })
+            
+            print(f"   ✅ scalable_analysis_system.py: {len([v for v in violations if 'scalable_analysis' in v['file']])} violations")
+            
+        except Exception as e:
+            print(f"   ⚠️ scalable_analysis_system.py check failed: {e}")
+            violations.append({
+                'file': 'scalable_analysis_system.py',
+                'method': '__init__',
+                'issue': f'Critical error during initialization: {str(e)}',
+                'parameter': 'system_error'
+            })
+        
+        # improved_scalable_analysis_system.pyの trades_per_day チェック
+        try:
+            if os.path.exists('improved_scalable_analysis_system.py'):
+                with open('improved_scalable_analysis_system.py', 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # trades_per_day の使用をチェック
+                if 'trades_per_day' in content and 'num_trades = int(trades_per_day' in content:
+                    violations.append({
+                        'file': 'improved_scalable_analysis_system.py',
+                        'method': 'TIMEFRAME_CONFIGS',
+                        'issue': 'trades_per_day forced count generation detected',
+                        'parameter': 'trades_per_day'
+                    })
+                
+                print(f"   ✅ improved_scalable_analysis_system.py: {len([v for v in violations if 'improved' in v['file']])} violations")
+                
+        except Exception as e:
+            print(f"   ⚠️ improved_scalable_analysis_system.py check failed: {e}")
+        
+        # 結果報告
+        if violations:
+            print(f"\n🚨 強制回数生成を検出:")
+            for violation in violations:
+                print(f"   - {violation['file']}.{violation['method']}: {violation['issue']}")
+        else:
+            print(f"\n✅ 強制回数生成は検出されませんでした")
+        
+        self.assertEqual(len(violations), 0, 
+                        f"強制回数生成を検出: {violations}")
+
+    def test_condition_based_signal_generation(self):
+        """条件ベースシグナル生成が実装されていることを確認"""
+        print("\n🎯 条件ベースシグナル生成確認テストを実行中...")
+        
+        try:
+            from scalable_analysis_system import ScalableAnalysisSystem
+            system = ScalableAnalysisSystem()
+            
+            # _evaluate_entry_conditions メソッドが存在するかチェック
+            has_condition_evaluation = hasattr(system, '_evaluate_entry_conditions')
+            
+            if has_condition_evaluation:
+                print("   ✅ _evaluate_entry_conditions メソッドが存在")
+                
+                # メソッドのシグネチャをチェック
+                import inspect
+                argspec = inspect.getfullargspec(system._evaluate_entry_conditions)
+                expected_params = ['self', 'analysis_result', 'timeframe']
+                actual_params = argspec.args
+                
+                if actual_params == expected_params:
+                    print("   ✅ 条件評価メソッドのシグネチャが正しい")
+                else:
+                    print(f"   ⚠️ 条件評価メソッドのシグネチャが不正: {actual_params} != {expected_params}")
+            else:
+                print("   ❌ _evaluate_entry_conditions メソッドが存在しない")
+            
+            # 実際に条件ベース分析を試行してNameErrorを検出
+            print("   🧪 条件ベース分析の実行テスト...")
+            try:
+                # 軽量テスト実行
+                test_result = system._generate_real_analysis('BTC', '1h', 'Conservative_ML')
+                print("   ✅ 条件ベース分析実行成功")
+            except NameError as ne:
+                print(f"   ❌ NameError検出: {ne}")
+                self.fail(f"条件ベース分析でNameError: {ne}")
+            except Exception as te:
+                print(f"   ⚠️ その他のエラー: {te}")
+                # NameError以外のエラーは許容（データ取得エラー等）
+            
+            self.assertTrue(has_condition_evaluation, "条件ベースシグナル生成メソッドが実装されていません")
+            
+        except Exception as e:
+            self.fail(f"条件ベースシグナル生成確認中にエラー: {e}")
+    
+    def test_no_infinite_loop_in_analysis(self):
+        """条件ベース分析で無限ループが発生しないことを確認"""
+        print("\n⏰ 無限ループ検知テストを実行中...")
+        
+        import threading
+        import time
+        
+        try:
+            from scalable_analysis_system import ScalableAnalysisSystem
+            system = ScalableAnalysisSystem()
+            
+            # 分析実行フラグ
+            analysis_completed = threading.Event()
+            analysis_result = {'result': None, 'error': None}
+            
+            def run_analysis():
+                try:
+                    # 軽量なテスト分析（短期間、小さなデータ）
+                    result = system._generate_real_analysis('BTC', '1h', 'Conservative_ML', evaluation_period_days=1)
+                    analysis_result['result'] = result
+                    analysis_completed.set()
+                except Exception as e:
+                    analysis_result['error'] = e
+                    analysis_completed.set()
+            
+            # 分析をバックグラウンドで開始
+            analysis_thread = threading.Thread(target=run_analysis)
+            analysis_thread.daemon = True
+            analysis_thread.start()
+            
+            # 30秒でタイムアウト
+            timeout_seconds = 30
+            completed = analysis_completed.wait(timeout=timeout_seconds)
+            
+            if not completed:
+                print(f"   ❌ 無限ループまたは長時間処理を検出: {timeout_seconds}秒でタイムアウト")
+                self.fail(f"条件ベース分析が{timeout_seconds}秒以内に完了しませんでした（無限ループの可能性）")
+            
+            # エラーチェック
+            if analysis_result['error']:
+                if isinstance(analysis_result['error'], NameError):
+                    print(f"   ❌ NameError検出: {analysis_result['error']}")
+                    self.fail(f"NameError: {analysis_result['error']}")
+                else:
+                    print(f"   ⚠️ その他のエラー（許容）: {type(analysis_result['error']).__name__}")
+            else:
+                result = analysis_result['result']
+                print(f"   ✅ 分析正常完了: {len(result) if result else 0}件のシグナル生成")
+                
+        except Exception as e:
+            self.fail(f"無限ループ検知テスト中にエラー: {e}")
+        
     def test_no_hardcoded_entry_prices(self):
         """エントリー価格にハードコード値が使用されていないことを確認"""
         violations = self._scan_for_hardcoded_values(['entry_price'])

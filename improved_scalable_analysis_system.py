@@ -16,6 +16,9 @@ from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 
+# 設定管理
+from config.timeframe_config_manager import TimeframeConfigManager
+
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -32,73 +35,16 @@ class ImprovedScalableAnalysisSystem:
     4. リアリスティックなトレード分布
     """
     
-    # 時間足別の設定
-    TIMEFRAME_CONFIGS = {
-        '1m': {
-            'data_days': 14,           # データ取得期間
-            'trades_per_day': 20,      # 1日あたりのトレード数
-            'min_train_samples': 2000,  # 最小学習サンプル数
-            'train_ratio': 0.7,        # 学習データ比率
-            'val_ratio': 0.15,         # 検証データ比率
-            'test_ratio': 0.15,        # テストデータ比率
-            'trade_distribution': 'concentrated',  # 取引時間帯に集中
-            'active_hours': [9, 10, 11, 14, 15, 16, 20, 21]  # アクティブな時間帯（JST）
-        },
-        '3m': {
-            'data_days': 30,
-            'trades_per_day': 10,
-            'min_train_samples': 1500,
-            'train_ratio': 0.7,
-            'val_ratio': 0.15,
-            'test_ratio': 0.15,
-            'trade_distribution': 'concentrated',
-            'active_hours': [9, 10, 11, 14, 15, 16, 20, 21]
-        },
-        '5m': {
-            'data_days': 60,
-            'trades_per_day': 8,
-            'min_train_samples': 1000,
-            'train_ratio': 0.6,
-            'val_ratio': 0.2,
-            'test_ratio': 0.2,
-            'trade_distribution': 'semi_concentrated',
-            'active_hours': [9, 10, 11, 14, 15, 16, 17, 20, 21]
-        },
-        '15m': {
-            'data_days': 90,
-            'trades_per_day': 4,
-            'min_train_samples': 800,
-            'train_ratio': 0.6,
-            'val_ratio': 0.2,
-            'test_ratio': 0.2,
-            'trade_distribution': 'semi_concentrated',
-            'active_hours': range(9, 22)  # 9:00-21:00 JST
-        },
-        '30m': {
-            'data_days': 120,
-            'trades_per_day': 2,
-            'min_train_samples': 600,
-            'train_ratio': 0.6,
-            'val_ratio': 0.2,
-            'test_ratio': 0.2,
-            'trade_distribution': 'uniform',
-            'active_hours': range(9, 22)
-        },
-        '1h': {
-            'data_days': 180,
-            'trades_per_day': 1,
-            'min_train_samples': 500,
-            'train_ratio': 0.6,
-            'val_ratio': 0.2,
-            'test_ratio': 0.2,
-            'trade_distribution': 'uniform',
-            'active_hours': range(9, 22)
-        }
-    }
+    # 時間足設定は外部ファイルから読み込み
+    # config/timeframe_conditions.json を参照
     
-    def __init__(self, base_dir="improved_analysis"):
+    def __init__(self, base_dir="improved_analysis", config_file=None):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(exist_ok=True)
+        
+        # 設定管理の初期化
+        self.config_manager = TimeframeConfigManager(config_file)
+        print(f"✅ 時間足設定を外部ファイルから読み込み完了")
         
         # ディレクトリ構造
         self.db_path = self.base_dir / "analysis.db"
@@ -159,12 +105,12 @@ class ImprovedScalableAnalysisSystem:
             conn.commit()
     
     def get_timeframe_config(self, timeframe: str) -> dict:
-        """時間足に応じた設定を取得"""
-        return self.TIMEFRAME_CONFIGS.get(timeframe, self.TIMEFRAME_CONFIGS['1h'])
+        """時間足に応じた設定を取得（外部設定ファイルから）"""
+        return self.config_manager.get_timeframe_config(timeframe)
     
-    def _generate_real_analysis(self, symbol, timeframe, config, num_trades=None):
+    def _generate_real_analysis(self, symbol, timeframe, config, evaluation_period_days=None):
         """
-        改善版：時間足に応じた適切なトレード生成
+        改善版：時間足に応じた条件ベースシグナル生成
         """
         try:
             from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
@@ -172,15 +118,13 @@ class ImprovedScalableAnalysisSystem:
             # 時間足別の設定を取得
             tf_config = self.get_timeframe_config(timeframe)
             
-            # トレード数の決定
-            if num_trades is None:
-                data_days = tf_config['data_days']
-                trades_per_day = tf_config['trades_per_day']
-                num_trades = int(trades_per_day * data_days)
+            # 評価期間の決定
+            if evaluation_period_days is None:
+                evaluation_period_days = tf_config['data_days']
             
-            print(f"🎯 改善版分析を開始: {symbol} {timeframe} {config}")
-            print(f"   📊 データ期間: {tf_config['data_days']}日")
-            print(f"   🔄 トレード数: {num_trades} ({tf_config['trades_per_day']}/日)")
+            print(f"🎯 改善版条件ベース分析を開始: {symbol} {timeframe} {config}")
+            print(f"   📊 データ期間: {evaluation_period_days}日")
+            print(f"   🎯 条件ベース評価: 市場条件を満たした場合のみシグナル生成")
             print(f"   📈 分割比: Train={tf_config['train_ratio']:.0%}, Val={tf_config['val_ratio']:.0%}, Test={tf_config['test_ratio']:.0%}")
             
             # 取引所設定
@@ -202,12 +146,13 @@ class ImprovedScalableAnalysisSystem:
             else:
                 bot = self._bot_cache[bot_key]
             
-            # トレード生成
-            trades = self._generate_realistic_trades(
-                bot, symbol, timeframe, config, num_trades, tf_config
+            # 条件ベーストレード生成
+            trades = self._generate_condition_based_trades(
+                bot, symbol, timeframe, config, evaluation_period_days, tf_config
             )
             
-            print(f"✅ {symbol} {timeframe} {config}: 分析完了 ({len(trades)} trades)")
+            signals_count = len(trades)
+            print(f"✅ {symbol} {timeframe} {config}: 条件ベース分析完了 ({signals_count} signals)")
             
             return trades
             
@@ -215,45 +160,105 @@ class ImprovedScalableAnalysisSystem:
             logger.error(f"Real analysis failed: {e}")
             raise
     
-    def _generate_realistic_trades(self, bot, symbol, timeframe, config, 
-                                  num_trades, tf_config):
-        """リアリスティックなトレード分布を生成"""
+    def _generate_condition_based_trades(self, bot, symbol, timeframe, config,
+                                        evaluation_period_days, tf_config):
+        """条件ベースのトレード生成 - 市場条件を満たした場合のみシグナル生成"""
         trades = []
         
         # 期間設定
-        data_days = tf_config['data_days']
         end_time = datetime.now()
-        start_time = end_time - timedelta(days=data_days)
+        start_time = end_time - timedelta(days=evaluation_period_days)
         
-        # トレード分布の生成
-        trade_timestamps = self._generate_trade_timestamps(
-            start_time, end_time, num_trades, tf_config
-        )
+        # 評価間隔設定
+        evaluation_interval = timedelta(minutes=tf_config['evaluation_interval_minutes'])
         
-        for i, trade_time in enumerate(trade_timestamps):
+        # 条件ベース評価の実行
+        current_time = start_time
+        total_evaluations = 0
+        signals_generated = 0
+        
+        print(f"🔍 条件ベース評価: {start_time.strftime('%Y-%m-%d')} から {end_time.strftime('%Y-%m-%d')}")
+        print(f"📊 評価間隔: {tf_config['evaluation_interval_minutes']}分おき")
+        
+        while current_time <= end_time:
+            total_evaluations += 1
             try:
-                # 分析実行
+                # 市場条件の評価
                 result = bot.analyze_symbol(symbol, timeframe, config)
                 if not result or 'current_price' not in result:
+                    current_time += evaluation_interval
                     continue
+                
+                # エントリー条件の評価
+                should_enter = self._evaluate_entry_conditions_improved(result, tf_config)
+                
+                if not should_enter:
+                    # 条件を満たさない場合はスキップ
+                    current_time += evaluation_interval
+                    continue
+                
+                signals_generated += 1
                 
                 # トレード情報の生成
                 trade_info = self._create_trade_info(
-                    result, config, trade_time, timeframe
+                    result, config, current_time, timeframe
                 )
                 
                 trades.append(trade_info)
                 
                 # 進捗表示
-                if (i + 1) % max(1, num_trades // 10) == 0:
-                    progress = (i + 1) / num_trades * 100
-                    print(f"   進捗: {progress:.0f}% ({i + 1}/{num_trades})")
+                if signals_generated % 5 == 0:
+                    progress_pct = ((current_time - start_time).total_seconds() / 
+                                  (end_time - start_time).total_seconds()) * 100
+                    print(f"   🎯 シグナル生成: {signals_generated}件 (進捗: {progress_pct:.1f}%)")
                 
             except Exception as e:
-                logger.warning(f"Trade generation failed (iteration {i+1}): {e}")
-                continue
+                logger.warning(f"Analysis failed at {current_time}: {e}")
+            
+            # 次の評価時点に進む
+            current_time += evaluation_interval
+        
+        evaluation_rate = (signals_generated / total_evaluations * 100) if total_evaluations > 0 else 0
+        print(f"📊 総評価数: {total_evaluations}, シグナル生成: {signals_generated}件 ({evaluation_rate:.1f}%)")
         
         return trades
+    
+    def _evaluate_entry_conditions_improved(self, analysis_result, tf_config):
+        """
+        改善版エントリー条件評価
+        
+        Args:
+            analysis_result: ハイレバボットからの分析結果
+            tf_config: 時間足設定
+            
+        Returns:
+            bool: エントリー条件を満たしているかどうか
+        """
+        
+        # 基本的な条件チェック
+        leverage = analysis_result.get('leverage', 0)
+        confidence = analysis_result.get('confidence', 0) / 100.0
+        risk_reward = analysis_result.get('risk_reward_ratio', 0)
+        current_price = analysis_result.get('current_price', 0)
+        
+        # 設定から最小条件を取得
+        min_leverage = tf_config.get('min_leverage', 3.0)
+        min_confidence = tf_config.get('min_confidence', 0.5)
+        min_risk_reward = tf_config.get('min_risk_reward', 2.0)
+        
+        # 条件評価
+        leverage_ok = leverage >= min_leverage
+        confidence_ok = confidence >= min_confidence
+        risk_reward_ok = risk_reward >= min_risk_reward
+        price_ok = current_price > 0
+        
+        all_conditions_met = all([leverage_ok, confidence_ok, risk_reward_ok, price_ok])
+        
+        # 条件満足時のログ
+        if all_conditions_met:
+            print(f"   ✅ エントリー条件満足: L={leverage:.1f}x, C={confidence:.1%}, RR={risk_reward:.1f}")
+        
+        return all_conditions_met
     
     def _generate_trade_timestamps(self, start_time, end_time, num_trades, tf_config):
         """リアリスティックなトレードタイムスタンプを生成"""

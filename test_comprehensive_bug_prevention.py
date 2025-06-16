@@ -554,12 +554,12 @@ def run_comprehensive_tests():
     if result.failures:
         print("\n❌ 失敗したテスト:")
         for test, traceback in result.failures:
-            print(f"  - {test}: {traceback.split('AssertionError: ')[-1].split('\\n')[0]}")
+            print(f"  - {test}: {traceback.split('AssertionError: ')[-1].split(chr(10))[0]}")
     
     if result.errors:
         print("\n💥 エラーが発生したテスト:")
         for test, traceback in result.errors:
-            print(f"  - {test}: {traceback.split('\\n')[-2]}")
+            print(f"  - {test}: {traceback.split(chr(10))[-2]}")
     
     if result.skipped:
         print("\n⏭️ スキップされたテスト:")

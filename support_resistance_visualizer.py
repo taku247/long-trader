@@ -138,11 +138,16 @@ def calculate_level_details(cluster, df, window=10):
     recency_weight = 0.02  # 最近性の重み
     volume_weight = 10  # 出来高スパイクの重み
     
-    strength = (touch_count * touch_weight + 
-                avg_bounce * bounce_weight + 
-                time_span * time_weight - 
-                recency * recency_weight +
-                avg_volume_spike * volume_weight)
+    # 生の強度計算
+    raw_strength = (touch_count * touch_weight + 
+                    avg_bounce * bounce_weight + 
+                    time_span * time_weight - 
+                    recency * recency_weight +
+                    avg_volume_spike * volume_weight)
+    
+    # 強度を0.0-1.0の範囲に正規化
+    # 一般的に強度は0-200の範囲になるため、適切にスケーリング
+    strength = min(max(raw_strength / 200.0, 0.0), 1.0)
     
     return {
         'price': level_price,

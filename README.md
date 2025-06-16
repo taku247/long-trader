@@ -3081,4 +3081,128 @@ python run_all_validation_tests.py
 
 ---
 
+## ⏰ タイムゾーン対応状況
+
+### 📊 現在の状況
+システム全体のタイムゾーン処理は**混在状態**で、統一されていません：
+
+| 分野 | 現在の状況 | 問題点 |
+|------|----------|--------|
+| **OHLCVデータ取得** | 部分的にUTC対応 | naive datetimeオブジェクト多数 |
+| **データベース** | ローカル時間で保存 | UTC統一されていない |
+| **Webダッシュボード** | 混在状態 | UTC/JST/ローカル時間が混在 |
+| **バックテスト** | 手動JST変換 | `+timedelta(hours=9)`のハードコード |
+| **API処理** | 取引所ごとに異なる | 統一されたタイムゾーン処理なし |
+
+### 🚨 主要な問題点
+
+#### 1. **Naive Datetimeオブジェクト**
+```python
+# ❌ 問題のある例
+datetime.fromtimestamp(candle["t"] / 1000)  # tzinfo=None
+
+# ✅ 改善案
+datetime.fromtimestamp(candle["t"] / 1000, tz=timezone.utc)
+```
+
+#### 2. **手動タイムゾーン変換**
+```python
+# ❌ 危険な手動変換 (scalable_analysis_system.py:424)
+jst_entry_time = trade_time + timedelta(hours=9)
+
+# ✅ 推奨方法
+import pytz
+jst = pytz.timezone('Asia/Tokyo')
+jst_entry_time = trade_time.astimezone(jst)
+```
+
+#### 3. **非推奨メソッドの使用**
+```python
+# ❌ 非推奨
+datetime.utcfromtimestamp(timestamp)
+
+# ✅ 推奨
+datetime.fromtimestamp(timestamp, tz=timezone.utc)
+```
+
+### 🎯 改善計画
+
+#### **Phase 1: データ取得層の統一** (優先度: 🔴 高)
+- APIからのOHLCVデータをUTCに統一
+- naive datetimeの排除
+- 非推奨メソッドの置換
+
+#### **Phase 2: データベース層の統一** (優先度: 🔴 高)
+- SQLite保存時のUTC統一
+- タイムスタンプカラムの統一仕様
+
+#### **Phase 3: 表示層のローカライゼーション** (優先度: 🟡 中)
+- Webダッシュボードでの適切なタイムゾーン表示
+- ユーザー設定による表示タイムゾーン選択
+
+### 💡 推奨される開発パターン
+
+#### **データ処理（内部）**
+```python
+from datetime import datetime, timezone
+
+# ✅ システム内部は常にUTC
+utc_time = datetime.now(timezone.utc)
+```
+
+#### **表示処理（ユーザー向け）**
+```python
+import pytz
+
+def to_jst_display(utc_datetime):
+    """UTC時間をJST表示用に変換"""
+    if utc_datetime.tzinfo is None:
+        utc_datetime = utc_datetime.replace(tzinfo=timezone.utc)
+    
+    jst = pytz.timezone('Asia/Tokyo')
+    return utc_datetime.astimezone(jst)
+```
+
+### 📋 各コンポーネントの対応状況
+
+#### ✅ **対応済み**
+- `scalable_analysis_system.py`: timezone import追加
+- 一部APIクライアントでのタイムゾーン考慮処理
+
+#### ⚠️ **部分対応**
+- `hyperliquid_api_client.py`: Gate.io OHLCVでの一部タイムゾーン処理
+- `web_dashboard/app.py`: 一部でUTC使用
+
+#### ❌ **未対応**
+- データベース層の統一
+- 手動タイムゾーン変換の修正
+- 非推奨メソッドの置換
+- 表示層の統一
+
+### 🔧 開発者向けガイドライン
+
+#### **新規開発時**
+```python
+# ❌ 避けるべきパターン
+datetime.now()                    # ローカル時間
+datetime.utcnow()                # 非推奨
+trade_time + timedelta(hours=9)   # 手動変換
+
+# ✅ 推奨パターン
+datetime.now(timezone.utc)        # UTC統一
+pytz.timezone('Asia/Tokyo')       # 適切なタイムゾーン処理
+```
+
+#### **既存コード修正時**
+1. naive datetimeを見つけたらtzinfo付きに変更
+2. 手動の+9時間変換を適切なライブラリ使用に変更
+3. 表示時のみローカライゼーションを実装
+
+### ⚠️ 注意事項
+- **現在のバックテスト結果**: 時刻表示にJST/UTCの混在があります
+- **データベースデータ**: 既存データのタイムゾーンが不明確な場合があります
+- **時間比較処理**: 異なるタイムゾーンのデータ比較時は要注意
+
+---
+
 **⚠️ 免責事項**: このシステムは教育・研究目的のツールです。実際の取引には十分な検証とリスク管理を行ってください。

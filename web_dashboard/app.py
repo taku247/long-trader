@@ -1758,6 +1758,58 @@ class WebDashboard:
             except Exception as e:
                 self.logger.error(f"Error in migration execution: {e}")
                 return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/symbol/<symbol>/delete', methods=['DELETE'])
+        def api_delete_symbol_data(symbol):
+            """銘柄の全分析データを削除"""
+            try:
+                # 実行中チェック - 実際にプロセスが動いているかを確認
+                import sqlite3
+                import os
+                import subprocess
+                
+                # プロセスレベルでの実行中チェック
+                try:
+                    process_check = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+                    running_processes = process_check.stdout
+                    
+                    # 銘柄に関連するプロセスがあるかチェック
+                    symbol_process_running = any(
+                        symbol.lower() in line.lower() and 'python' in line.lower() 
+                        for line in running_processes.split('\n')
+                    )
+                    
+                    if symbol_process_running:
+                        self.logger.warning(f"Cannot delete {symbol}: actual process is running")
+                        return jsonify({
+                            'error': f'{symbol}の分析が実行中です。完了後に削除してください。',
+                            'running_executions': ['process_detected']
+                        }), 400
+                    else:
+                        self.logger.info(f"No actual process running for {symbol}, proceeding with deletion")
+                        
+                except Exception as e:
+                    self.logger.warning(f"Process check failed: {e}, proceeding with deletion")
+                
+                # 削除実行
+                result = self._delete_symbol_complete(symbol)
+                
+                if result['errors']:
+                    return jsonify({
+                        'status': 'partial_success',
+                        'message': f'{symbol}のデータを部分的に削除しました',
+                        'result': result
+                    }), 207  # Multi-Status
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': f'{symbol}のデータを完全削除しました',
+                    'result': result
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error deleting symbol data: {e}")
+                return jsonify({'error': str(e)}), 500
     
     def _check_symbol_execution_status(self, exec_db, symbol, completed_patterns, latest_completion):
         """Check if symbol analysis has failed or stalled."""
@@ -1815,6 +1867,140 @@ class WebDashboard:
         except Exception as e:
             self.logger.error(f"Error checking execution status for {symbol}: {e}")
             return 'unknown', None
+    
+    def _delete_symbol_complete(self, symbol: str) -> dict:
+        """銘柄の全データを安全に削除"""
+        import glob
+        import os
+        import json
+        import sqlite3
+        from datetime import datetime
+        
+        results = {
+            'symbol': symbol,
+            'deleted': {
+                'analyses': 0,
+                'alerts': 0, 
+                'price_tracking': 0,
+                'performance_summary': 0,
+                'files': 0
+            },
+            'updated': {
+                'execution_logs': 0
+            },
+            'errors': []
+        }
+        
+        try:
+            # 1. analysis.db から削除（CASCADE）
+            analysis_db_path = 'large_scale_analysis/analysis.db'
+            if os.path.exists(analysis_db_path):
+                with sqlite3.connect(analysis_db_path) as conn:
+                    cursor = conn.cursor()
+                    
+                    # 関連テーブルのデータも削除（テーブルが存在する場合のみ）
+                    try:
+                        cursor.execute("DELETE FROM backtest_summary WHERE analysis_id IN (SELECT id FROM analyses WHERE symbol=?)", (symbol,))
+                    except sqlite3.OperationalError as e:
+                        if "no such table" in str(e):
+                            self.logger.warning(f"Table backtest_summary does not exist: {e}")
+                        else:
+                            raise
+                    
+                    try:
+                        cursor.execute("DELETE FROM leverage_calculation_details WHERE analysis_id IN (SELECT id FROM analyses WHERE symbol=?)", (symbol,))
+                    except sqlite3.OperationalError as e:
+                        if "no such table" in str(e):
+                            self.logger.warning(f"Table leverage_calculation_details does not exist: {e}")
+                        else:
+                            raise
+                    
+                    cursor.execute("DELETE FROM analyses WHERE symbol=?", (symbol,))
+                    results['deleted']['analyses'] = cursor.rowcount
+                    conn.commit()
+            
+            # 2. alert_history.db から削除
+            alert_db_path = 'alert_history_system/data/alert_history.db'
+            if os.path.exists(alert_db_path):
+                with sqlite3.connect(alert_db_path) as conn:
+                    cursor = conn.cursor()
+                    
+                    cursor.execute("DELETE FROM performance_summary WHERE symbol=?", (symbol,))
+                    results['deleted']['performance_summary'] = cursor.rowcount
+                    
+                    cursor.execute("DELETE FROM price_tracking WHERE symbol=?", (symbol,))
+                    results['deleted']['price_tracking'] = cursor.rowcount
+                    
+                    cursor.execute("DELETE FROM alerts WHERE symbol=?", (symbol,))
+                    results['deleted']['alerts'] = cursor.rowcount
+                    
+                    conn.commit()
+            
+            # 3. execution_logs.db のステータス更新
+            exec_db_path = 'execution_logs.db'
+            if os.path.exists(exec_db_path):
+                with sqlite3.connect(exec_db_path) as conn:
+                    cursor = conn.cursor()
+                    
+                    # 完了済み実行を DATA_DELETED に更新
+                    cursor.execute("""
+                        UPDATE execution_logs 
+                        SET status = 'DATA_DELETED', updated_at = CURRENT_TIMESTAMP
+                        WHERE symbol = ? AND status IN ('SUCCESS', 'FAILED')
+                    """, (symbol,))
+                    
+                    updated_count = cursor.rowcount
+                    
+                    # 実行中のものをキャンセル
+                    cursor.execute("""
+                        UPDATE execution_logs 
+                        SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
+                        WHERE symbol = ? AND status IN ('RUNNING', 'PENDING')
+                    """, (symbol,))
+                    
+                    results['updated']['execution_logs'] = updated_count + cursor.rowcount
+                    conn.commit()
+            
+            # 4. ファイル削除
+            patterns = [
+                f'large_scale_analysis/compressed/{symbol}_*.pkl.gz',
+                f'large_scale_analysis/charts/{symbol}_*.html',
+                f'large_scale_analysis/data/{symbol}_*.*'
+            ]
+            
+            for pattern in patterns:
+                for file_path in glob.glob(pattern):
+                    try:
+                        os.remove(file_path)
+                        results['deleted']['files'] += 1
+                        self.logger.info(f"Deleted file: {file_path}")
+                    except Exception as e:
+                        results['errors'].append(f"ファイル削除エラー: {file_path}: {str(e)}")
+            
+            # 5. 削除操作をログに記録
+            try:
+                if os.path.exists(exec_db_path):
+                    with sqlite3.connect(exec_db_path) as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            INSERT INTO execution_logs 
+                            (execution_id, execution_type, symbol, status, timestamp_start, triggered_by, metadata)
+                            VALUES (?, 'DATA_DELETION', ?, 'SUCCESS', ?, 'web_dashboard', ?)
+                        """, (
+                            f"delete_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            symbol,
+                            datetime.now().isoformat(),
+                            json.dumps(results)
+                        ))
+                        conn.commit()
+            except Exception as e:
+                results['errors'].append(f"ログ記録エラー: {str(e)}")
+        
+        except Exception as e:
+            results['errors'].append(f"削除処理エラー: {str(e)}")
+            self.logger.error(f"Error in delete_symbol_complete: {e}")
+        
+        return results
     
     def _setup_socketio_events(self):
         """Setup SocketIO events."""

@@ -95,6 +95,16 @@ class StrategyResultsManager {
         // Export functionality
         document.getElementById('btn-export-csv').addEventListener('click', () => this.exportToCSV());
         document.getElementById('btn-show-trades').addEventListener('click', () => this.showTradeDetails());
+
+        // Delete functionality
+        document.getElementById('btn-delete-analysis').addEventListener('click', () => {
+            if (this.currentSymbol) {
+                this.showDeleteConfirmation();
+            }
+        });
+        document.getElementById('btn-confirm-delete').addEventListener('click', () => {
+            this.executeDelete();
+        });
     }
 
     async loadAvailableSymbols() {
@@ -165,6 +175,9 @@ class StrategyResultsManager {
                 this.renderResults();
                 this.showAllSections();
                 
+                // 削除ボタンを有効化
+                document.getElementById('btn-delete-analysis').disabled = false;
+                
             } else {
                 throw new Error(`HTTP ${response.status}`);
             }
@@ -172,6 +185,9 @@ class StrategyResultsManager {
             console.error('Error loading strategy results:', error);
             this.showMessageBanner(`${symbol}の分析結果の読み込みに失敗しました`, 'error');
             this.hideAllSections();
+            
+            // 削除ボタンを無効化
+            document.getElementById('btn-delete-analysis').disabled = true;
         }
     }
 
@@ -947,6 +963,104 @@ class StrategyResultsManager {
         modal.addEventListener('hidden.bs.modal', () => {
             document.body.removeChild(modal);
         });
+    }
+
+    showDeleteConfirmation() {
+        // 削除確認モーダルを表示
+        if (!this.currentSymbol) {
+            this.showMessageBanner('銘柄が選択されていません', 'warning');
+            return;
+        }
+
+        // モーダルに銘柄名を設定
+        document.getElementById('delete-symbol-name').textContent = this.currentSymbol;
+        
+        // モーダルを表示
+        const modal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
+        modal.show();
+    }
+
+    async executeDelete() {
+        // 削除を実行
+        if (!this.currentSymbol) {
+            this.showMessageBanner('銘柄が選択されていません', 'warning');
+            return;
+        }
+
+        // 削除ボタンの参照と元のテキストを先に取得
+        const confirmBtn = document.getElementById('btn-confirm-delete');
+        const originalText = confirmBtn.innerHTML;
+
+        try {
+            // 削除ボタンを無効化
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 削除中...';
+
+            this.showMessageBanner(`${this.currentSymbol}のデータを削除中...`, 'info');
+
+            // 削除API呼び出し
+            const response = await fetch(`/api/symbol/${this.currentSymbol}/delete`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                // 成功時の処理
+                let message = `${this.currentSymbol}のデータを削除しました`;
+                
+                if (result.result) {
+                    const deleted = result.result.deleted;
+                    const details = [];
+                    if (deleted.analyses > 0) details.push(`分析${deleted.analyses}件`);
+                    if (deleted.alerts > 0) details.push(`アラート${deleted.alerts}件`);
+                    if (deleted.files > 0) details.push(`ファイル${deleted.files}件`);
+                    
+                    if (details.length > 0) {
+                        message += `（${details.join('、')}）`;
+                    }
+                }
+
+                this.showMessageBanner(message, 'success');
+
+                // UIリセット
+                this.currentSymbol = null;
+                this.resultsData = [];
+                this.hideAllSections();
+                
+                // 削除ボタンを無効化
+                document.getElementById('btn-delete-analysis').disabled = true;
+                
+                // 銘柄リストを更新
+                await this.loadAvailableSymbols();
+
+            } else {
+                // エラー時の処理
+                let errorMessage = '削除に失敗しました';
+                if (result.error) {
+                    errorMessage += `: ${result.error}`;
+                }
+                this.showMessageBanner(errorMessage, 'error');
+            }
+
+        } catch (error) {
+            console.error('Delete error:', error);
+            this.showMessageBanner('削除処理でエラーが発生しました', 'error');
+        } finally {
+            // ボタンを元に戻す
+            const confirmBtn = document.getElementById('btn-confirm-delete');
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = originalText;
+
+            // モーダルを閉じる
+            const modal = bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal'));
+            if (modal) {
+                modal.hide();
+            }
+        }
     }
 }
 

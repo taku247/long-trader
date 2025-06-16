@@ -419,8 +419,15 @@ class ExecutionLogDatabase:
                     params.append(execution_type)
                 
                 if symbol:
-                    where_conditions.append("(symbol = ? OR symbols LIKE ?)")
-                    params.extend([symbol, f'%"{symbol}"%'])
+                    # より厳密な符合条件：個別符号フィールドまたはJSONarray内の正確な値
+                    where_conditions.append("(symbol = ? OR (symbols IS NOT NULL AND (symbols = ? OR symbols LIKE ? OR symbols LIKE ? OR symbols LIKE ?)))")
+                    params.extend([
+                        symbol,
+                        f'["{symbol}"]',  # 単独の場合
+                        f'["{symbol}",%',  # 先頭の場合
+                        f'%,"{symbol}"]',  # 末尾の場合  
+                        f'%,"{symbol}",%'  # 中間の場合
+                    ])
                 
                 if status:
                     where_conditions.append("status = ?")

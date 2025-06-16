@@ -81,9 +81,12 @@
                                     <option value="max_drawdown">最大ドローダウン</option>
                                 </select>
                             </div>
-                            <div class="col-md-3 d-flex align-items-end">
+                            <div class="col-md-3 d-flex align-items-end gap-2">
                                 <button id="btn-load-results" class="btn btn-success">
                                     <i class="fas fa-search"></i> 結果表示
+                                </button>
+                                <button id="btn-delete-analysis" class="btn btn-danger btn-sm" disabled title="選択した銘柄の全分析データを削除">
+                                    <i class="fas fa-trash"></i> データ削除
                                 </button>
                             </div>
                         </div>
@@ -220,6 +223,58 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title" id="deleteConfirmModalLabel">
+                        <i class="fas fa-exclamation-triangle"></i> データ削除の確認
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>⚠️ 警告:</strong> この操作は取り消せません。
+                    </div>
+                    
+                    <p>以下のデータが<strong>完全削除</strong>されます:</p>
+                    <ul class="list-unstyled mb-3">
+                        <li><i class="fas fa-check text-danger"></i> 戦略分析結果（analysis.db）</li>
+                        <li><i class="fas fa-check text-danger"></i> アラート履歴（alert_history.db）</li>
+                        <li><i class="fas fa-check text-danger"></i> 価格追跡データ</li>
+                        <li><i class="fas fa-check text-danger"></i> パフォーマンス評価</li>
+                        <li><i class="fas fa-check text-danger"></i> 圧縮データファイル</li>
+                        <li><i class="fas fa-edit text-info"></i> 実行ログ（ステータス更新のみ）</li>
+                    </ul>
+                    
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>影響範囲:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>リアルタイム監視: 削除後はアラート生成されません</li>
+                            <li>他の銘柄: 一切影響ありません</li>
+                            <li>watchlist設定: 保持されます</li>
+                        </ul>
+                    </div>
+                    
+                    <p class="mb-0">
+                        <strong id="delete-symbol-name" class="text-danger fs-5"></strong>の全データを削除しますか？
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times"></i> キャンセル
+                    </button>
+                    <button type="button" class="btn btn-danger" id="btn-confirm-delete">
+                        <i class="fas fa-trash"></i> 削除実行
+                    </button>
                 </div>
             </div>
         </div>

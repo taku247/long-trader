@@ -1717,6 +1717,75 @@ Long Traderは**SQLite + 圧縮ファイル**のハイブリッド管理方式�
 - 🔒 **他銘柄保護**: 削除対象以外のデータは完全保護
 - 🔒 **プロセス検証**: 実際のシステムプロセスを確認して安全性確保
 
+### **🚨 既知の重大なデータ異常**
+
+#### **⚠️ バックテスト計算における重大な問題**
+
+**発見された異常事例（ETH 3m Conservative_ML）:**
+```
+エントリー価格: 1,932 USD
+エグジット価格: 2,812 USD (45%上昇)
+損切りライン: 2,578 USD (エントリーより33%高い) ← 論理エラー
+利確ライン: 2,782 USD (エントリーより44%高い)
+実行時間: 50分で45%上昇 ← 非現実的
+```
+
+#### **🔍 問題の原因分析**
+
+**1. 価格参照の不整合**
+- エントリー価格: `_get_real_market_price()`（実際の市場データ）
+- 損切り・利確価格: `current_price`（分析時の価格）
+- 異なる価格ソースの混在により価格乖離が発生
+
+**2. ロングポジション計算ロジックの論理エラー**
+```python
+# 正常: stop_loss_price < entry_price < take_profit_price
+# 異常: entry_price < stop_loss_price < take_profit_price（損切りが上に設定）
+```
+
+**3. クローズ価格・時刻算定の問題**
+```python
+# scalable_analysis_system.py の _generate_real_analysis()
+exit_price = tp_price * np.random.uniform(0.98, 1.02)  # TP価格の±2%
+exit_time = entry_time + timedelta(minutes=np.random.randint(5, 120))  # ランダム
+```
+
+#### **🛡️ 緊急対応が必要な理由**
+
+- **戦略パフォーマンスの過大評価**: 非現実的な利益率でバックテスト結果が歪曲
+- **実取引での重大リスク**: このデータを信頼した取引で大損失の危険性
+- **システム信頼性への疑問**: 基幹計算ロジックの根本的問題
+
+#### **🔧 修正すべき箇所**
+
+**1. engines/leverage_decision_engine.py（119-124行）**
+```python
+stop_loss, take_profit = self._calculate_stop_loss_take_profit(
+    current_price,  # ← この価格参照を統一する必要
+    downside_analysis,
+    upside_analysis,
+    leverage_recommendation['recommended_leverage']
+)
+```
+
+**2. 必須ロジックチェック追加**
+```python
+# ロングポジション必須条件の検証
+assert stop_loss_price < entry_price < take_profit_price
+```
+
+**3. デバッグログ強化**
+- 価格計算の各ステップでの詳細トレース
+- サポート・レジスタンスレベルの妥当性検証
+
+#### **📊 影響範囲**
+
+- **ETH**: 3m足 Conservative_ML戦略で確認済み
+- **他銘柄・時間足**: 同様の問題が潜在している可能性
+- **全戦略タイプ**: Conservative/Aggressive/Full_ML全てに影響の可能性
+
+**⚠️ 重要**: 現在表示されているバックテスト結果は信頼性に重大な疑問があります。実際の取引前に徹底的な検証と修正が必要です。
+
 ```bash
 # 現在の登録状況確認
 python -c "

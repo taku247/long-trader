@@ -58,13 +58,21 @@
                     </div>
                     <div class="card-body">
                         <div class="row align-items-center">
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label for="symbol-select" class="form-label">分析銘柄</label>
                                 <select class="form-select" id="symbol-select">
                                     <option value="">銘柄を選択してください</option>
                                 </select>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3">
+                                <label for="filter-mode" class="form-label">表示モード</label>
+                                <select class="form-select" id="filter-mode">
+                                    <option value="completed_only">完了済みのみ (18/18)</option>
+                                    <option value="all">全て表示</option>
+                                </select>
+                                <small class="text-muted">※「全て表示」で部分的な分析も含めて表示</small>
+                            </div>
+                            <div class="col-md-3">
                                 <label for="sort-by" class="form-label">並び替え</label>
                                 <select class="form-select" id="sort-by">
                                     <option value="sharpe_ratio">シャープ比</option>
@@ -73,7 +81,7 @@
                                     <option value="max_drawdown">最大ドローダウン</option>
                                 </select>
                             </div>
-                            <div class="col-md-4 d-flex align-items-end">
+                            <div class="col-md-3 d-flex align-items-end">
                                 <button id="btn-load-results" class="btn btn-success">
                                     <i class="fas fa-search"></i> 結果表示
                                 </button>

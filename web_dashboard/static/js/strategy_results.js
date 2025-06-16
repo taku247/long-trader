@@ -69,6 +69,11 @@ class StrategyResultsManager {
             }
         });
 
+        // Filter mode change
+        document.getElementById('filter-mode').addEventListener('change', () => {
+            this.loadAvailableSymbols();
+        });
+
         // Refresh button
         document.getElementById('btn-refresh-results').addEventListener('click', () => {
             this.loadAvailableSymbols();
@@ -96,8 +101,11 @@ class StrategyResultsManager {
         try {
             this.showMessageBanner('利用可能な銘柄を読み込み中...', 'info');
             
+            // Get filter mode
+            const filterMode = document.getElementById('filter-mode').value;
+            
             // Get symbols that have completed analysis
-            const response = await fetch('/api/strategy-results/symbols');
+            const response = await fetch(`/api/strategy-results/symbols?filter=${filterMode}`);
             if (response.ok) {
                 const symbols = await response.json();
                 
@@ -107,7 +115,8 @@ class StrategyResultsManager {
                 symbols.forEach(symbol => {
                     const option = document.createElement('option');
                     option.value = symbol.symbol;
-                    option.textContent = `${symbol.symbol} (${symbol.pattern_count}パターン分析済み)`;
+                    const completionInfo = symbol.completion_rate ? ` (${symbol.completion_rate}%完了)` : '';
+                    option.textContent = `${symbol.symbol} - ${symbol.pattern_count}/18パターン${completionInfo}`;
                     symbolSelect.appendChild(option);
                 });
                 

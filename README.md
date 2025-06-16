@@ -1847,6 +1847,83 @@ Hyperliquidでレート制限が発生した場合の対処法：
 
 Gate.ioは独立したAPIなので、Hyperliquidのレート制限の影響を受けません。
 
+## 🗄️ データベース構造
+
+Long Traderシステムは3つの主要なSQLiteデータベースを使用して、異なる側面のデータを管理しています。
+
+### 📊 データベース概要
+
+| データベース | 場所 | 用途 |
+|------------|------|------|
+| **execution_logs.db** | `/` | システム実行の追跡・監視 |
+| **alert_history.db** | `/alert_history_system/data/` | 取引アラートとパフォーマンス追跡 |
+| **analysis.db** | `/large_scale_analysis/` | 戦略分析結果とバックテストデータ |
+
+### 🔍 各データベースの詳細
+
+#### 1. **execution_logs.db** - 実行追跡データベース
+システムの実行状況を監視し、銘柄追加や定期訓練などの操作を記録します。
+
+**主要テーブル**:
+- `execution_logs`: 実行の概要（実行ID、タイプ、ステータス、進捗率など）
+- `execution_steps`: 各実行の詳細ステップ（ステップ名、結果、エラー情報など）
+
+**使用例**:
+```python
+from execution_log_database import ExecutionLogDatabase
+exec_db = ExecutionLogDatabase()
+executions = exec_db.list_executions(limit=10)  # 最新10件の実行履歴
+```
+
+#### 2. **alert_history.db** - アラート履歴データベース
+取引シグナルのアラートを保存し、実際の市場での成績を追跡します。
+
+**主要テーブル**:
+- `alerts`: 取引アラート（銘柄、レバレッジ、信頼度、エントリー/TP/SL価格）
+- `price_tracking`: アラート後の価格追跡（時間経過、価格変動率）
+- `performance_summary`: パフォーマンス評価（成功/失敗、最大利益/損失、24h/72hリターン）
+
+**使用例**:
+```python
+from alert_history_system.alert_db_writer import AlertDBWriter
+db_writer = AlertDBWriter()
+alerts = db_writer.db.get_alerts_by_symbol('HYPE', 100)  # HYPEの最新100件
+```
+
+#### 3. **analysis.db** - 戦略分析データベース
+バックテストの結果と詳細な戦略パフォーマンスデータを保存します。
+
+**主要テーブル**:
+- `analyses`: 戦略分析結果（シャープ比、勝率、総リターン、最大ドローダウン）
+- `backtest_summary`: 追加のパフォーマンスメトリクス
+- `leverage_calculation_details`: レバレッジ計算の詳細内訳
+
+**使用例**:
+```python
+from scalable_analysis_system import ScalableAnalysisSystem
+system = ScalableAnalysisSystem()
+results = system.query_analyses(filters={'symbol': 'ADA'})  # ADAの分析結果
+```
+
+### 🔗 データベース間の連携
+
+```
+銘柄追加フロー:
+1. execution_logs.db: 実行開始を記録
+2. analysis.db: バックテスト結果を保存
+3. alert_history.db: リアルタイム監視でアラート生成
+
+データ参照フロー:
+- Webダッシュボード → analysis.db: 戦略結果表示
+- 監視システム → alert_history.db: アラート履歴確認
+- 管理画面 → execution_logs.db: システム状態監視
+```
+
+### 📚 詳細なER図
+
+データベースの完全なER図（Entity Relationship Diagram）は以下のファイルに記載されています：
+- **`database_er_diagram.md`**: 全テーブルの詳細構造とリレーション
+
 ## 🧪 テストスイート・品質監視システム
 
 Long Traderには包括的なテスト環境と継続的品質監視システムが実装されており、システムの信頼性と価格データの整合性を保証します。

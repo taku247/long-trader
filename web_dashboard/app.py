@@ -601,15 +601,24 @@ class WebDashboard:
                 from scalable_analysis_system import ScalableAnalysisSystem
                 system = ScalableAnalysisSystem()
                 
+                # Get filter mode from query parameter (default: completed_only)
+                filter_mode = request.args.get('filter', 'completed_only')
+                
+                # Set minimum pattern count based on filter mode
+                if filter_mode == 'all':
+                    min_patterns = 1  # Show all symbols with at least 1 analysis
+                else:
+                    min_patterns = 18  # Show only symbols with all 18 patterns completed
+                
                 # Get symbols with completed analyses
                 # 18 patterns = 3 strategies × 6 timeframes (1m,3m,5m,15m,30m,1h)
-                query = """
+                query = f"""
                     SELECT symbol, COUNT(*) as pattern_count, AVG(sharpe_ratio) as avg_sharpe
                     FROM analyses 
                     WHERE status='completed' 
                     GROUP BY symbol 
-                    HAVING pattern_count >= 18
-                    ORDER BY avg_sharpe DESC
+                    HAVING pattern_count >= {min_patterns}
+                    ORDER BY pattern_count DESC, avg_sharpe DESC
                 """
                 
                 import sqlite3
@@ -622,7 +631,8 @@ class WebDashboard:
                         {
                             'symbol': row[0],
                             'pattern_count': row[1],
-                            'avg_sharpe': round(row[2], 2) if row[2] else 0
+                            'avg_sharpe': round(row[2], 2) if row[2] else 0,
+                            'completion_rate': round((row[1] / 18) * 100, 1)
                         }
                         for row in results
                     ]
@@ -1376,6 +1386,143 @@ class WebDashboard:
                 self.logger.error(f"Error getting execution status: {e}")
                 return jsonify({'error': str(e)}), 500
         
+        @self.app.route('/execution-logs')
+        def execution_logs_page():
+            """Display execution logs page."""
+            execution_id = request.args.get('execution_id')
+            
+            try:
+                from execution_log_database import ExecutionLogDatabase
+                exec_db = ExecutionLogDatabase()
+                
+                if execution_id:
+                    # Get specific execution details
+                    execution = exec_db.get_execution(execution_id)
+                    if not execution:
+                        return render_template('execution_logs.html', 
+                                             error=f"実行ID '{execution_id}' が見つかりません",
+                                             execution_id=execution_id)
+                    
+                    # Get execution logs/steps
+                    logs = exec_db.get_execution_steps(execution_id)
+                    
+                    return render_template('execution_logs.html',
+                                         execution=execution,
+                                         logs=logs,
+                                         execution_id=execution_id)
+                else:
+                    # Show recent executions list
+                    executions = exec_db.list_executions(limit=50)
+                    return render_template('execution_logs.html',
+                                         executions=executions)
+                    
+            except Exception as e:
+                self.logger.error(f"Error loading execution logs: {e}")
+                return render_template('execution_logs.html', 
+                                     error=f"実行ログの読み込み中にエラーが発生しました: {str(e)}",
+                                     execution_id=execution_id)
+
+        @self.app.route('/api/execution-logs')
+        def api_execution_logs():
+            """Get execution logs with filtering and pagination."""
+            try:
+                # Get query parameters
+                page = request.args.get('page', 1, type=int)
+                page_size = request.args.get('page_size', 20, type=int)
+                execution_type = request.args.get('execution_type', '')
+                symbol = request.args.get('symbol', '')
+                status = request.args.get('status', '')
+                days = request.args.get('days', 7, type=int)
+                
+                from execution_log_database import ExecutionLogDatabase
+                exec_db = ExecutionLogDatabase()
+                
+                # Build filters
+                filters = {}
+                if execution_type:
+                    filters['execution_type'] = execution_type
+                if symbol:
+                    filters['symbol'] = symbol
+                if status:
+                    filters['status'] = status
+                
+                # Calculate offset
+                offset = (page - 1) * page_size
+                
+                # Get filtered executions
+                executions = exec_db.list_executions(
+                    limit=page_size,
+                    offset=offset,
+                    execution_type=execution_type if execution_type else None,
+                    symbol=symbol if symbol else None,
+                    status=status if status else None,
+                    days=days
+                )
+                
+                # Get total count by getting all results without limit (simplified)
+                all_executions = exec_db.list_executions(
+                    limit=999999,  # Large limit to get all
+                    execution_type=execution_type if execution_type else None,
+                    symbol=symbol if symbol else None,
+                    status=status if status else None,
+                    days=days
+                )
+                total_count = len(all_executions)
+                
+                return jsonify({
+                    'executions': executions,
+                    'pagination': {
+                        'page': page,
+                        'page_size': page_size,
+                        'total_count': total_count,
+                        'total_pages': (total_count + page_size - 1) // page_size
+                    }
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error getting execution logs: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/execution-logs/<execution_id>')
+        def api_execution_log_detail(execution_id):
+            """Get detailed execution log for specific execution ID."""
+            try:
+                from execution_log_database import ExecutionLogDatabase
+                exec_db = ExecutionLogDatabase()
+                
+                # Get execution details
+                execution = exec_db.get_execution(execution_id)
+                if not execution:
+                    return jsonify({'error': f'Execution {execution_id} not found'}), 404
+                
+                # Get execution steps from database manually
+                try:
+                    import sqlite3
+                    with sqlite3.connect(exec_db.db_path) as conn:
+                        conn.row_factory = sqlite3.Row
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT step_name, status, timestamp_start, timestamp_end, 
+                                   duration_seconds, result_data, error_message
+                            FROM execution_steps 
+                            WHERE execution_id = ? 
+                            ORDER BY timestamp_start
+                        """, (execution_id,))
+                        steps = [dict(row) for row in cursor.fetchall()]
+                except Exception as step_error:
+                    self.logger.warning(f"Could not load steps for {execution_id}: {step_error}")
+                    steps = []
+                
+                # Combine execution info with steps
+                result = dict(execution)
+                result['steps'] = steps if steps else []
+                
+                return jsonify(result)
+                
+            except Exception as e:
+                self.logger.error(f"Error getting execution detail for {execution_id}: {e}")
+                return jsonify({'error': str(e)}), 500
+
         @self.app.route('/api/executions')
         def api_executions_list():
             """Get list of recent executions."""

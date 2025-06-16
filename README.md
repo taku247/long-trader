@@ -2103,6 +2103,122 @@ assert stop_loss_price < entry_price < take_profit_price
 
 **⚠️ 重要**: 現在表示されているバックテスト結果は信頼性に重大な疑問があります。実際の取引前に徹底的な検証と修正が必要です。
 
+### **🔧 価格データ整合性チェックシステム（2025年6月17日実装）**
+
+#### **📊 価格参照統一システム**
+
+**実装目的**: 上記のETH異常事例で発見された価格参照の不整合問題（current_price vs entry_price）を根本的に解決
+
+**システム概要**:
+```python
+# engines/price_consistency_validator.py
+class PriceConsistencyValidator:
+    """価格データ整合性検証器"""
+    
+    def validate_price_consistency(self, analysis_price, entry_price, symbol):
+        """分析価格とエントリー価格の整合性を検証"""
+        price_diff_pct = abs(analysis_price - entry_price) / analysis_price * 100
+        
+        if price_diff_pct < 1.0:   # 正常範囲
+            return 'normal'
+        elif price_diff_pct < 5.0: # 警告レベル
+            return 'warning'
+        elif price_diff_pct < 10.0: # エラーレベル
+            return 'error'
+        else:                       # 重大エラー（ETH事例: 45%差）
+            return 'critical'
+```
+
+#### **🚨 自動異常検知機能**
+
+**バックテスト結果の総合検証**:
+```python
+def validate_backtest_result(self, entry_price, stop_loss_price, take_profit_price, 
+                           exit_price, duration_minutes, symbol):
+    """バックテスト結果の論理エラー・非現実的利益率を検知"""
+    issues = []
+    
+    # 1. ロングポジション論理エラー検知
+    if stop_loss_price >= entry_price:  # ETH事例での問題
+        issues.append("損切り価格がエントリー価格以上")
+    
+    # 2. 非現実的利益率検知
+    profit_rate = (exit_price - entry_price) / entry_price * 100
+    if duration_minutes < 60 and profit_rate > 20:  # 1時間未満で20%超
+        issues.append(f"短時間で{profit_rate:.1f}%の利益（非現実的）")
+    
+    # 3. 年利換算異常検知
+    annual_rate = profit_rate * (365*24*60 / duration_minutes)
+    if annual_rate > 1000:  # 年利1000%超
+        issues.append(f"年利換算{annual_rate:.0f}%（非現実的）")
+    
+    return {'is_valid': len(issues) == 0, 'issues': issues}
+```
+
+#### **🎯 統合システムでの動作**
+
+**scalable_analysis_system.py での自動チェック**:
+```python
+# 価格整合性チェック実行
+price_consistency_result = self.price_validator.validate_price_consistency(
+    analysis_price=current_price,
+    entry_price=entry_price,
+    symbol=symbol
+)
+
+# 重大な価格不整合の場合は取引をスキップ
+if price_consistency_result.inconsistency_level.value == 'critical':
+    logger.error(f"重大な価格不整合のためトレードをスキップ: {symbol}")
+    continue
+
+# バックテスト結果の総合検証
+backtest_validation = self.price_validator.validate_backtest_result(
+    entry_price=entry_price,
+    stop_loss_price=sl_price,
+    take_profit_price=tp_price,
+    exit_price=exit_price,
+    duration_minutes=duration_minutes,
+    symbol=symbol
+)
+
+# 重大な論理エラーの場合は取引をスキップ
+if backtest_validation['severity_level'] == 'critical':
+    logger.error(f"重大なバックテスト異常のためトレードをスキップ: {symbol}")
+    continue
+```
+
+#### **⚡ テスト検証結果**
+
+**ETH異常ケースの正常検知確認**:
+```bash
+$ python engines/price_consistency_validator.py
+
+テスト3: ETH異常ケース（重大エラー）
+結果: 価格整合性: 重大エラー (差異: 45.30%) - 深刻な不整合
+一貫性: ❌
+
+テスト4: バックテスト結果の総合検証
+バックテスト妥当性: ❌
+深刻度: critical
+利益率: 45.5%
+年利換算: 478807%
+問題: ['損切り価格(2578.00)がエントリー価格(1932.00)以上', 
+      '1時間未満で45.5%の利益（非現実的）', 
+      '年利換算478807%（非現実的）']
+```
+
+#### **✅ 実装完了機能**
+
+- ✅ **価格参照整合性チェック**: current_price vs entry_price統一
+- ✅ **異常価格差の自動検出**: 4段階分類（normal/warning/error/critical）
+- ✅ **リアルタイム価格検証**: 取引実行前の自動チェック
+- ✅ **バックテスト結果自動検証**: 論理エラー・非現実的利益率の検知
+- ✅ **統一価格データ構造**: 一貫性のある価格管理
+- ✅ **価格整合性メトリクス**: 分析結果への自動追加
+- ✅ **検証サマリーレポート**: システム動作状況の可視化
+
+**🎯 効果**: ETH異常事例のような価格参照の不整合と非現実的なバックテスト結果を事前に検知・防止し、システムの信頼性を大幅に向上。
+
 ```bash
 # 現在の登録状況確認
 python -c "

@@ -16,6 +16,9 @@ from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 
+# 価格データ整合性チェックシステムのインポート
+from engines.price_consistency_validator import PriceConsistencyValidator, UnifiedPriceData
+
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -33,6 +36,13 @@ class ScalableAnalysisSystem:
         
         for dir_path in [self.charts_dir, self.data_dir, self.compressed_dir]:
             dir_path.mkdir(exist_ok=True)
+        
+        # 価格データ整合性チェックシステムの初期化
+        self.price_validator = PriceConsistencyValidator(
+            warning_threshold_pct=1.0,
+            error_threshold_pct=5.0,
+            critical_threshold_pct=10.0
+        )
         
         # データベース初期化
         self.init_database()
@@ -456,6 +466,34 @@ class ScalableAnalysisSystem:
                     # 理由: current_priceが固定値のため、実際の時系列データを使用
                     entry_price = self._get_real_market_price(bot, symbol, timeframe, trade_time)
                     
+                    # 価格データ整合性チェック実行
+                    price_consistency_result = self.price_validator.validate_price_consistency(
+                        analysis_price=current_price,
+                        entry_price=entry_price,
+                        symbol=symbol,
+                        context=f"{timeframe}_{config}_trade_{len(trades)+1}"
+                    )
+                    
+                    if not price_consistency_result.is_consistent:
+                        logger.warning(f"価格整合性問題検出: {symbol} {timeframe} - {price_consistency_result.message}")
+                        for recommendation in price_consistency_result.recommendations:
+                            logger.warning(f"推奨対応: {recommendation}")
+                        
+                        # 重大な価格不整合の場合は取引をスキップ
+                        if price_consistency_result.inconsistency_level.value == 'critical':
+                            logger.error(f"重大な価格不整合のためトレードをスキップ: {symbol} at {trade_time}")
+                            continue
+                    
+                    # 統一価格データの作成
+                    unified_price_data = self.price_validator.create_unified_price_data(
+                        analysis_price=current_price,
+                        entry_price=entry_price,
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        market_timestamp=trade_time,
+                        data_source=exchange
+                    )
+                    
                     # 成功確率（信頼度ベース）
                     is_success = np.random.random() < (confidence * 0.8 + 0.2)
                     
@@ -484,6 +522,25 @@ class ScalableAnalysisSystem:
                     # 退出時間は5分-2時間後
                     exit_time = trade_time + timedelta(minutes=np.random.randint(5, 120))
                     
+                    # バックテスト結果の総合検証
+                    backtest_validation = self.price_validator.validate_backtest_result(
+                        entry_price=entry_price,
+                        stop_loss_price=sl_price,
+                        take_profit_price=tp_price,
+                        exit_price=exit_price,
+                        duration_minutes=int((exit_time - trade_time).total_seconds() / 60),
+                        symbol=symbol
+                    )
+                    
+                    if not backtest_validation['is_valid']:
+                        logger.warning(f"バックテスト結果異常検知: {symbol} {timeframe}")
+                        logger.warning(f"問題: {', '.join(backtest_validation['issues'])}")
+                        
+                        # 重大な問題がある場合はトレードをスキップ
+                        if backtest_validation['severity_level'] == 'critical':
+                            logger.error(f"重大なバックテスト異常のためトレードをスキップ: {symbol} at {trade_time}")
+                            continue
+                    
                     # 日本時間（UTC+9）で表示
                     jst_entry_time = trade_time + timedelta(hours=9)
                     jst_exit_time = exit_time + timedelta(hours=9)
@@ -499,7 +556,12 @@ class ScalableAnalysisSystem:
                         'pnl_pct': leveraged_pnl,
                         'confidence': confidence,
                         'is_success': is_success,
-                        'strategy': config
+                        'strategy': config,
+                        # 価格整合性情報の追加
+                        'price_consistency_score': unified_price_data.consistency_score,
+                        'price_validation_level': price_consistency_result.inconsistency_level.value,
+                        'backtest_validation_severity': backtest_validation['severity_level'],
+                        'analysis_price': current_price  # デバッグ用
                     })
                     
                 except Exception as e:
@@ -520,6 +582,15 @@ class ScalableAnalysisSystem:
             evaluation_rate = (signals_generated / total_evaluations * 100) if total_evaluations > 0 else 0
             print(f"✅ {symbol} {timeframe} {config}: 条件ベース分析完了")
             print(f"   📊 総評価数: {total_evaluations}, シグナル生成: {signals_generated}件 ({evaluation_rate:.1f}%)")
+            
+            # 価格整合性チェック結果のサマリーを表示
+            if trades:
+                validation_summary = self.price_validator.get_validation_summary(hours=24)
+                if validation_summary['total_validations'] > 0:
+                    print(f"   🔍 価格整合性チェック: {validation_summary['consistency_rate']:.1f}% 整合性")
+                    print(f"   📈 平均価格差異: {validation_summary['avg_difference_pct']:.2f}%")
+                    if validation_summary['level_counts'].get('critical', 0) > 0:
+                        print(f"   ⚠️ 重大な価格不整合: {validation_summary['level_counts']['critical']}件")
             
             return trades
             
@@ -716,7 +787,22 @@ class ScalableAnalysisSystem:
         drawdown = (cum_returns - peak) / peak
         max_drawdown = np.min(drawdown) if len(drawdown) > 0 else 0
         
-        return {
+        # 価格整合性メトリクスの計算
+        price_consistency_metrics = {}
+        if 'price_consistency_score' in trades_df.columns:
+            price_consistency_metrics = {
+                'avg_price_consistency': trades_df['price_consistency_score'].mean(),
+                'critical_price_issues': len(trades_df[trades_df['price_validation_level'] == 'critical']),
+                'critical_backtest_issues': len(trades_df[trades_df['backtest_validation_severity'] == 'critical'])
+            }
+        else:
+            price_consistency_metrics = {
+                'avg_price_consistency': 1.0,
+                'critical_price_issues': 0,
+                'critical_backtest_issues': 0
+            }
+        
+        base_metrics = {
             'total_trades': len(trades_df),
             'total_return': total_return,
             'win_rate': win_rate,
@@ -724,6 +810,10 @@ class ScalableAnalysisSystem:
             'max_drawdown': max_drawdown,
             'avg_leverage': trades_df['leverage'].mean() if len(trades_df) > 0 else 0
         }
+        
+        # 価格整合性メトリクスを結合
+        base_metrics.update(price_consistency_metrics)
+        return base_metrics
     
     def _save_compressed_data(self, analysis_id, trades_df):
         """データを圧縮して保存"""

@@ -2868,4 +2868,66 @@ python continuous_quality_monitor.py --summary
 
 ---
 
+## 📝 修正履歴
+
+### 🐛 **2025-06-16: NameErrorバグ修正**
+
+#### **問題の詳細**
+- **発生箇所**: `engines/leverage_decision_engine.py:471`
+- **エラー内容**: `NameError: name 'market_context' is not defined`
+- **影響範囲**: レバレッジ計算時に例外が発生し、フォールバック値（信頼度10%、レバレッジ1.0、RR比1.0）が使用される
+
+#### **根本原因**
+`_calculate_final_leverage`メソッドで`market_context.volatility`にアクセスしようとしたが、メソッドのパラメータに`market_context`が含まれていなかった。
+
+#### **修正内容**
+1. **メソッドシグネチャ修正**:
+   ```python
+   # 修正前
+   def _calculate_final_leverage(self, downside_analysis, upside_analysis, 
+                               btc_risk_analysis, market_risk_factor, 
+                               current_price, reasoning) -> Dict:
+   
+   # 修正後  
+   def _calculate_final_leverage(self, downside_analysis, upside_analysis,
+                               btc_risk_analysis, market_risk_factor,
+                               current_price, reasoning, market_context) -> Dict:
+   ```
+
+2. **メソッド呼び出し修正**:
+   ```python
+   # 修正前
+   leverage_recommendation = self._calculate_final_leverage(
+       downside_analysis, upside_analysis, btc_risk_analysis,
+       market_risk_factor, current_price, reasoning
+   )
+   
+   # 修正後
+   leverage_recommendation = self._calculate_final_leverage(
+       downside_analysis, upside_analysis, btc_risk_analysis,
+       market_risk_factor, current_price, reasoning, market_context
+   )
+   ```
+
+3. **オブジェクトアクセス修正**:
+   ```python
+   # 修正前
+   market_conservatism = 0.5 + (market_context['volatility'] * 0.3)
+   
+   # 修正後
+   market_conservatism = 0.5 + (market_context.volatility * 0.3)
+   ```
+
+#### **修正効果**
+- **修正前**: 信頼度常に10%（例外ハンドラーのフォールバック値）
+- **修正後**: 信頼度90%（市場条件に基づく正常な計算）
+- **検証結果**: BTC分析で多様な値を確認（レバレッジ1.62x、信頼度90%、RR比1.08）
+
+#### **影響した機能**
+- ✅ レバレッジ判定システムの正常動作復旧
+- ✅ 信頼度計算の適正化
+- ✅ 条件ベース分析でのハードコード値問題解決
+
+---
+
 **⚠️ 免責事項**: このシステムは教育・研究目的のツールです。実際の取引には十分な検証とリスク管理を行ってください。

@@ -89,8 +89,16 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
                 btc_risk_analysis,
                 market_risk_factor,
                 current_price,
-                reasoning
+                reasoning,
+                market_context
             )
+            
+            # デバッグログ: leverage_recommendationがNoneかチェック
+            if leverage_recommendation is None:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"🚨 leverage_recommendation is None! This will cause no signal generation.")
+                logger.error(f"   Symbol being analyzed: {getattr(self, '_current_symbol', 'UNKNOWN')}")
             
             # === 6. 損切り・利確ライン設定 ===
             if self.sl_tp_calculator:
@@ -116,6 +124,14 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
                 )
             
             # === 7. 最終推奨結果 ===
+            # デバッグログ: 最終結果の値を確認
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"🎯 最終レバレッジ推奨結果:")
+            logger.error(f"   recommended_leverage: {leverage_recommendation['recommended_leverage']}")
+            logger.error(f"   confidence: {leverage_recommendation['confidence']}")
+            logger.error(f"   risk_reward_ratio: {leverage_recommendation['risk_reward_ratio']}")
+            
             return LeverageRecommendation(
                 recommended_leverage=leverage_recommendation['recommended_leverage'],
                 max_safe_leverage=leverage_recommendation['max_safe_leverage'],
@@ -129,6 +145,13 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
             
         except Exception as e:
             # エラー時は保守的な推奨を返す
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"🚨 レバレッジ計算エラー: {str(e)}")
+            logger.error(f"   エラータイプ: {type(e).__name__}")
+            import traceback
+            logger.error(f"   スタックトレース: {traceback.format_exc()}")
+            
             return LeverageRecommendation(
                 recommended_leverage=1.0,
                 max_safe_leverage=2.0,
@@ -384,7 +407,8 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
     
     def _calculate_final_leverage(self, downside_analysis: Dict, upside_analysis: Dict,
                                 btc_risk_analysis: Dict, market_risk_factor: float,
-                                current_price: float, reasoning: List[str]) -> Dict:
+                                current_price: float, reasoning: List[str],
+                                market_context: MarketContext) -> Dict:
         """
         最終レバレッジ計算
         
@@ -402,6 +426,14 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         
         # 実際の市場データに基づく最小値を使用（ハードコード値は避ける）
         if profit_potential <= 0 or downside_risk <= 0:
+            # デバッグログ追加
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"🚨 RETURN NONE TRIGGERED! profit_potential={profit_potential}, downside_risk={downside_risk}")
+            logger.error(f"   upside_analysis: {upside_analysis}")
+            logger.error(f"   downside_analysis: {downside_analysis}")
+            logger.error(f"   current_price: {current_price}")
+            
             reasoning.append("⚠️ 不正なリスク・リワードデータ - 分析をスキップ")
             return None
         
@@ -438,7 +470,7 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         
         # === 推奨レバレッジは市場条件に基づく調整 ===
         # 市場の状況に応じて保守的さを調整（固定70%ではなく）
-        market_conservatism = 0.5 + (market_context['volatility'] * 0.3)  # 0.5-0.8の範囲
+        market_conservatism = 0.5 + (market_context.volatility * 0.3)  # 0.5-0.8の範囲
         market_conservatism = max(0.5, min(0.9, market_conservatism))
         
         recommended_leverage = max_safe_leverage * market_conservatism
@@ -454,6 +486,16 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
             1.0 - btc_risk_analysis['correlation_risk_factor'],
             1.0 / market_risk_factor if market_risk_factor > 0 else 0.5
         ]
+        
+        # デバッグログ: 信頼度要素の値を確認
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"🔍 信頼度要素デバッグ:")
+        logger.error(f"   support_strength: {downside_analysis.get('support_strength', 'N/A')}")
+        logger.error(f"   breakout_probability: {upside_analysis.get('breakout_probability', 'N/A')}")
+        logger.error(f"   btc_correlation_risk_factor: {btc_risk_analysis.get('correlation_risk_factor', 'N/A')}")
+        logger.error(f"   market_risk_factor: {market_risk_factor}")
+        logger.error(f"   confidence_factors: {confidence_factors}")
         
         # 各要素を0-1に正規化
         normalized_factors = [max(0.0, min(1.0, factor)) for factor in confidence_factors]

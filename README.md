@@ -2713,6 +2713,67 @@ max_evaluations = 100  # 必要に応じて調整
 - `demo_exchange_switching.py`: マルチ取引所デモ
 - `tests/`: **包括的テストスイート** 🧪
 
+## 🔧 **改善提案メモ**
+
+### **📊 トレードデータ異常チェックページ改善案**
+
+#### **現在の問題**
+- **異常チェックページで全履歴データを表示**：今回の銘柄追加実行分と過去の実行分が混在表示
+- **同じ日時のトレード重複**：異なる実行時期の同じバックテスト期間データが統合されて表示
+- **異常検知精度の低下**：過去データによるノイズで今回の結果の問題を発見しにくい
+
+#### **修正案：現在実行分のみ表示**
+
+**実装可能性**: ✅ **高い**（2つのアプローチで実装可能）
+
+##### **オプション1: 時間ベースフィルタリング（簡単・即効性）**
+```python
+# web_dashboard/app.py の異常チェックAPI修正
+current_execution = get_current_execution(symbol)
+if current_execution:
+    start_time = current_execution['timestamp_start']
+    results_df = system.query_analyses(filters={
+        'symbol': symbol,
+        'generated_at >= ?': start_time
+    })
+```
+- **実装時間**: 2-4時間
+- **メリット**: 既存スキーマで実装可能、スキーマ変更不要
+- **使用**: 既存の`generated_at`フィールドと`execution_logs`テーブル
+
+##### **オプション2: 実行ID追跡（推奨・最適）**
+```python
+# 1. analyses テーブルに execution_id 追加
+ALTER TABLE analyses ADD COLUMN execution_id TEXT;
+CREATE INDEX idx_execution_id ON analyses(execution_id);
+
+# 2. 分析パイプライン修正
+def _save_to_database(self, ..., execution_id=None):
+    cursor.execute('''INSERT INTO analyses (..., execution_id) VALUES (..., ?)''')
+
+# 3. 現在実行のIDで絞り込み
+results_df = system.query_analyses(filters={
+    'symbol': symbol,
+    'execution_id': current_execution_id
+})
+```
+- **実装時間**: 8-12時間
+- **メリット**: より正確で拡張可能、将来の実行追跡にも対応
+
+##### **推奨実装戦略**
+1. **フェーズ1（即効性）**: 時間ベースフィルタリングで今回実行分のみ表示
+2. **フェーズ2（最適化）**: execution_id フィールド追加で正確な実行追跡
+3. **フェーズ3（UI改善）**: 「現在実行のみ」「全履歴」切り替えボタン追加
+
+##### **期待効果**
+- ✅ **異常検知精度向上**: 今回の処理結果のみでの品質確認
+- ✅ **同じ日時重複問題解消**: 過去実行データの除外
+- ✅ **ユーザビリティ向上**: 関連性の高いデータのみ表示
+
+**メモ日時**: 2025-06-16  
+**ステータス**: 要検討・未実装  
+**優先度**: 中（異常チェック機能の精度向上のため）
+
 ---
 
 ## 🔧 **2025年6月16日 重要バグ修正・機能改善**
@@ -3000,6 +3061,23 @@ python run_all_validation_tests.py
 ✅ tests/test_confidence_anomaly_detection.py
 📊 成功率: 100% - 異常値バグを確実に防止
 ```
+
+---
+
+## 📝 TODO項目
+
+### 🔧 システム改善
+- [ ] **デバッグログレベル修正**: `leverage_decision_engine.py`の信頼度要素デバッグログを`ERROR`から`INFO`レベルに変更
+- [ ] **未定義戦略修正**: "Full_ML"戦略をconfigファイルに定義するか、呼び出し側で正しい戦略名を使用
+
+### 💡 背景
+現在、以下の警告ログが出力されています：
+```
+2025-06-16 17:54:34,690 - ERROR - 🔍 信頼度要素デバッグ:
+⚠️ 未定義の戦略: Full_ML, デフォルト(Balanced)を使用
+```
+
+これらは機能的な問題ではありませんが、ログの可読性と戦略管理の観点から修正が推奨されます。
 
 ---
 

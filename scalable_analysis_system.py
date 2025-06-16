@@ -12,7 +12,7 @@ from multiprocessing import cpu_count
 import shutil
 import gzip
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 
@@ -244,27 +244,10 @@ class ScalableAnalysisSystem:
             print(f"🎯 実データによる戦略分析を開始: {symbol} {timeframe} {config} ({exchange})")
             print("   ⏳ データ取得とML分析のため、処理に数分かかる場合があります...")
             
-            # マルチプロセシング競合を防ぐため、一度だけボットを初期化
-            if not hasattr(self, '_bot_cache'):
-                self._bot_cache = {}
-            
-            bot_key = f"{exchange}_{symbol}"
-            if bot_key not in self._bot_cache:
-                bot = HighLeverageBotOrchestrator(use_default_plugins=True, exchange=exchange)
-                # データを一度だけ取得してキャッシュ
-                try:
-                    market_data = bot._fetch_market_data(symbol, timeframe)
-                    if market_data.empty:
-                        raise Exception(f"No market data available for {symbol}")
-                    bot._cached_data = market_data
-                    self._bot_cache[bot_key] = bot
-                    print(f"✅ {symbol} データキャッシュ完了: {len(market_data)} points")
-                except Exception as e:
-                    logger.error(f"Failed to cache data for {symbol}: {e}")
-                    raise
-            else:
-                bot = self._bot_cache[bot_key]
-                print(f"🔄 {symbol} キャッシュ済みデータを使用")
+            # 修正: ハードコード値問題解決のため、毎回新しいボットを作成（キャッシュ無効化）
+            # 理由: キャッシュされたデータの再利用により、全トレードで同じエントリー価格が使用される問題を解決
+            bot = HighLeverageBotOrchestrator(use_default_plugins=True, exchange=exchange)
+            print(f"🔄 {symbol} 新規ボットでデータ取得中... (価格多様性確保のため)")
             
             # 複数回分析を実行してトレードデータを生成（完全ログ抑制）
             trades = []
@@ -344,6 +327,9 @@ class ScalableAnalysisSystem:
                     
                     if not should_enter:
                         # 条件を満たさない場合はスキップ
+                        # デバッグログ追加
+                        if symbol == 'OP' and total_evaluations <= 5:  # 最初の5回のみログ
+                            logger.error(f"🚨 OP条件不満足 #{total_evaluations}: leverage={result.get('leverage')}, confidence={result.get('confidence')}, RR={result.get('risk_reward_ratio')}")
                         current_time += evaluation_interval
                         continue
                     
@@ -401,7 +387,10 @@ class ScalableAnalysisSystem:
                     # 実際のTP/SL価格
                     tp_price = sltp_levels.take_profit_price
                     sl_price = sltp_levels.stop_loss_price
-                    entry_price = current_price
+                    
+                    # 修正: 実際の市場データから各トレードのエントリー価格を取得
+                    # 理由: current_priceが固定値のため、実際の時系列データを使用
+                    entry_price = self._get_real_market_price(bot, symbol, timeframe, trade_time)
                     
                     # 成功確率（信頼度ベース）
                     is_success = np.random.random() < (confidence * 0.8 + 0.2)
@@ -539,6 +528,14 @@ class ScalableAnalysisSystem:
         
         # 全ての条件が満たされているかをチェック
         all_conditions_met = all(condition[1] for condition in conditions_met)
+        
+        # デバッグログ: OPの条件評価詳細
+        if 'OP' in str(analysis_result.get('symbol', '')):
+            logger.error(f"🔍 OP条件評価詳細:")
+            logger.error(f"   レバレッジ: {leverage} (必要: {conditions['min_leverage']}) → {leverage_ok}")
+            logger.error(f"   信頼度: {confidence:.1%} (必要: {conditions['min_confidence']:.1%}) → {confidence_ok}")
+            logger.error(f"   RR比: {risk_reward} (必要: {conditions['min_risk_reward']}) → {risk_reward_ok}")
+            logger.error(f"   結果: {all_conditions_met}")
         
         # デバッグ用ログ（条件満足時のみ詳細表示）
         if all_conditions_met:
@@ -903,6 +900,137 @@ class ScalableAnalysisSystem:
             
             logger.info(f"クリーンアップ完了: {deleted_records}レコード, {deleted_files}ファイル削除")
             return deleted_records, deleted_files
+    
+    def _get_real_market_price(self, bot, symbol, timeframe, trade_time):
+        """
+        実際の市場データから指定時刻の価格を取得
+        トレード時刻が属するローソク足のopen価格を使用（最も現実的）
+        
+        Args:
+            bot: HighLeverageBotOrchestrator インスタンス
+            symbol: 銘柄シンボル  
+            timeframe: 時間足
+            trade_time: トレード時刻
+        
+        Returns:
+            float: 実際の市場価格（該当ローソク足のopen価格）
+        """
+        try:
+            # ボットから実際の市場データを取得
+            if hasattr(bot, '_cached_data') and not bot._cached_data.empty:
+                market_data = bot._cached_data
+            else:
+                market_data = bot._fetch_market_data(symbol, timeframe)
+            
+            if market_data.empty:
+                raise Exception(f"市場データが空です: {symbol}")
+            
+            # データの timestamp カラムを確認・作成
+            if 'timestamp' not in market_data.columns:
+                if market_data.index.name == 'timestamp' or pd.api.types.is_datetime64_any_dtype(market_data.index):
+                    # インデックスがタイムスタンプの場合
+                    market_data = market_data.reset_index()
+                    if 'index' in market_data.columns:
+                        market_data = market_data.rename(columns={'index': 'timestamp'})
+                else:
+                    # インデックスがタイムスタンプでない場合は作成
+                    market_data['timestamp'] = pd.to_datetime(market_data.index)
+            
+            # timestampカラムをdatetime型に確実に変換
+            market_data['timestamp'] = pd.to_datetime(market_data['timestamp'])
+            
+            # trade_timeをUTCに変換
+            if trade_time.tzinfo is None:
+                target_time = trade_time
+            else:
+                target_time = trade_time.astimezone(timezone.utc)
+            
+            # trade_timeが属するローソク足の開始時刻を計算
+            candle_start_time = self._get_candle_start_time(target_time, timeframe)
+            
+            # 該当するローソク足を特定（タイムゾーン考慮）
+            # market_dataのタイムスタンプをUTCに統一
+            if market_data['timestamp'].dt.tz is None:
+                market_data['timestamp'] = market_data['timestamp'].dt.tz_localize('UTC')
+            else:
+                market_data['timestamp'] = market_data['timestamp'].dt.tz_convert('UTC')
+            
+            # candle_start_timeもUTCに統一
+            if candle_start_time.tzinfo is None:
+                candle_start_time = candle_start_time.replace(tzinfo=timezone.utc)
+            else:
+                candle_start_time = candle_start_time.astimezone(timezone.utc)
+            
+            # より柔軟なマッチング（数分の誤差を許容）
+            time_tolerance = timedelta(minutes=1)
+            target_candles = market_data[
+                abs(market_data['timestamp'] - candle_start_time) <= time_tolerance
+            ]
+            
+            if target_candles.empty:
+                # デバッグ情報を追加
+                available_times = market_data['timestamp'].head(10).tolist()
+                raise Exception(
+                    f"該当ローソク足が見つかりません: {symbol} {timeframe} "
+                    f"trade_time={target_time}, candle_start={candle_start_time}. "
+                    f"利用可能な最初の10件: {available_times}. "
+                    f"実際の値のみ使用のため、フォールバックは使用しません。"
+                )
+            
+            # 最も近いローソク足を選択
+            target_candle = target_candles.iloc[0]
+            
+            # そのローソク足のopen価格を返す（最も現実的なエントリー価格）
+            open_price = float(target_candle['open'])
+            
+            return open_price
+            
+        except Exception as e:
+            # フォールバックは使用せず、エラーで戦略分析を終了
+            raise Exception(f"実際の市場価格取得に失敗: {symbol} - {str(e)}")
+    
+    def _get_candle_start_time(self, trade_time, timeframe):
+        """
+        トレード時刻が属するローソク足の開始時刻を計算
+        
+        Args:
+            trade_time: トレード時刻
+            timeframe: 時間足（例: '15m', '1h', '4h'）
+        
+        Returns:
+            datetime: ローソク足の開始時刻
+        """
+        # 時間足を分単位に変換
+        timeframe_minutes = {
+            '1m': 1, '3m': 3, '5m': 5, '15m': 15, 
+            '30m': 30, '1h': 60, '4h': 240, '1d': 1440
+        }
+        
+        if timeframe not in timeframe_minutes:
+            raise Exception(f"サポートされていない時間足: {timeframe}")
+        
+        minutes_interval = timeframe_minutes[timeframe]
+        
+        # trade_timeを該当するローソク足の開始時刻に丸める
+        if timeframe == '1d':
+            # 日足の場合は00:00:00に丸める
+            candle_start = trade_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            # 分足・時間足の場合
+            total_minutes = trade_time.hour * 60 + trade_time.minute
+            candle_minutes = (total_minutes // minutes_interval) * minutes_interval
+            
+            candle_hour = candle_minutes // 60
+            candle_minute = candle_minutes % 60
+            
+            candle_start = trade_time.replace(
+                hour=candle_hour, 
+                minute=candle_minute, 
+                second=0, 
+                microsecond=0
+            )
+        
+        return candle_start
 
 def generate_large_scale_configs(symbols_count=20, timeframes=4, configs=10):
     """大規模設定を生成"""

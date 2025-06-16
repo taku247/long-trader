@@ -375,14 +375,78 @@ class ScalableAnalysisSystem:
                         timestamp=trade_time
                     )
                     
-                    # TP/SL価格を実際に計算
-                    sltp_levels = sltp_calculator.calculate_levels(
-                        current_price=current_price,
-                        leverage=leverage,
-                        support_levels=[],  # 簡易実装のため空
-                        resistance_levels=[],  # 簡易実装のため空
-                        market_context=market_context
-                    )
+                    # 実際の支持線・抵抗線データを検出（柔軟なアダプター版）
+                    try:
+                        from engines.support_resistance_adapter import FlexibleSupportResistanceDetector
+                        
+                        # OHLCVデータを同期的に取得（ボット内のキャッシュされたデータを使用）
+                        try:
+                            # ボットが既に取得したOHLCVデータを取得
+                            import asyncio
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            ohlcv_data = loop.run_until_complete(
+                                api_client.get_ohlcv_data_with_period(symbol, timeframe, days=30)
+                            )
+                            loop.close()
+                        except Exception as ohlcv_error:
+                            # OHLCVデータ取得に失敗した場合はフォールバック
+                            raise Exception(f"OHLCVデータ取得に失敗: {str(ohlcv_error)}")
+                        
+                        if len(ohlcv_data) < 50:
+                            raise Exception(f"支持線・抵抗線検出に必要なデータが不足しています。{len(ohlcv_data)}本（最低50本必要）")
+                        
+                        # 柔軟な支持線・抵抗線検出器を初期化（設定ファイル対応）
+                        detector = FlexibleSupportResistanceDetector(
+                            min_touches=2, 
+                            tolerance_pct=0.01,
+                            use_ml_enhancement=True
+                        )
+                        
+                        # プロバイダー情報をログに表示
+                        provider_info = detector.get_provider_info()
+                        print(f"       検出プロバイダー: {provider_info['base_provider']}")
+                        print(f"       ML強化: {provider_info['ml_provider']}")
+                        
+                        # 支持線・抵抗線を検出
+                        support_levels, resistance_levels = detector.detect_levels(ohlcv_data, current_price)
+                        
+                        # 上位レベルのみ選択（パフォーマンス向上）
+                        max_levels = 3
+                        support_levels = support_levels[:max_levels]
+                        resistance_levels = resistance_levels[:max_levels]
+                        
+                        if not support_levels and not resistance_levels:
+                            raise Exception(f"有効な支持線・抵抗線が検出されませんでした。市場データが不十分である可能性があります。")
+                        
+                        print(f"   ✅ 支持線・抵抗線検出成功: 支持線{len(support_levels)}個, 抵抗線{len(resistance_levels)}個")
+                        
+                        # ML予測スコア情報も表示
+                        if provider_info['ml_provider'] != "Disabled":
+                            if support_levels:
+                                avg_ml_score = np.mean([getattr(s, 'ml_bounce_probability', 0) for s in support_levels])
+                                print(f"       支持線ML反発予測: 平均{avg_ml_score:.2f}")
+                            if resistance_levels:
+                                avg_ml_score = np.mean([getattr(r, 'ml_bounce_probability', 0) for r in resistance_levels])
+                                print(f"       抵抗線ML反発予測: 平均{avg_ml_score:.2f}")
+                        else:
+                            print(f"       ML予測: 無効化")
+                        
+                        # TP/SL価格を実際のデータで計算
+                        sltp_levels = sltp_calculator.calculate_levels(
+                            current_price=current_price,
+                            leverage=leverage,
+                            support_levels=support_levels,
+                            resistance_levels=resistance_levels,
+                            market_context=market_context
+                        )
+                        
+                    except Exception as e:
+                        # 支持線・抵抗線データ不足により分析を停止
+                        error_msg = f"支持線・抵抗線データの検出・分析に失敗: {str(e)}"
+                        print(f"❌ {symbol} {timeframe} {config}: {error_msg}")
+                        logger.error(f"Support/resistance analysis error for {symbol}: {error_msg}")
+                        raise Exception(f"戦略分析失敗 - {error_msg}")
                     
                     # 実際のTP/SL価格
                     tp_price = sltp_levels.take_profit_price

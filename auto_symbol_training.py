@@ -326,7 +326,20 @@ class AutoSymbolTrainer:
             self.logger.info(f"Generated {len(configs)} backtest configurations")
             
             # バックテスト実行（ScalableAnalysisSystemを使用）
-            processed_count = self.analysis_system.generate_batch_analysis(configs)
+            # Level 1厳格検証: 支持線・抵抗線データ不足時は処理停止
+            try:
+                processed_count = self.analysis_system.generate_batch_analysis(configs)
+                if processed_count == 0:
+                    raise Exception("支持線・抵抗線データが不足しているため、すべての戦略パターンが失敗しました。")
+            except Exception as e:
+                if "支持線" in str(e) or "抵抗線" in str(e) or "CriticalAnalysis" in str(e):
+                    # 支持線・抵抗線データ不足による致命的エラー
+                    error_msg = f"❌ {symbol}: 必須の支持線・抵抗線データが不足しています。銘柄追加を中断します。"
+                    self.logger.error(error_msg)
+                    raise Exception(error_msg)
+                else:
+                    # その他のエラー
+                    raise
             
             # 結果の集計（データベースから取得）
             results = []

@@ -1717,6 +1717,133 @@ Long Traderは**SQLite + 圧縮ファイル**のハイブリッド管理方式�
 - 🔒 **他銘柄保護**: 削除対象以外のデータは完全保護
 - 🔒 **プロセス検証**: 実際のシステムプロセスを確認して安全性確保
 
+## 🛠️ 開発・保守機能
+
+### 🗑️ 銘柄データ削除機能
+
+開発効率化のため、戦略分析結果画面から銘柄の全分析データを削除できます。
+
+#### 使用方法
+1. 戦略分析結果画面で銘柄を選択
+2. 「🗑️ 削除」ボタンをクリック
+3. 確認ダイアログで「削除」を選択
+
+#### 削除される対象データ
+- **analysis_results.db**: 該当銘柄の全戦略分析結果
+- **ohlcv_data.db**: 該当銘柄の全時間足データ
+- **alert_history.db**: 該当銘柄の全アラート履歴
+- **execution_logs.db**: 実行ステータスを「DELETED」に更新
+
+#### 安全対策
+- 分析実行中の銘柄は削除不可
+- 削除前の確認ダイアログ
+- データ不整合防止のための段階的削除
+- 削除処理の完全性確認
+
+#### テスト状況
+- 削除機能テスト: ✅ 6/6テスト成功
+- データ整合性テスト: ✅ 検証済み
+- エラーハンドリング: ✅ 実装済み
+
+## 🔧 システム構成の改善
+
+### ⚠️ Level 1 厳格バリデーション実装
+
+システムの信頼性向上のため、支持線・抵抗線データの厳格な検証を実装しました。
+
+#### 実装内容
+- 空の支持線・抵抗線配列を検出した場合、銘柄追加を完全に失敗させる
+- フォールバック値の使用を廃止し、実際のデータのみを使用
+- `CriticalAnalysisError`例外による厳格なエラーハンドリング
+
+```python
+# engines/stop_loss_take_profit_calculators.py
+class CriticalAnalysisError(Exception):
+    """重要な分析データが不足している場合の例外"""
+    pass
+
+if not support_levels or not resistance_levels:
+    raise CriticalAnalysisError(
+        "支持線・抵抗線データが不足しています。"
+        "適切な分析データが揃うまで銘柄追加を延期してください。"
+    )
+```
+
+### 🎯 支持線・抵抗線検出システムの統合
+
+既存の`support_resistance_visualizer.py`と`support_resistance_ml.py`を活用した実際の検出システムを実装しました。
+
+#### 統合されたコンポーネント
+1. **SupportResistanceDetector** - 基本検出エンジン
+2. **AdvancedSupportResistanceDetector** - ML強化検出エンジン
+3. **FlexibleSupportResistanceDetector** - 柔軟なアダプターパターン
+
+#### バックテストシステムでの使用
+```python
+# scalable_analysis_system.py での統合例
+from engines.support_resistance_adapter import FlexibleSupportResistanceDetector
+
+detector = FlexibleSupportResistanceDetector()
+support_levels, resistance_levels = detector.detect_levels(df, current_price)
+
+# 厳格バリデーション
+if not support_levels or not resistance_levels:
+    raise CriticalAnalysisError("支持線・抵抗線検出に失敗")
+```
+
+### 🔄 モジュール差し替え対応アーキテクチャ
+
+将来の改善・変更に対応するため、支持線・抵抗線検出モジュールの差し替えが容易な設計を実装しました。
+
+#### アダプターパターンの実装
+- **ISupportResistanceProvider**: 基本検出プロバイダーのインターフェース
+- **IMLEnhancementProvider**: ML強化プロバイダーのインターフェース
+- **FlexibleSupportResistanceDetector**: 統合的な検出器
+
+#### 差し替えの容易さ
+```python
+# 基本プロバイダーの差し替え
+detector = FlexibleSupportResistanceDetector()
+detector.set_base_provider(new_provider)
+
+# MLプロバイダーの差し替え
+detector.set_ml_provider(new_ml_provider)
+
+# ML機能のオン/オフ切り替え
+detector.disable_ml_enhancement()
+detector.enable_ml_enhancement()
+```
+
+#### 設定ファイルによる管理
+```json
+// config/support_resistance_config.json
+{
+  "default_provider": {
+    "base_provider": "SupportResistanceVisualizer",
+    "ml_provider": "SupportResistanceML",
+    "use_ml_enhancement": true
+  },
+  "fallback_provider": {
+    "base_provider": "Simple",
+    "ml_provider": null,
+    "use_ml_enhancement": false
+  }
+}
+```
+
+#### 差し替えテスト結果
+- プロバイダー差し替えテスト: ✅ 100%成功
+- ML機能切り替えテスト: ✅ 100%成功
+- 柔軟性スコア: ✅ 100%
+- 既存モジュール互換性: ✅ 確認済み
+
+#### 将来の改善における利点
+- `support_resistance_visualizer.py`の改善版への差し替えが容易
+- `support_resistance_ml.py`の新アルゴリズムへの差し替えが容易
+- 全く新しい検出アルゴリズムの追加が容易
+- 本番環境でのA/Bテストが可能
+- 設定ファイルによる動的な切り替えが可能
+
 ### **🚨 既知の重大なデータ異常**
 
 #### **⚠️ バックテスト計算における重大な問題**

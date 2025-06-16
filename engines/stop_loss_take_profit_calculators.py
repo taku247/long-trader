@@ -10,6 +10,11 @@ import os
 from typing import List
 import numpy as np
 
+
+class CriticalAnalysisError(Exception):
+    """重要な分析データが不足している場合の例外"""
+    pass
+
 # プロジェクトルートをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -79,9 +84,8 @@ class DefaultSLTPCalculator(IStopLossTakeProfitCalculator):
         """損切りライン計算（既存ロジック移植）"""
         
         if not support_levels:
-            # サポートレベルがない場合は固定パーセンテージ
-            stop_loss_distance = 0.05  # 5%
-            reasoning.append(f"📍 サポートなし: 固定5%で損切り設定")
+            # Level 1 厳格検証: サポートレベルが必須
+            raise CriticalAnalysisError("支持線データが不足しています。適切な損切りラインを計算できません。")
         else:
             # 最も近いサポートレベルを基準
             nearest_supports = [s for s in support_levels if s.price < current_price]
@@ -97,8 +101,8 @@ class DefaultSLTPCalculator(IStopLossTakeProfitCalculator):
                 reasoning.append(f"📍 最近サポート: {nearest_support.price:.4f} ({support_distance*100:.1f}%下)")
                 reasoning.append(f"💪 サポート強度: {support_strength:.2f}")
             else:
-                stop_loss_distance = 0.05
-                reasoning.append(f"📍 下方サポートなし: 固定5%で損切り設定")
+                # Level 1 厳格検証: 下方サポートが必須
+                raise CriticalAnalysisError("現在価格より下の支持線データが不足しています。適切な損切りラインを計算できません。")
         
         # レバレッジを考慮した損切り（資金の10%を上限）
         max_loss_pct = self.max_loss_pct_base / leverage
@@ -120,9 +124,8 @@ class DefaultSLTPCalculator(IStopLossTakeProfitCalculator):
         """利確ライン計算（既存ロジック移植）"""
         
         if not resistance_levels:
-            # レジスタンスレベルがない場合は固定パーセンテージ
-            take_profit_distance = 0.08  # 8%
-            reasoning.append(f"🎯 レジスタンスなし: 固定8%で利確設定")
+            # Level 1 厳格検証: レジスタンスレベルが必須
+            raise CriticalAnalysisError("抵抗線データが不足しています。適切な利確ラインを計算できません。")
         else:
             # 最も近いレジスタンスレベルを基準
             nearest_resistances = [r for r in resistance_levels if r.price > current_price]
@@ -142,8 +145,8 @@ class DefaultSLTPCalculator(IStopLossTakeProfitCalculator):
                 
                 reasoning.append(f"🎯 最近レジスタンス: {nearest_resistance.price:.4f} ({resistance_distance*100:.1f}%上)")
             else:
-                take_profit_distance = 0.08
-                reasoning.append(f"🎯 上方レジスタンスなし: 固定8%で利確設定")
+                # Level 1 厳格検証: 上方レジスタンスが必須
+                raise CriticalAnalysisError("現在価格より上の抵抗線データが不足しています。適切な利確ラインを計算できません。")
         
         take_profit_price = current_price * (1 + take_profit_distance)
         
@@ -221,10 +224,11 @@ class ConservativeSLTPCalculator(IStopLossTakeProfitCalculator):
                 reasoning.append(f"🛡️ サポート手前早期損切り: {support_distance*100:.1f}% → {stop_loss_distance*100:.1f}%")
             else:
                 stop_loss_distance = 0.03  # 3%
-                reasoning.append(f"🛡️ 下方サポートなし: 固定3%で早期損切り")
+                # Level 1 厳格検証: 下方サポートが必須
+                raise CriticalAnalysisError("現在価格より下の支持線データが不足しています。保守的戦略での適切な損切りラインを計算できません。")
         else:
-            stop_loss_distance = 0.03
-            reasoning.append(f"🛡️ サポートデータなし: 固定3%で早期損切り")
+            # Level 1 厳格検証: サポートデータが必須
+            raise CriticalAnalysisError("支持線データが不足しています。保守的戦略での適切な損切りラインを計算できません。")
         
         # レバレッジ考慮（より保守的）
         max_loss_pct = self.max_loss_pct_base / leverage
@@ -252,10 +256,11 @@ class ConservativeSLTPCalculator(IStopLossTakeProfitCalculator):
                 reasoning.append(f"🛡️ レジスタンス手前確実利確: {resistance_distance*100:.1f}% → {take_profit_distance*100:.1f}%")
             else:
                 take_profit_distance = 0.05  # 5%
-                reasoning.append(f"🛡️ 上方レジスタンスなし: 固定5%で確実利確")
+                # Level 1 厳格検証: 上方レジスタンスが必須
+                raise CriticalAnalysisError("現在価格より上の抵抗線データが不足しています。保守的戦略での適切な利確ラインを計算できません。")
         else:
-            take_profit_distance = 0.05
-            reasoning.append(f"🛡️ レジスタンスデータなし: 固定5%で確実利確")
+            # Level 1 厳格検証: レジスタンスデータが必須
+            raise CriticalAnalysisError("抵抗線データが不足しています。保守的戦略での適切な利確ラインを計算できません。")
         
         return current_price * (1 + take_profit_distance)
 
@@ -338,10 +343,11 @@ class AggressiveSLTPCalculator(IStopLossTakeProfitCalculator):
                     reasoning.append(f"🚀 サポート下抜け想定: {nearest_support.price:.4f}")
                 else:
                     stop_loss_distance = 0.10  # 10%
-                    reasoning.append(f"🚀 下方サポートなし: 固定10%でワイド損切り")
+                    # Level 1 厳格検証: 下方サポートが必須
+                    raise CriticalAnalysisError("現在価格より下の支持線データが不足しています。積極的戦略での適切な損切りラインを計算できません。")
         else:
-            stop_loss_distance = 0.10
-            reasoning.append(f"🚀 サポートデータなし: 固定10%でワイド損切り")
+            # Level 1 厳格検証: サポートデータが必須
+            raise CriticalAnalysisError("支持線データが不足しています。積極的戦略での適切な損切りラインを計算できません。")
         
         # レバレッジ考慮（積極的）
         max_loss_pct = self.max_loss_pct_base / leverage
@@ -379,10 +385,11 @@ class AggressiveSLTPCalculator(IStopLossTakeProfitCalculator):
                 reasoning.append(f"🚀 大幅ブレイクアウト狙い: {first_resistance.price:.4f} x{self.aggressive_take_profit_ratio}")
             else:
                 take_profit_distance = 0.15  # 15%
-                reasoning.append(f"🚀 上方レジスタンスなし: 固定15%で大幅利確")
+                # Level 1 厳格検証: 上方レジスタンスが必須
+                raise CriticalAnalysisError("現在価格より上の抵抗線データが不足しています。積極的戦略での適切な利確ラインを計算できません。")
         else:
-            take_profit_distance = 0.15
-            reasoning.append(f"🚀 レジスタンスデータなし: 固定15%で大幅利確")
+            # Level 1 厳格検証: レジスタンスデータが必須
+            raise CriticalAnalysisError("抵抗線データが不足しています。積極的戦略での適切な利確ラインを計算できません。")
         
         # ボラティリティが高い場合はさらに上を狙う
         if market_context.volatility > 0.05:

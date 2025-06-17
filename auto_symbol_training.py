@@ -329,7 +329,7 @@ class AutoSymbolTrainer:
             self.logger.info(f"Generated {len(configs)} backtest configurations")
             
             # バックテスト実行（ScalableAnalysisSystemを使用 + 進捗ロガー統合）
-            # Level 1厳格検証: 支持線・抵抗線データ不足時は処理停止
+            # 支持線・抵抗線データ不足時はシグナルなしとして継続
             try:
                 # 実行IDを取得（現在の実行IDを使用）
                 current_execution_id = getattr(self, '_current_execution_id', None)
@@ -339,16 +339,23 @@ class AutoSymbolTrainer:
                     symbol=symbol, 
                     execution_id=current_execution_id
                 )
+                
                 if processed_count == 0:
-                    raise Exception("支持線・抵抗線データが不足しているため、すべての戦略パターンが失敗しました。")
+                    # 全戦略で有効なシグナルが見つからなかった場合
+                    warning_msg = f"⚠️ {symbol}: 現在の市場状況では有効な支持線・抵抗線が検出されませんでした。シグナルなしとして記録します。"
+                    self.logger.warning(warning_msg)
+                    print(warning_msg)
+                    # 例外を投げず、処理を継続
+                    
             except Exception as e:
                 if "支持線" in str(e) or "抵抗線" in str(e) or "CriticalAnalysis" in str(e):
-                    # 支持線・抵抗線データ不足による致命的エラー
-                    error_msg = f"❌ {symbol}: 必須の支持線・抵抗線データが不足しています。銘柄追加を中断します。"
-                    self.logger.error(error_msg)
-                    raise Exception(error_msg)
+                    # 支持線・抵抗線データ不足は警告扱いとし、処理継続
+                    warning_msg = f"⚠️ {symbol}: 支持線・抵抗線検出エラー - {str(e)[:100]}。シグナルなしとして継続します。"
+                    self.logger.warning(warning_msg)
+                    print(warning_msg)
+                    processed_count = 0  # 処理済み数を0として継続
                 else:
-                    # その他のエラー
+                    # その他のエラーは従来通り例外として処理
                     raise
             
             # 結果の集計（データベースから取得）

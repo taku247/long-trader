@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>銘柄管理 - Long Trader</title>
+    
+    <!-- CSS Dependencies -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dashboard.css') }}" rel="stylesheet">
+    <style>
+        /* Symbol-specific styles */
+        .symbol-card {
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+            margin-bottom: 1rem;
+        }
+        
+        .symbol-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: #0d6efd;
+        }
+        
+        .add-symbol-section {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        /* Tab Navigation */
+        .symbol-tabs {
+            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 1rem;
+        }
+        
+        .symbol-tab {
+            background: none;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            margin-right: 0.5rem;
+            border-radius: 8px 8px 0 0;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .symbol-tab.active {
+            background-color: #0d6efd;
+            color: white;
+        }
+        
+        .symbol-tab:not(.active):hover {
+            background-color: #e9ecef;
+        }
+        
+        .tab-badge {
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+        }
+        
+        .symbol-tab.active .tab-badge {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Progress Bars */
+        .symbol-progress-bar {
+            height: 8px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+        
+        .symbol-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            transition: width 0.5s ease;
+        }
+        
+        .symbol-progress-fill.running {
+            background: linear-gradient(90deg, #007bff, #6610f2);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        /* Symbol Status Cards */
+        .symbol-status-card {
+            border-left: 4px solid;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: white;
+            border-radius: 0 8px 8px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .symbol-status-card.completed {
+            border-left-color: #28a745;
+        }
+        
+        .symbol-status-card.running {
+            border-left-color: #007bff;
+        }
+        
+        .symbol-status-card.pending {
+            border-left-color: #ffc107;
+        }
+        
+        .symbol-status-card.failed {
+            border-left-color: #dc3545;
+        }
+        
+        /* Strategy Progress */
+        .strategy-group {
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .strategy-icons {
+            display: inline-flex;
+            gap: 0.25rem;
+        }
+        
+        .strategy-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+            display: inline-block;
+        }
+        
+        .strategy-icon.completed {
+            background-color: #28a745;
+        }
+        
+        .strategy-icon.running {
+            background-color: #007bff;
+            animation: pulse 1s infinite;
+        }
+        
+        .strategy-icon.pending {
+            background-color: #e9ecef;
+            border: 1px solid #dee2e6;
+        }
+        
+        /* Time Display */
+        .time-info {
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin-top: 0.5rem;
+        }
+        
+        /* Update Status */
+        .update-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            z-index: 1000;
+        }
+        
+        .popular-symbols {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        
+        .popular-symbol-tag {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .popular-symbol-tag:hover {
+            transform: scale(1.05);
+        }
+        
+        /* Tab Content */
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- Header -->
+        <nav class="navbar navbar-dark bg-dark">
+            <div class="container-fluid">
+                <span class="navbar-brand mb-0 h1">
+                    <i class="fas fa-coins"></i> 戦略分析銘柄管理
+                </span>
+                <div class="d-flex align-items-center">
+                    <!-- Exchange Switcher -->
+                    <div class="dropdown me-3">
+                        <button class="btn btn-outline-warning btn-sm dropdown-toggle" type="button" id="exchangeDropdown" data-bs-toggle="dropdown">
+                            <i class="fas fa-exchange-alt"></i> <span id="current-exchange">Gate.io</span>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="switchExchange('hyperliquid')">
+                                <i class="fas fa-fire text-warning"></i> Hyperliquid
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="switchExchange('gateio')">
+                                <i class="fas fa-globe text-info"></i> Gate.io
+                            </a></li>
+                        </ul>
+                    </div>
+                    
+                    <a href="/" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-arrow-left"></i> ダッシュボード
+                    </a>
+                    <a href="/analysis" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-chart-line"></i> 履歴分析
+                    </a>
+                    <a href="/strategy-results" class="btn btn-outline-light btn-sm me-2">
+                        <i class="fas fa-chart-bar"></i> 戦略結果
+                    </a>
+                    <a href="/settings" class="btn btn-outline-light btn-sm">
+                        <i class="fas fa-cog"></i> 設定
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Message Area -->
+        <div id="message-area" class="message-area"></div>
+
+        <!-- Add Symbol Section -->
+        <div class="add-symbol-section mt-3">
+            <div class="text-center">
+                <h3 class="mb-4">
+                    <i class="fas fa-plus-circle"></i> 新規銘柄を追加
+                </h3>
+                
+                <div class="symbol-search-box" style="max-width: 500px; margin: 0 auto;">
+                    <div class="input-group input-group-lg">
+                        <input type="text" 
+                               class="form-control" 
+                               id="new-symbol-input" 
+                               placeholder="銘柄名を入力 (例: BTC, ETH, SOL)"
+                               maxlength="10"
+                               autocomplete="off">
+                        <button class="btn btn-primary" type="button" id="btn-add-symbol">
+                            <i class="fas fa-search"></i> 分析開始
+                        </button>
+                    </div>
+                    
+                    <div class="form-text mt-2">
+                        <i class="fas fa-info-circle"></i> 
+                        入力された銘柄に対して自動的に全時間足・全戦略での学習とバックテストを実行します
+                    </div>
+                    
+                    <!-- Popular Symbols -->
+                    <div class="popular-symbols">
+                        <small class="text-muted me-2">人気の銘柄:</small>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="BTC">BTC</span>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="ETH">ETH</span>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="SOL">SOL</span>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="AVAX">AVAX</span>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="DOGE">DOGE</span>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="LINK">LINK</span>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="ARB">ARB</span>
+                        <span class="badge bg-secondary popular-symbol-tag" data-symbol="OP">OP</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Symbol Management Tabs -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="symbol-tabs">
+                            <button class="symbol-tab active" data-tab="running">
+                                🔄 実行中<span class="tab-badge" id="running-count">0</span>
+                            </button>
+                            <button class="symbol-tab" data-tab="completed">
+                                ✅ 完了済み<span class="tab-badge" id="completed-count">0</span>
+                            </button>
+                            <button class="symbol-tab" data-tab="pending">
+                                ⏳ 待機中<span class="tab-badge" id="pending-count">0</span>
+                            </button>
+                            <button class="symbol-tab" data-tab="failed">
+                                ❌ 失敗<span class="tab-badge" id="failed-count">0</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Running Tab -->
+                        <div id="running-tab" class="tab-content active">
+                            <div class="row">
+                                <div class="col-12">
+                                    <div id="running-symbols" class="symbols-container">
+                                        <!-- Dynamic content -->
+                                        <div class="empty-state">
+                                            <i class="fas fa-cogs"></i>
+                                            <p>現在実行中の銘柄はありません</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Completed Tab -->
+                        <div id="completed-tab" class="tab-content">
+                            <div class="row">
+                                <div class="col-12">
+                                    <div id="completed-symbols" class="symbols-container">
+                                        <!-- Dynamic content -->
+                                        <div class="empty-state">
+                                            <i class="fas fa-check-circle"></i>
+                                            <p>完了した銘柄はまだありません</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pending Tab -->
+                        <div id="pending-tab" class="tab-content">
+                            <div class="row">
+                                <div class="col-12">
+                                    <div id="pending-symbols" class="symbols-container">
+                                        <!-- Dynamic content -->
+                                        <div class="empty-state">
+                                            <i class="fas fa-clock"></i>
+                                            <p>待機中の銘柄はありません</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Failed Tab -->
+                        <div id="failed-tab" class="tab-content">
+                            <div class="row">
+                                <div class="col-12">
+                                    <div id="failed-symbols" class="symbols-container">
+                                        <!-- Dynamic content -->
+                                        <div class="empty-state">
+                                            <i class="fas fa-exclamation-triangle"></i>
+                                            <p>失敗した銘柄はありません</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Status -->
+    <div class="update-status">
+        <span id="last-updated">最終更新: --:--:--</span>
+        <span class="update-interval">・20秒毎自動更新</span>
+    </div>
+
+    <!-- JavaScript Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- ウォレット拡張機能エラーハンドリング -->
+    <script>
+        // MetaMaskやウォレット拡張機能のエラーを無視
+        window.addEventListener('error', function(e) {
+            if (e.message.includes('ethereum') || 
+                e.message.includes('MetaMask') || 
+                e.message.includes('provider') ||
+                e.filename.includes('evmAsk') ||
+                e.filename.includes('inpage')) {
+                e.preventDefault();
+                return false;
+            }
+        });
+        
+        // runtime.lastError を無視
+        window.addEventListener('unhandledrejection', function(e) {
+            if (e.reason && e.reason.message && 
+                (e.reason.message.includes('extension') || 
+                 e.reason.message.includes('connection') ||
+                 e.reason.message.includes('MetaMask'))) {
+                e.preventDefault();
+                return false;
+            }
+        });
+    </script>
+    
+    <script src="/static/js/symbols_new.js"></script>
+</body>
+</html>

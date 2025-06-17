@@ -403,6 +403,116 @@ class WebDashboard:
             """Symbol management page."""
             return render_template('symbols.html')
         
+        @self.app.route('/symbols-new')
+        def symbols_new_page():
+            """New symbol management page with integrated progress display."""
+            return render_template('symbols_new.html')
+        
+        @self.app.route('/api/symbols/status')
+        def api_symbols_status():
+            """Get symbols status with detailed progress information."""
+            try:
+                from execution_log_database import ExecutionLogDatabase
+                import sqlite3
+                from datetime import datetime, timedelta
+                
+                db = ExecutionLogDatabase()
+                
+                # Get all recent executions
+                with sqlite3.connect(db.db_path) as conn:
+                    cursor = conn.execute('''
+                        SELECT execution_id, status, symbol, progress_percentage, 
+                               current_operation, errors, timestamp_start, timestamp_end
+                        FROM execution_logs 
+                        WHERE symbol IS NOT NULL
+                        ORDER BY timestamp_start DESC 
+                        LIMIT 100
+                    ''')
+                    
+                    rows = cursor.fetchall()
+                
+                # Categorize symbols by status
+                symbols_data = {
+                    'running': [],
+                    'completed': [],
+                    'pending': [],
+                    'failed': []
+                }
+                
+                # Process execution data
+                for row in rows:
+                    exec_id, status, symbol, progress, current_op, errors_json, start_time, end_time = row
+                    
+                    if not symbol:
+                        continue
+                    
+                    # Skip duplicates (keep only latest for each symbol)
+                    if any(s['symbol'] == symbol for status_list in symbols_data.values() for s in status_list):
+                        continue
+                    
+                    # Calculate elapsed time
+                    try:
+                        start_dt = datetime.fromisoformat(start_time)
+                        if end_time:
+                            end_dt = datetime.fromisoformat(end_time)
+                            elapsed_seconds = (end_dt - start_dt).total_seconds()
+                        else:
+                            elapsed_seconds = (datetime.now() - start_dt).total_seconds()
+                    except:
+                        elapsed_seconds = 0
+                    
+                    # Parse errors
+                    try:
+                        errors = json.loads(errors_json) if errors_json else []
+                    except:
+                        errors = []
+                    
+                    # Estimate remaining time (rough estimation)
+                    estimated_remaining = None
+                    if status == 'RUNNING' and progress and progress > 0:
+                        estimated_total = elapsed_seconds / (progress / 100)
+                        estimated_remaining = max(0, estimated_total - elapsed_seconds)
+                    
+                    # Create symbol data
+                    symbol_data = {
+                        'symbol': symbol,
+                        'execution_id': exec_id,
+                        'overall_progress': progress or 0,
+                        'current_phase': current_op or '',
+                        'elapsed_time': elapsed_seconds,
+                        'estimated_remaining': estimated_remaining,
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'errors': errors,
+                        'phase_progress': self._get_phase_progress(symbol, progress or 0)
+                    }
+                    
+                    # Add completion info for completed symbols
+                    if status == 'SUCCESS':
+                        symbol_data['best_strategy'] = self._get_best_strategy(symbol)
+                    
+                    # Categorize symbol
+                    if status == 'RUNNING':
+                        symbols_data['running'].append(symbol_data)
+                    elif status == 'SUCCESS':
+                        symbols_data['completed'].append(symbol_data)
+                    elif status == 'FAILED':
+                        symbols_data['failed'].append(symbol_data)
+                    elif status == 'PENDING':
+                        symbols_data['pending'].append(symbol_data)
+                
+                return jsonify(symbols_data)
+                
+            except Exception as e:
+                self.logger.error(f"Error getting symbols status: {e}")
+                return jsonify({
+                    'running': [],
+                    'completed': [],
+                    'pending': [],
+                    'failed': [],
+                    'error': str(e)
+                }), 500
+        
         # Settings Management Routes
         @self.app.route('/settings')
         def settings_page():
@@ -2092,6 +2202,103 @@ class WebDashboard:
         finally:
             self._stop_monitor()
             self.logger.system_stop("Web dashboard stopped")
+    
+    def _get_phase_progress(self, symbol: str, overall_progress: float) -> dict:
+        """Get detailed phase progress for a symbol."""
+        # This is a simplified estimation based on overall progress
+        # In a real implementation, you might store detailed progress in the database
+        
+        phases = {}
+        
+        # Data fetch phase (usually first 5% of progress)
+        if overall_progress >= 5:
+            phases['data_fetch'] = {
+                'status': 'completed',
+                'duration': 3.2  # estimated
+            }
+        elif overall_progress > 0:
+            phases['data_fetch'] = {
+                'status': 'running'
+            }
+        
+        # Strategy phases (remaining 95% divided among strategy groups)
+        strategy_groups = [
+            ('1h_strategies', 3),
+            ('30m_strategies', 3), 
+            ('15m_strategies', 3),
+            ('5m_strategies', 3),
+            ('3m_strategies', 3),
+            ('1m_strategies', 3)
+        ]
+        
+        # Estimate progress for each strategy group
+        total_strategies = sum(count for _, count in strategy_groups)
+        strategies_per_percent = total_strategies / 95  # 95% for all strategies
+        
+        current_strategy = int((overall_progress - 5) * strategies_per_percent) if overall_progress > 5 else 0
+        
+        completed_strategies = 0
+        for group_key, group_count in strategy_groups:
+            if completed_strategies + group_count <= current_strategy:
+                # Group fully completed
+                phases[group_key] = {
+                    'completed': group_count,
+                    'total': group_count,
+                    'progress': 100
+                }
+                completed_strategies += group_count
+            elif completed_strategies < current_strategy:
+                # Group partially completed
+                remaining_in_group = current_strategy - completed_strategies
+                phases[group_key] = {
+                    'completed': remaining_in_group,
+                    'total': group_count,
+                    'progress': int((remaining_in_group / group_count) * 100)
+                }
+                completed_strategies = current_strategy
+                break
+            else:
+                # Group not started
+                phases[group_key] = {
+                    'completed': 0,
+                    'total': group_count,
+                    'progress': 0
+                }
+        
+        return phases
+    
+    def _get_best_strategy(self, symbol: str) -> dict:
+        """Get best strategy results for a completed symbol."""
+        try:
+            from scalable_analysis_system import ScalableAnalysisSystem
+            
+            analysis_system = ScalableAnalysisSystem()
+            
+            # Query best performing strategy
+            results = analysis_system.query_analyses(
+                filters={'symbol': symbol},
+                sort_by='sharpe_ratio',
+                limit=1
+            )
+            
+            if not results.empty:
+                best = results.iloc[0]
+                return {
+                    'sharpe_ratio': best.get('sharpe_ratio', 0),
+                    'recommended_leverage': best.get('avg_leverage', 0),
+                    'max_return': best.get('total_return', 0) * 100,  # Convert to percentage
+                    'strategy_name': f"{best.get('timeframe', '')}_{best.get('config', '')}"
+                }
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to get best strategy for {symbol}: {e}")
+        
+        return {
+            'sharpe_ratio': 0,
+            'recommended_leverage': 0,
+            'max_return': 0,
+            'strategy_name': 'Unknown'
+        }
 
 
 def main():

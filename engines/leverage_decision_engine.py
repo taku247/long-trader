@@ -574,15 +574,58 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
 class SimpleMarketContextAnalyzer(IMarketContextAnalyzer):
     """シンプルな市場コンテキスト分析器"""
     
-    def analyze_market_phase(self, data: pd.DataFrame) -> MarketContext:
-        """市場フェーズを分析"""
+    def analyze_market_phase(self, data: pd.DataFrame, target_timestamp: datetime = None, is_realtime: bool = True) -> MarketContext:
+        """市場フェーズを分析
+        
+        Args:
+            data: OHLCVデータ
+            target_timestamp: 分析対象の時刻（バックテストの場合必須）
+            is_realtime: リアルタイム分析かどうかのフラグ
+        """
         try:
             if data.empty:
                 current_price = 1000.0
                 volume_24h = 1000000.0
                 volatility = 0.02
             else:
-                current_price = float(data['close'].iloc[-1])
+                # リアルタイム分析の場合
+                if is_realtime:
+                    # リアルタイムでは現在価格を使用
+                    # TODO: 実際のAPIから現在価格を取得する実装が必要
+                    # 現在は最新のclose価格を代用
+                    current_price = float(data['close'].iloc[-1])
+                    # 将来的には: current_price = self._fetch_realtime_price(symbol)
+                    
+                # バックテストの場合
+                else:
+                    # target_timestampが必須
+                    if target_timestamp is None:
+                        raise ValueError(
+                            "バックテスト分析ではtarget_timestampが必須です。"
+                            "is_realtime=Falseの場合は必ずtarget_timestampを指定してください。"
+                        )
+                    
+                    # timestampカラムの確認・作成
+                    if 'timestamp' not in data.columns:
+                        if pd.api.types.is_datetime64_any_dtype(data.index):
+                            data = data.reset_index()
+                            if 'index' in data.columns:
+                                data = data.rename(columns={'index': 'timestamp'})
+                        else:
+                            raise ValueError(
+                                "バックテスト分析ではデータにtimestampカラムが必要です。"
+                            )
+                    
+                    # タイムスタンプをdatetime型に変換
+                    data['timestamp'] = pd.to_datetime(data['timestamp'])
+                    
+                    # 該当時刻のローソク足を探す
+                    time_diff = abs(data['timestamp'] - target_timestamp)
+                    nearest_idx = time_diff.idxmin()
+                    
+                    # 該当ローソク足のopen価格を使用（エントリー時の実際の価格）
+                    current_price = float(data.loc[nearest_idx, 'open'])
+                
                 volume_24h = float(data['volume'].tail(24).sum()) if len(data) >= 24 else float(data['volume'].sum())
                 returns = data['close'].pct_change().dropna()
                 volatility = float(returns.std()) if len(returns) > 1 else 0.02
@@ -616,6 +659,9 @@ class SimpleMarketContextAnalyzer(IMarketContextAnalyzer):
                 timestamp=datetime.now()
             )
             
+        except ValueError as e:
+            # ValueErrorは再スロー（タイムスタンプ関連のエラー）
+            raise
         except Exception as e:
             print(f"市場コンテキスト分析エラー: {e}")
             return MarketContext(

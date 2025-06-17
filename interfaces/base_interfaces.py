@@ -8,6 +8,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
+from datetime import datetime
 from .data_types import (
     SupportResistanceLevel, BreakoutPrediction, BTCCorrelationRisk,
     MarketContext, LeverageRecommendation, StopLossTakeProfitLevels, 
@@ -170,12 +171,14 @@ class IMarketContextAnalyzer(ABC):
     """市場コンテキスト分析インターフェース"""
     
     @abstractmethod
-    def analyze_market_phase(self, data: pd.DataFrame) -> MarketContext:
+    def analyze_market_phase(self, data: pd.DataFrame, target_timestamp: datetime = None, is_realtime: bool = True) -> MarketContext:
         """
         現在の市場フェーズを分析
         
         Args:
             data: OHLCV データ
+            target_timestamp: 分析対象の時刻（バックテストの場合必須）
+            is_realtime: リアルタイム分析かどうかのフラグ
             
         Returns:
             市場コンテキスト

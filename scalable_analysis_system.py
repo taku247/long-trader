@@ -466,6 +466,10 @@ class ScalableAnalysisSystem:
                     # 理由: current_priceが固定値のため、実際の時系列データを使用
                     entry_price = self._get_real_market_price(bot, symbol, timeframe, trade_time)
                     
+                    # 戦略分析では、current_priceもentry_priceと同じにして整合性を保つ
+                    # これにより、同じローソク足のopen vs closeによる価格差を防ぐ
+                    current_price = entry_price
+                    
                     # 価格データ整合性チェック実行
                     price_consistency_result = self.price_validator.validate_price_consistency(
                         analysis_price=current_price,

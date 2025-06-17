@@ -159,7 +159,8 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             
             # === STEP 5: 市場コンテキスト分析 ===
             print("\n📈 市場コンテキスト分析中...")
-            market_context = self._analyze_market_context(market_data)
+            # リアルタイム分析として実行（現在価格を使用）
+            market_context = self._analyze_market_context(market_data, is_realtime=True)
             
             print(f"🎪 市場状況: {market_context.trend_direction} / {market_context.market_phase}")
             
@@ -317,12 +318,22 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         
         return None
     
-    def _analyze_market_context(self, data: pd.DataFrame) -> MarketContext:
-        """市場コンテキスト分析"""
+    def _analyze_market_context(self, data: pd.DataFrame, target_timestamp: datetime = None, is_realtime: bool = True) -> MarketContext:
+        """市場コンテキスト分析
+        
+        Args:
+            data: OHLCVデータ
+            target_timestamp: 分析対象の時刻（バックテストの場合）
+            is_realtime: リアルタイム分析かどうか
+        """
         
         try:
             if self.market_context_analyzer:
-                return self.market_context_analyzer.analyze_market_phase(data)
+                return self.market_context_analyzer.analyze_market_phase(
+                    data, 
+                    target_timestamp=target_timestamp,
+                    is_realtime=is_realtime
+                )
             
         except Exception as e:
             print(f"市場コンテキスト分析エラー: {e}")

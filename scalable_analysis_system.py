@@ -559,33 +559,33 @@ class ScalableAnalysisSystem:
                         data_source=exchange
                     )
                     
-                    # 成功確率（信頼度ベース）
-                    is_success = np.random.random() < (confidence * 0.8 + 0.2)
+                    # TP/SL到達ベースのクローズ判定（実際の市場データを使用）
+                    exit_time, exit_price, is_success = self._find_tp_sl_exit(
+                        bot, symbol, timeframe, trade_time, entry_price, tp_price, sl_price
+                    )
                     
-                    if is_success:
-                        # 成功時はTP価格付近でクローズ
-                        exit_price = tp_price * np.random.uniform(0.98, 1.02)  # TP価格の±2%
-                        pnl_pct = (exit_price - entry_price) / entry_price
-                    else:
-                        # 失敗時はSL価格付近でクローズ
-                        exit_price = sl_price * np.random.uniform(0.98, 1.02)  # SL価格の±2%
-                        pnl_pct = (exit_price - entry_price) / entry_price
+                    # 到達判定が失敗した場合のフォールバック
+                    if exit_time is None:
+                        # 営業時間内（平日の9:00-21:00 JST = 0:00-12:00 UTC）に調整
+                        if trade_time.weekday() >= 5:  # 土日は月曜に移動
+                            trade_time += timedelta(days=(7 - trade_time.weekday()))
+                        # 時間調整（9:00-21:00 JST = 0:00-12:00 UTC）
+                        hour = trade_time.hour
+                        if hour < 0:  # JST 9:00 = UTC 0:00
+                            trade_time = trade_time.replace(hour=0)
+                        elif hour > 12:  # JST 21:00 = UTC 12:00
+                            trade_time = trade_time.replace(hour=12)
+                        
+                        # フォールバック: 時間足に応じた期間後にクローズ
+                        exit_minutes = self._get_fallback_exit_minutes(timeframe)
+                        exit_time = trade_time + timedelta(minutes=exit_minutes)
+                        # フォールバック: 信頼度ベースの判定
+                        is_success = np.random.random() < (confidence * 0.8 + 0.2)
+                        exit_price = tp_price if is_success else sl_price
                     
-                    # レバレッジ適用
+                    # PnL計算
+                    pnl_pct = (exit_price - entry_price) / entry_price
                     leveraged_pnl = pnl_pct * leverage
-                    
-                    # 営業時間内（平日の9:00-21:00 JST = 0:00-12:00 UTC）に調整
-                    if trade_time.weekday() >= 5:  # 土日は月曜に移動
-                        trade_time += timedelta(days=(7 - trade_time.weekday()))
-                    # 時間調整（9:00-21:00 JST = 0:00-12:00 UTC）
-                    hour = trade_time.hour
-                    if hour < 0:  # JST 9:00 = UTC 0:00
-                        trade_time = trade_time.replace(hour=0)
-                    elif hour > 12:  # JST 21:00 = UTC 12:00
-                        trade_time = trade_time.replace(hour=12)
-                    
-                    # 退出時間は5分-2時間後
-                    exit_time = trade_time + timedelta(minutes=np.random.randint(5, 120))
                     
                     # バックテスト結果の総合検証
                     backtest_validation = self.price_validator.validate_backtest_result(
@@ -1251,6 +1251,99 @@ class ScalableAnalysisSystem:
             )
         
         return candle_start
+    
+    def _find_tp_sl_exit(self, bot, symbol, timeframe, entry_time, entry_price, tp_price, sl_price):
+        """
+        TP/SL到達ベースのクローズ判定
+        
+        Args:
+            bot: HighLeverageBotOrchestrator インスタンス
+            symbol: 銘柄シンボル
+            timeframe: 時間足
+            entry_time: エントリー時刻
+            entry_price: エントリー価格
+            tp_price: 利確価格
+            sl_price: 損切り価格
+            
+        Returns:
+            tuple: (exit_time, exit_price, is_success)
+        """
+        try:
+            # ボットから市場データを取得
+            if hasattr(bot, '_cached_data') and not bot._cached_data.empty:
+                market_data = bot._cached_data
+            else:
+                market_data = bot._fetch_market_data(symbol, timeframe)
+            
+            if market_data.empty:
+                return None, None, None
+            
+            # タイムスタンプカラムの準備
+            if 'timestamp' not in market_data.columns:
+                if market_data.index.name == 'timestamp' or pd.api.types.is_datetime64_any_dtype(market_data.index):
+                    market_data = market_data.reset_index()
+                    if 'index' in market_data.columns:
+                        market_data = market_data.rename(columns={'index': 'timestamp'})
+                else:
+                    market_data['timestamp'] = pd.to_datetime(market_data.index)
+            
+            # タイムスタンプを統一
+            market_data['timestamp'] = pd.to_datetime(market_data['timestamp'])
+            if market_data['timestamp'].dt.tz is None:
+                market_data['timestamp'] = market_data['timestamp'].dt.tz_localize('UTC')
+            else:
+                market_data['timestamp'] = market_data['timestamp'].dt.tz_convert('UTC')
+            
+            # entry_timeをUTCに変換
+            if entry_time.tzinfo is None:
+                entry_time_utc = entry_time.replace(tzinfo=timezone.utc)
+            else:
+                entry_time_utc = entry_time.astimezone(timezone.utc)
+            
+            # エントリー後のデータを取得
+            after_entry_data = market_data[market_data['timestamp'] > entry_time_utc].copy()
+            
+            if after_entry_data.empty:
+                return None, None, None
+            
+            # 各ローソク足でTP/SL到達をチェック
+            for _, candle in after_entry_data.iterrows():
+                # ロングポジションを想定
+                candle_high = float(candle['high'])
+                candle_low = float(candle['low'])
+                
+                # 利確ライン到達チェック
+                if candle_high >= tp_price:
+                    exit_time = candle['timestamp']
+                    exit_price = tp_price
+                    is_success = True
+                    return exit_time, exit_price, is_success
+                
+                # 損切りライン到達チェック
+                if candle_low <= sl_price:
+                    exit_time = candle['timestamp']
+                    exit_price = sl_price
+                    is_success = False
+                    return exit_time, exit_price, is_success
+            
+            # 評価期間内に到達しなかった場合
+            return None, None, None
+            
+        except Exception as e:
+            logger.warning(f"TP/SL到達判定エラー: {symbol} - {e}")
+            return None, None, None
+    
+    def _get_fallback_exit_minutes(self, timeframe):
+        """時間足に応じたフォールバック退出時間を取得"""
+        fallback_minutes = {
+            '1m': 15,    # 15分後
+            '3m': 30,    # 30分後
+            '5m': 45,    # 45分後
+            '15m': 60,   # 1時間後
+            '30m': 90,   # 1.5時間後
+            '1h': 120    # 2時間後
+        }
+        return fallback_minutes.get(timeframe, 60)
 
 def generate_large_scale_configs(symbols_count=20, timeframes=4, configs=10):
     """大規模設定を生成"""

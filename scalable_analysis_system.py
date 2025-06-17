@@ -542,10 +542,11 @@ class ScalableAnalysisSystem:
                         logger.warning(f"バックテスト結果異常検知: {symbol} {timeframe}")
                         logger.warning(f"問題: {', '.join(backtest_validation['issues'])}")
                         
-                        # 重大な問題がある場合はトレードをスキップ
+                        # 重大な問題がある場合は銘柄追加自体を停止
                         if backtest_validation['severity_level'] == 'critical':
-                            logger.error(f"重大なバックテスト異常のためトレードをスキップ: {symbol} at {trade_time}")
-                            continue
+                            logger.error(f"重大なバックテスト異常のため銘柄追加を停止: {symbol} at {trade_time}")
+                            logger.error(f"詳細: {', '.join(backtest_validation['issues'])}")
+                            raise Exception(f"重大なバックテスト異常検知: {', '.join(backtest_validation['issues'])}")
                     
                     # 日本時間（UTC+9）で表示
                     jst_entry_time = trade_time + timedelta(hours=9)

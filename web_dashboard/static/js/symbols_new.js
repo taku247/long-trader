@@ -57,6 +57,26 @@ class SymbolProgressManager {
         window.switchExchange = (exchange) => {
             this.switchExchange(exchange);
         };
+        
+        // 管理機能: ゾンビプロセスクリーンアップ
+        document.getElementById('btn-cleanup-zombies').addEventListener('click', () => {
+            this.cleanupZombieProcesses();
+        });
+        
+        // 管理機能: 手動リセット
+        const selectRunning = document.getElementById('select-running-symbol');
+        const btnReset = document.getElementById('btn-manual-reset');
+        
+        selectRunning.addEventListener('change', (e) => {
+            btnReset.disabled = !e.target.value;
+        });
+        
+        btnReset.addEventListener('click', () => {
+            const executionId = selectRunning.value;
+            if (executionId) {
+                this.manualResetExecution(executionId);
+            }
+        });
     }
     
     switchTab(tabName) {
@@ -151,6 +171,7 @@ class SymbolProgressManager {
             this.updateTabCounts();
             this.renderSymbols();
             this.updateLastUpdated();
+            this.updateRunningSymbolSelect();  // 実行中銘柄のセレクトボックスを更新
             
         } catch (error) {
             console.error('データ更新エラー:', error);
@@ -437,6 +458,93 @@ class SymbolProgressManager {
     
     destroy() {
         this.stopAutoUpdate();
+    }
+    
+    // 管理機能: 実行中銘柄のセレクトボックスを更新
+    updateRunningSymbolSelect() {
+        const select = document.getElementById('select-running-symbol');
+        if (!select) return;
+        
+        const currentValue = select.value;
+        select.innerHTML = '<option value="">実行中の銘柄を選択...</option>';
+        
+        this.symbolsData.running.forEach(symbol => {
+            const option = document.createElement('option');
+            option.value = symbol.execution_id;
+            option.textContent = `${symbol.symbol} (${symbol.overall_progress}% - ${symbol.execution_id.substring(0, 20)}...)`;
+            select.appendChild(option);
+        });
+        
+        // 以前の選択を復元
+        if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+            select.value = currentValue;
+        }
+    }
+    
+    // 管理機能: ゾンビプロセスクリーンアップ
+    async cleanupZombieProcesses() {
+        if (!confirm('12時間以上停滞している実行を失敗扱いにします。\n続行しますか？')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/admin/cleanup-zombies', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                this.showMessage(`✅ ${result.cleaned_count}件のゾンビプロセスをクリーンアップしました`, 'success');
+                // データを更新
+                await this.updateSymbolsData();
+            } else {
+                this.showMessage(`エラー: ${result.error || '不明なエラー'}`, 'danger');
+            }
+        } catch (error) {
+            this.showMessage(`ネットワークエラー: ${error.message}`, 'danger');
+        }
+    }
+    
+    // 管理機能: 手動リセット
+    async manualResetExecution(executionId) {
+        const symbol = this.symbolsData.running.find(s => s.execution_id === executionId);
+        if (!symbol) {
+            this.showMessage('選択した実行が見つかりません', 'warning');
+            return;
+        }
+        
+        if (!confirm(`${symbol.symbol}の実行を停止します。\n続行しますか？`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/admin/reset-execution', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ execution_id: executionId })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                this.showMessage(`✅ ${symbol.symbol}の実行を停止しました`, 'success');
+                // セレクトボックスをリセット
+                document.getElementById('select-running-symbol').value = '';
+                document.getElementById('btn-manual-reset').disabled = true;
+                // データを更新
+                await this.updateSymbolsData();
+            } else {
+                this.showMessage(`エラー: ${result.error || '不明なエラー'}`, 'danger');
+            }
+        } catch (error) {
+            this.showMessage(`ネットワークエラー: ${error.message}`, 'danger');
+        }
     }
 }
 

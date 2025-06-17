@@ -498,6 +498,8 @@ class WebDashboard:
                         symbols_data['completed'].append(symbol_data)
                     elif status == 'FAILED':
                         symbols_data['failed'].append(symbol_data)
+                    elif status == 'CANCELLED':
+                        symbols_data['failed'].append(symbol_data)  # CANCELLEDは失敗タブに表示
                     elif status == 'PENDING':
                         symbols_data['pending'].append(symbol_data)
                 
@@ -512,6 +514,123 @@ class WebDashboard:
                     'failed': [],
                     'error': str(e)
                 }), 500
+        
+        # Admin API Routes
+        @self.app.route('/api/admin/cleanup-zombies', methods=['POST'])
+        def api_cleanup_zombies():
+            """Clean up zombie processes (running for more than 12 hours)."""
+            try:
+                from execution_log_database import ExecutionLogDatabase
+                import sqlite3
+                import json
+                
+                db = ExecutionLogDatabase()
+                
+                with sqlite3.connect(db.db_path) as conn:
+                    # Find zombie processes
+                    cursor = conn.execute('''
+                        SELECT execution_id, symbol
+                        FROM execution_logs 
+                        WHERE status = 'RUNNING' 
+                        AND datetime(timestamp_start) < datetime('now', '-12 hours')
+                    ''')
+                    
+                    zombies = cursor.fetchall()
+                    cleaned_count = 0
+                    
+                    if zombies:
+                        # Update zombie processes to FAILED
+                        for exec_id, symbol in zombies:
+                            error_data = [{
+                                "error_type": "ProcessTimeout",
+                                "error_message": "Process terminated after 12+ hours of inactivity",
+                                "timestamp": datetime.now().isoformat()
+                            }]
+                            
+                            conn.execute('''
+                                UPDATE execution_logs 
+                                SET status = 'FAILED', 
+                                    timestamp_end = datetime('now'),
+                                    errors = ?
+                                WHERE execution_id = ?
+                            ''', (json.dumps(error_data), exec_id))
+                            
+                            cleaned_count += 1
+                            self.logger.info(f"Cleaned up zombie process: {symbol} ({exec_id})")
+                        
+                        conn.commit()
+                    
+                    return jsonify({
+                        'success': True,
+                        'cleaned_count': cleaned_count,
+                        'message': f'{cleaned_count}件のゾンビプロセスをクリーンアップしました'
+                    })
+                    
+            except Exception as e:
+                self.logger.error(f"Error cleaning up zombies: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/admin/reset-execution', methods=['POST'])
+        def api_reset_execution():
+            """Manually reset a running execution."""
+            try:
+                data = request.get_json()
+                execution_id = data.get('execution_id')
+                
+                if not execution_id:
+                    return jsonify({'error': '実行IDが指定されていません'}), 400
+                
+                from execution_log_database import ExecutionLogDatabase
+                import sqlite3
+                import json
+                
+                db = ExecutionLogDatabase()
+                
+                with sqlite3.connect(db.db_path) as conn:
+                    # Check if execution exists and is running
+                    cursor = conn.execute('''
+                        SELECT symbol, status
+                        FROM execution_logs 
+                        WHERE execution_id = ?
+                    ''', (execution_id,))
+                    
+                    row = cursor.fetchone()
+                    if not row:
+                        return jsonify({'error': '指定された実行が見つかりません'}), 404
+                    
+                    symbol, status = row
+                    
+                    if status != 'RUNNING':
+                        return jsonify({'error': f'実行は既に{status}状態です'}), 400
+                    
+                    # Update to CANCELLED
+                    error_data = [{
+                        "error_type": "ManualReset",
+                        "error_message": "Manually reset by user",
+                        "timestamp": datetime.now().isoformat()
+                    }]
+                    
+                    conn.execute('''
+                        UPDATE execution_logs 
+                        SET status = 'CANCELLED', 
+                            timestamp_end = datetime('now'),
+                            errors = ?
+                        WHERE execution_id = ?
+                    ''', (json.dumps(error_data), execution_id))
+                    
+                    conn.commit()
+                    
+                    self.logger.info(f"Manually reset execution: {symbol} ({execution_id})")
+                    
+                    return jsonify({
+                        'success': True,
+                        'symbol': symbol,
+                        'message': f'{symbol}の実行を停止しました'
+                    })
+                    
+            except Exception as e:
+                self.logger.error(f"Error resetting execution: {e}")
+                return jsonify({'error': str(e)}), 500
         
         # Settings Management Routes
         @self.app.route('/settings')
@@ -2277,7 +2396,7 @@ class WebDashboard:
             # Query best performing strategy
             results = analysis_system.query_analyses(
                 filters={'symbol': symbol},
-                sort_by='sharpe_ratio',
+                order_by='sharpe_ratio',
                 limit=1
             )
             

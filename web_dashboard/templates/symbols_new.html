@@ -255,6 +255,36 @@
         <!-- Message Area -->
         <div id="message-area" class="message-area"></div>
 
+        <!-- Admin Controls Section -->
+        <div class="admin-controls mt-3 mb-3">
+            <div class="card">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0"><i class="fas fa-tools"></i> 管理機能</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-broom"></i> ゾンビプロセスクリーンアップ</h6>
+                            <p class="text-muted small">12時間以上停滞している実行を自動的に失敗扱いにします</p>
+                            <button class="btn btn-warning" id="btn-cleanup-zombies">
+                                <i class="fas fa-skull"></i> ゾンビプロセスをクリーンアップ
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-stop-circle"></i> 手動リセット</h6>
+                            <p class="text-muted small">選択した実行中の銘柄を手動で停止します</p>
+                            <select class="form-select mb-2" id="select-running-symbol">
+                                <option value="">実行中の銘柄を選択...</option>
+                            </select>
+                            <button class="btn btn-danger" id="btn-manual-reset" disabled>
+                                <i class="fas fa-times-circle"></i> 選択した銘柄を停止
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Add Symbol Section -->
         <div class="add-symbol-section mt-3">
             <div class="text-center">

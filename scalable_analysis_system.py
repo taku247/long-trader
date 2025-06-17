@@ -19,6 +19,9 @@ from pathlib import Path
 # 価格データ整合性チェックシステムのインポート
 from engines.price_consistency_validator import PriceConsistencyValidator, UnifiedPriceData
 
+# 進捗ロガーのインポート
+from progress_logger import SymbolProgressLogger
+
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -90,18 +93,29 @@ class ScalableAnalysisSystem:
             
             conn.commit()
     
-    def generate_batch_analysis(self, batch_configs, max_workers=None):
+    def generate_batch_analysis(self, batch_configs, max_workers=None, symbol=None, execution_id=None):
         """
         バッチで大量の分析を並列生成
         
         Args:
             batch_configs: [{'symbol': 'BTC', 'timeframe': '1h', 'config': 'ML'}, ...]
             max_workers: 並列数（デフォルト: CPU数）
+            symbol: 銘柄名（進捗表示用）
+            execution_id: 実行ID（進捗表示用）
         """
         if max_workers is None:
             max_workers = min(cpu_count(), 4)  # Rate Limit対策で最大4並列
         
-        logger.info(f"バッチ分析開始: {len(batch_configs)}パターン, {max_workers}並列")
+        # 進捗ロガーの初期化
+        progress_logger = None
+        if symbol and execution_id:
+            progress_logger = SymbolProgressLogger(symbol, execution_id, len(batch_configs))
+            progress_logger.log_phase_start("バックテスト", f"{len(batch_configs)}パターン, {max_workers}並列")
+        else:
+            logger.info(f"バッチ分析開始: {len(batch_configs)}パターン, {max_workers}並列")
+        
+        self.max_workers = max_workers  # インスタンス変数として保存
+        self.progress_logger = progress_logger  # 進捗ロガーを保存
         
         # バッチをチャンクに分割
         chunk_size = max(1, len(batch_configs) // max_workers)
@@ -120,15 +134,27 @@ class ScalableAnalysisSystem:
                     # 各チャンクに30分のタイムアウトを設定
                     processed_count = future.result(timeout=1800)  # 30 minutes
                     total_processed += processed_count
-                    logger.info(f"チャンク {i+1}/{len(futures)} 完了: {processed_count}パターン処理")
+                    
+                    if progress_logger:
+                        # 進捗ログは個別戦略完了時に出力されるため、ここでは簡潔に
+                        pass
+                    else:
+                        logger.info(f"チャンク {i+1}/{len(futures)} 完了: {processed_count}パターン処理")
                 except Exception as e:
                     logger.error(f"チャンク {i+1} 処理エラー: {e}")
+                    if progress_logger:
+                        progress_logger.log_error(f"チャンク {i+1} 処理エラー: {e}", "バックテスト")
                     # エラーが発生してもプロセスプールを破損させない
                     if "BrokenProcessPool" in str(e):
                         logger.error("プロセスプール破損検出 - 残りのチャンクをスキップ")
                         break
         
-        logger.info(f"バッチ分析完了: {total_processed}パターン処理完了")
+        if progress_logger:
+            progress_logger.log_phase_complete("バックテスト")
+            progress_logger.log_final_summary(total_processed > 0)
+        else:
+            logger.info(f"バッチ分析完了: {total_processed}パターン処理完了")
+        
         return total_processed
     
     def _process_chunk(self, configs_chunk, chunk_id):
@@ -160,13 +186,25 @@ class ScalableAnalysisSystem:
                     logger.error(f"Missing required keys in config: {config}")
                     continue
                 
-                result = self._generate_single_analysis(
+                result, metrics = self._generate_single_analysis(
                     config['symbol'], 
                     config['timeframe'], 
                     strategy
                 )
                 if result:
                     processed += 1
+                    
+                    # 進捗ロガーが利用可能な場合、戦略完了をログ
+                    if hasattr(self, 'progress_logger') and self.progress_logger:
+                        try:
+                            self.progress_logger.log_strategy_complete(
+                                config['timeframe'], 
+                                strategy,
+                                metrics or {}
+                            )
+                        except Exception as log_error:
+                            logger.warning(f"Progress logging error: {log_error}")
+                    
                     if processed % 10 == 0:
                         logger.info(f"Chunk {chunk_id}: {processed}/{len(configs_chunk)} 完了")
             except Exception as e:
@@ -182,7 +220,7 @@ class ScalableAnalysisSystem:
         
         # 既存チェック
         if self._analysis_exists(analysis_id):
-            return False
+            return False, None
         
         # ハイレバレッジボットを使用した分析を試行
         try:
@@ -190,7 +228,7 @@ class ScalableAnalysisSystem:
         except Exception as e:
             logger.error(f"Real analysis failed for {symbol} {timeframe} {config}: {e}")
             logger.error(f"Analysis terminated - no fallback to sample data")
-            return False
+            return False, None
         
         # メトリクス計算
         metrics = self._calculate_metrics(trades_data)
@@ -206,7 +244,7 @@ class ScalableAnalysisSystem:
         # データベース保存
         self._save_to_database(symbol, timeframe, config, metrics, chart_path, compressed_path)
         
-        return True
+        return True, metrics
     
     def _get_exchange_from_config(self, config) -> str:
         """設定から取引所を取得"""
@@ -460,13 +498,33 @@ class ScalableAnalysisSystem:
                         logger.error(f"Support/resistance analysis error for {symbol}: {error_msg}")
                         raise Exception(f"戦略分析失敗 - {error_msg}")
                     
-                    # 実際のTP/SL価格
+                    # 🔧 重要な修正: 実際の市場データから各トレードのエントリー価格を取得
+                    # 理由: current_priceが固定値のため、実際の時系列データを使用
+                    entry_price = self._get_real_market_price(bot, symbol, timeframe, trade_time)
+                    
+                    # SL/TP価格をエントリー価格ベースで再計算
+                    sltp_levels = sltp_calculator.calculate_levels(
+                        current_price=entry_price,  # エントリー価格をベースに計算
+                        leverage=leverage,
+                        support_levels=support_levels,
+                        resistance_levels=resistance_levels,
+                        market_context=market_context
+                    )
+                    
+                    # 実際のTP/SL価格（エントリー価格ベース）
                     tp_price = sltp_levels.take_profit_price
                     sl_price = sltp_levels.stop_loss_price
                     
-                    # 修正: 実際の市場データから各トレードのエントリー価格を取得
-                    # 理由: current_priceが固定値のため、実際の時系列データを使用
-                    entry_price = self._get_real_market_price(bot, symbol, timeframe, trade_time)
+                    # 🔧 ロングポジションの価格論理チェック
+                    if sl_price >= entry_price:
+                        logger.error(f"重大エラー: 損切り価格({sl_price:.4f})がエントリー価格({entry_price:.4f})以上")
+                        continue
+                    if tp_price <= entry_price:
+                        logger.error(f"重大エラー: 利確価格({tp_price:.4f})がエントリー価格({entry_price:.4f})以下")
+                        continue
+                    if sl_price >= tp_price:
+                        logger.error(f"重大エラー: 損切り価格({sl_price:.4f})が利確価格({tp_price:.4f})以上")
+                        continue
                     
                     # 戦略分析では、current_priceもentry_priceと同じにして整合性を保つ
                     # これにより、同じローソク足のopen vs closeによる価格差を防ぐ

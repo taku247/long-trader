@@ -76,6 +76,9 @@ class AutoSymbolTrainer:
             
             self.logger.info(f"Execution ID: {execution_id}")
             
+            # 実行IDをインスタンス変数として保存（進捗ロガー用）
+            self._current_execution_id = execution_id
+            
             # 実行開始
             self.execution_db.update_execution_status(
                 execution_id,
@@ -325,10 +328,17 @@ class AutoSymbolTrainer:
             
             self.logger.info(f"Generated {len(configs)} backtest configurations")
             
-            # バックテスト実行（ScalableAnalysisSystemを使用）
+            # バックテスト実行（ScalableAnalysisSystemを使用 + 進捗ロガー統合）
             # Level 1厳格検証: 支持線・抵抗線データ不足時は処理停止
             try:
-                processed_count = self.analysis_system.generate_batch_analysis(configs)
+                # 実行IDを取得（現在の実行IDを使用）
+                current_execution_id = getattr(self, '_current_execution_id', None)
+                
+                processed_count = self.analysis_system.generate_batch_analysis(
+                    configs, 
+                    symbol=symbol, 
+                    execution_id=current_execution_id
+                )
                 if processed_count == 0:
                     raise Exception("支持線・抵抗線データが不足しているため、すべての戦略パターンが失敗しました。")
             except Exception as e:

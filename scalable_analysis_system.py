@@ -115,7 +115,7 @@ class ScalableAnalysisSystem:
             logger.info(f"バッチ分析開始: {len(batch_configs)}パターン, {max_workers}並列")
         
         self.max_workers = max_workers  # インスタンス変数として保存
-        self.progress_logger = progress_logger  # 進捗ロガーを保存
+        # self.progress_logger = progress_logger  # 🐛 Pickle化エラー修正: インスタンス変数への保存を無効化
         
         # バッチをチャンクに分割
         chunk_size = max(1, len(batch_configs) // max_workers)
@@ -195,15 +195,16 @@ class ScalableAnalysisSystem:
                     processed += 1
                     
                     # 進捗ロガーが利用可能な場合、戦略完了をログ
-                    if hasattr(self, 'progress_logger') and self.progress_logger:
-                        try:
-                            self.progress_logger.log_strategy_complete(
-                                config['timeframe'], 
-                                strategy,
-                                metrics or {}
-                            )
-                        except Exception as log_error:
-                            logger.warning(f"Progress logging error: {log_error}")
+                    # 🐛 Pickle化エラー修正: ProcessPoolExecutor環境では進捗ログを無効化
+                    # if hasattr(self, 'progress_logger') and self.progress_logger:
+                    #     try:
+                    #         self.progress_logger.log_strategy_complete(
+                    #             config['timeframe'], 
+                    #             strategy,
+                    #             metrics or {}
+                    #         )
+                    #     except Exception as log_error:
+                    #         logger.warning(f"Progress logging error: {log_error}")
                     
                     if processed % 10 == 0:
                         logger.info(f"Chunk {chunk_id}: {processed}/{len(configs_chunk)} 完了")

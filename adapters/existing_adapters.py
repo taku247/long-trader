@@ -12,6 +12,7 @@ import numpy as np
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import time
+import json
 
 # プロジェクトルートをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,15 +37,36 @@ class ExistingSupportResistanceAdapter(ISupportResistanceAnalyzer):
     
     def __init__(self):
         self.visualizer = None
+        self.config = None
+        self._load_config()
         try:
             # 既存の visualizer 初期化（関数ベースなので直接使用）
             pass
         except Exception as e:
             print(f"サポレジアダプター初期化エラー: {e}")
     
+    def _load_config(self):
+        """設定ファイルを読み込む"""
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                      'config', 'support_resistance_config.json')
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self.config = json.load(f)
+        except Exception as e:
+            print(f"設定ファイル読み込みエラー: {e}")
+            # デフォルト値を設定
+            self.config = {
+                "support_resistance_analysis": {
+                    "fractal_detection": {
+                        "min_distance_from_current_price_pct": 0.5
+                    }
+                }
+            }
+    
     def find_levels(self, data: pd.DataFrame, **kwargs) -> List[SupportResistanceLevel]:
         """
         既存の find_all_levels 関数をラップしてサポレジレベルを検出
+        🔧 バグ修正: 抵抗線は現在価格より上、サポート線は現在価格より下のみを返す
         """
         try:
             # データ構造を既存システムに合わせて変換
@@ -63,31 +85,54 @@ class ExistingSupportResistanceAdapter(ISupportResistanceAnalyzer):
             min_touches = kwargs.get('min_touches', 2)
             tolerance = kwargs.get('tolerance', 0.01)
             
+            # 現在価格を取得
+            current_price = data['close'].iloc[-1] if not data.empty else 1000.0
+            # 設定から最小距離を取得（%をデシマルに変換）
+            min_distance_pct_config = self.config.get('support_resistance_analysis', {}).get(
+                'fractal_detection', {}).get('min_distance_from_current_price_pct', 0.5)
+            min_distance_pct = kwargs.get('min_distance_pct', min_distance_pct_config / 100.0)
+            
             # 既存関数を呼び出し（引数を修正）
             levels_data = srv.find_all_levels(
                 data_copy, 
                 min_touches=min_touches
             )
             
-            # 標準データ型に変換
+            # 標準データ型に変換 + フィルタリング
             levels = []
-            current_price = data['close'].iloc[-1] if not data.empty else 1000.0
             
             for level_data in levels_data:
+                level_price = level_data.get('level', level_data.get('price', 0.0))
+                level_type = level_data.get('type', 'support')
+                
+                # 🔧 重要な修正: 現在価格との位置関係でフィルタリング
+                distance_pct = abs(level_price - current_price) / current_price
+                
+                # 最小距離チェック
+                if distance_pct < min_distance_pct:
+                    continue
+                
+                # 抵抗線は現在価格より上のみ、サポート線は現在価格より下のみ
+                if level_type == 'resistance' and level_price <= current_price:
+                    print(f"  🚨 除外: 抵抗線 ${level_price:.4f} が現在価格 ${current_price:.4f} 以下")
+                    continue
+                elif level_type == 'support' and level_price >= current_price:
+                    print(f"  🚨 除外: サポート線 ${level_price:.4f} が現在価格 ${current_price:.4f} 以上")
+                    continue
+                
                 level = SupportResistanceLevel(
-                    price=level_data.get('level', level_data.get('price', 0.0)),
+                    price=level_price,
                     strength=level_data.get('strength', 0.5),
                     touch_count=level_data.get('touches', level_data.get('touch_count', 1)),
-                    level_type=level_data.get('type', 'support'),
+                    level_type=level_type,
                     first_touch=datetime.now(),  # 実装では詳細な時刻情報が無いためデフォルト
                     last_touch=datetime.now(),
                     volume_at_level=level_data.get('volume', 0.0),
-                    distance_from_current=self._calculate_distance(
-                        level_data.get('level', level_data.get('price', 0.0)), 
-                        current_price
-                    )
+                    distance_from_current=self._calculate_distance(level_price, current_price)
                 )
                 levels.append(level)
+            
+            print(f"  ✅ フィルタ後: {len(levels)}個のレベル (現在価格: ${current_price:.4f})")
             
             return levels
             
@@ -150,6 +195,8 @@ class ExistingMLPredictorAdapter(IBreakoutPredictor):
         self.ml_system = None
         self.is_trained = False
         self.accuracy_metrics = {}
+        self.config = None
+        self._load_config()
         
         try:
             # 既存のMLシステムの初期化
@@ -157,6 +204,25 @@ class ExistingMLPredictorAdapter(IBreakoutPredictor):
             pass
         except Exception as e:
             print(f"ML予測アダプター初期化エラー: {e}")
+    
+    def _load_config(self):
+        """設定ファイルを読み込む"""
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                      'config', 'support_resistance_config.json')
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self.config = json.load(f)
+        except Exception as e:
+            print(f"設定ファイル読み込みエラー: {e}")
+            # デフォルト値を設定
+            self.config = {
+                "provider_settings": {
+                    "SupportResistanceML": {
+                        "distance_threshold": 0.02,
+                        "confidence_threshold": 0.6
+                    }
+                }
+            }
     
     def train_model(self, data: pd.DataFrame, levels: List[SupportResistanceLevel]) -> bool:
         """
@@ -177,11 +243,13 @@ class ExistingMLPredictorAdapter(IBreakoutPredictor):
             
             # 既存のML訓練プロセス
             self.is_trained = True
+            # ML設定から精度メトリクスを取得（存在しない場合はデフォルト値を使用）
+            ml_settings = self.config.get('provider_settings', {}).get('SupportResistanceML', {})
             self.accuracy_metrics = {
-                'accuracy': 0.57,  # 既存システムの実績値
-                'precision': 0.54,
-                'recall': 0.61,
-                'f1_score': 0.57
+                'accuracy': ml_settings.get('default_accuracy', 0.57),  # 既存システムの実績値
+                'precision': ml_settings.get('default_precision', 0.54),
+                'recall': ml_settings.get('default_recall', 0.61),
+                'f1_score': ml_settings.get('default_f1_score', 0.57)
             }
             
             print("ML予測モデルの訓練が完了しました")
@@ -226,17 +294,22 @@ class ExistingMLPredictorAdapter(IBreakoutPredictor):
             breakout_prob = max(0.1, min(0.9, breakout_prob))
             bounce_prob = 1.0 - breakout_prob
             
-            # 価格ターゲット計算
+            # 価格ターゲット計算（設定から取得、無ければデフォルト値）
+            ml_settings = self.config.get('provider_settings', {}).get('SupportResistanceML', {})
+            resistance_target_multiplier = ml_settings.get('resistance_target_multiplier', 1.02)
+            support_target_multiplier = ml_settings.get('support_target_multiplier', 0.98)
+            
             if level.level_type == 'resistance':
-                target_price = level.price * 1.02  # 2%上
+                target_price = level.price * resistance_target_multiplier
             else:
-                target_price = level.price * 0.98  # 2%下
+                target_price = level.price * support_target_multiplier
             
             return BreakoutPrediction(
                 level=level,
                 breakout_probability=breakout_prob,
                 bounce_probability=bounce_prob,
-                prediction_confidence=0.57,  # 既存システムの実績
+                prediction_confidence=self.config.get('provider_settings', {}).get(
+                    'SupportResistanceML', {}).get('confidence_threshold', 0.6),
                 predicted_price_target=target_price,
                 time_horizon_minutes=60,
                 model_name="ExistingMLAdapter"
@@ -339,7 +412,42 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
     def __init__(self):
         self.predictor = None
         self._initialized = False
+        self.config = None
+        self._load_config()
         # 初期化時はBTCAltcoinCorrelationPredictorを作成しない（429エラー回避）
+    
+    def _load_config(self):
+        """設定ファイルを読み込む"""
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                      'config', 'support_resistance_config.json')
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self.config = json.load(f)
+        except Exception as e:
+            print(f"設定ファイル読み込みエラー: {e}")
+            # デフォルト値を設定
+            self.config = {
+                "support_resistance_analysis": {
+                    "btc_correlation": {
+                        "default_correlation_factor": 0.8,
+                        "impact_multipliers": {
+                            "5_min": 0.8,
+                            "15_min": 0.9,
+                            "60_min": 1.0,
+                            "240_min": 1.1
+                        }
+                    },
+                    "liquidation_risk_thresholds": {
+                        "critical": {"leveraged_impact_pct": -80, "risk_probability": 0.9},
+                        "high": {"leveraged_impact_pct": -60, "risk_probability": 0.6},
+                        "medium": {"leveraged_impact_pct": -40, "risk_probability": 0.3},
+                        "low": {"leveraged_impact_pct": 0, "risk_probability": 0.1}
+                    },
+                    "risk_level_scoring": {
+                        "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4
+                    }
+                }
+            }
     
     def _lazy_init(self):
         """遅延初期化（初めて使用される時に初期化）"""
@@ -409,7 +517,8 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
                 symbol=symbol,
                 btc_drop_scenario=btc_drop_pct,
                 predicted_altcoin_drop=predictions,
-                correlation_strength=0.8,  # 既存システムの想定値
+                correlation_strength=self.config.get('support_resistance_analysis', {}).get(
+                    'btc_correlation', {}).get('default_correlation_factor', 0.8),
                 risk_level=avg_risk_level,
                 liquidation_risk=self._extract_liquidation_risks(risk_assessment['risk_levels'])
             )
@@ -441,28 +550,40 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
     
     def _fallback_prediction(self, symbol: str, btc_drop_pct: float) -> BTCCorrelationRisk:
         """フォールバック予測（既存システムが利用できない場合）"""
-        # 一般的な相関関係に基づく予測
-        correlation_factor = 0.8  # アルトコインの一般的なBTC相関
+        # 設定から相関係数と影響乗数を取得
+        btc_config = self.config.get('support_resistance_analysis', {}).get('btc_correlation', {})
+        correlation_factor = btc_config.get('default_correlation_factor', 0.8)
+        impact_multipliers = btc_config.get('impact_multipliers', {
+            "5_min": 0.8,
+            "15_min": 0.9,
+            "60_min": 1.0,
+            "240_min": 1.1
+        })
         
         predictions = {
-            5: btc_drop_pct * correlation_factor * 0.8,
-            15: btc_drop_pct * correlation_factor * 0.9,
-            60: btc_drop_pct * correlation_factor * 1.0,
-            240: btc_drop_pct * correlation_factor * 1.1
+            5: btc_drop_pct * correlation_factor * impact_multipliers.get('5_min', 0.8),
+            15: btc_drop_pct * correlation_factor * impact_multipliers.get('15_min', 0.9),
+            60: btc_drop_pct * correlation_factor * impact_multipliers.get('60_min', 1.0),
+            240: btc_drop_pct * correlation_factor * impact_multipliers.get('240_min', 1.1)
         }
         
         liquidation_risks = {}
+        risk_thresholds = self.config.get('support_resistance_analysis', {}).get(
+            'liquidation_risk_thresholds', {})
+        
         for horizon, drop in predictions.items():
             # レバレッジ10倍での清算リスク
             leveraged_impact = drop * 10
-            if leveraged_impact <= -80:
-                risk = 0.9
-            elif leveraged_impact <= -60:
-                risk = 0.6
-            elif leveraged_impact <= -40:
-                risk = 0.3
+            
+            # 設定から閾値に基づいてリスクを判定
+            if leveraged_impact <= risk_thresholds.get('critical', {}).get('leveraged_impact_pct', -80):
+                risk = risk_thresholds.get('critical', {}).get('risk_probability', 0.9)
+            elif leveraged_impact <= risk_thresholds.get('high', {}).get('leveraged_impact_pct', -60):
+                risk = risk_thresholds.get('high', {}).get('risk_probability', 0.6)
+            elif leveraged_impact <= risk_thresholds.get('medium', {}).get('leveraged_impact_pct', -40):
+                risk = risk_thresholds.get('medium', {}).get('risk_probability', 0.3)
             else:
-                risk = 0.1
+                risk = risk_thresholds.get('low', {}).get('risk_probability', 0.1)
             liquidation_risks[horizon] = risk
         
         return BTCCorrelationRisk(
@@ -476,7 +597,8 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
     
     def _determine_average_risk_level(self, risk_levels: Dict) -> str:
         """平均的なリスクレベルを決定"""
-        risk_scores = {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4}
+        risk_scores = self.config.get('support_resistance_analysis', {}).get(
+            'risk_level_scoring', {'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4})
         
         if not risk_levels:
             return 'MEDIUM'
@@ -484,11 +606,16 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
         total_score = sum(risk_scores.get(risk['risk_level'], 2) for risk in risk_levels.values())
         avg_score = total_score / len(risk_levels)
         
-        if avg_score <= 1.5:
+        thresholds = self.config.get('support_resistance_analysis', {}).get(
+            'risk_level_scoring', {}).get('average_thresholds', {
+                'low': 1.5, 'medium': 2.5, 'high': 3.5
+            })
+        
+        if avg_score <= thresholds.get('low', 1.5):
             return 'LOW'
-        elif avg_score <= 2.5:
+        elif avg_score <= thresholds.get('medium', 2.5):
             return 'MEDIUM'
-        elif avg_score <= 3.5:
+        elif avg_score <= thresholds.get('high', 3.5):
             return 'HIGH'
         else:
             return 'CRITICAL'
@@ -501,11 +628,15 @@ class ExistingBTCCorrelationAdapter(IBTCCorrelationAnalyzer):
             # リスクレベルを確率に変換
             risk_level = risk_data.get('risk_level', 'MEDIUM')
             
+            # 設定からリスク確率マッピングを構築
+            risk_thresholds = self.config.get('support_resistance_analysis', {}).get(
+                'liquidation_risk_thresholds', {})
+            
             risk_prob_map = {
-                'LOW': 0.1,
-                'MEDIUM': 0.3,
-                'HIGH': 0.6,
-                'CRITICAL': 0.9
+                'LOW': risk_thresholds.get('low', {}).get('risk_probability', 0.1),
+                'MEDIUM': risk_thresholds.get('medium', {}).get('risk_probability', 0.3),
+                'HIGH': risk_thresholds.get('high', {}).get('risk_probability', 0.6),
+                'CRITICAL': risk_thresholds.get('critical', {}).get('risk_probability', 0.9)
             }
             
             liquidation_risks[horizon] = risk_prob_map.get(risk_level, 0.3)

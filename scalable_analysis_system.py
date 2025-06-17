@@ -391,14 +391,16 @@ class ScalableAnalysisSystem:
                         
                         # OHLCVデータを同期的に取得（ボット内のキャッシュされたデータを使用）
                         try:
-                            # ボットが既に取得したOHLCVデータを取得
-                            import asyncio
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            ohlcv_data = loop.run_until_complete(
-                                api_client.get_ohlcv_data_with_period(symbol, timeframe, days=30)
-                            )
-                            loop.close()
+                            # ボットが既に取得したOHLCVデータを使用
+                            if hasattr(bot, '_cached_data') and not bot._cached_data.empty:
+                                ohlcv_data = bot._cached_data
+                            else:
+                                # ボットのfetch_market_dataメソッドを使用
+                                ohlcv_data = bot._fetch_market_data(symbol, timeframe)
+                            
+                            if ohlcv_data.empty:
+                                raise Exception("OHLCVデータが空です")
+                                
                         except Exception as ohlcv_error:
                             # OHLCVデータ取得に失敗した場合はフォールバック
                             raise Exception(f"OHLCVデータ取得に失敗: {str(ohlcv_error)}")

@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from real_time_system.utils.colored_log import get_colored_logger
 from scalable_analysis_system import ScalableAnalysisSystem
 from execution_log_database import ExecutionLogDatabase, ExecutionType, ExecutionStatus
+from engines.leverage_decision_engine import InsufficientMarketDataError, InsufficientConfigurationError
 
 
 class AutoSymbolTrainer:
@@ -174,6 +175,56 @@ class AutoSymbolTrainer:
             )
             
             self.logger.success(f"Step {step_name} completed in {duration:.2f}s")
+            
+        except InsufficientMarketDataError as e:
+            # 市場データ不足エラーの場合は特別な処理
+            self.logger.error(f"❌ 市場データ不足により銘柄追加を中止: {e}")
+            self.logger.error(f"   エラータイプ: {e.error_type}")
+            self.logger.error(f"   不足データ: {e.missing_data}")
+            
+            # データベースに特別なステータスで記録
+            self.execution_db.add_execution_step(
+                execution_id,
+                step_name,
+                'FAILED_INSUFFICIENT_DATA',
+                error_message=f"市場データ不足: {e}",
+                error_traceback=traceback.format_exc()
+            )
+            
+            # 実行を失敗として終了
+            self.execution_db.update_execution_status(
+                execution_id,
+                ExecutionStatus.FAILED,
+                current_operation=f'市場データ不足により中止: {e.error_type}',
+                error_message=str(e)
+            )
+            
+            raise  # 上位に伝播して銘柄追加を完全に停止
+            
+        except InsufficientConfigurationError as e:
+            # 設定不足エラーの場合は特別な処理
+            self.logger.error(f"❌ 設定不足により銘柄追加を中止: {e}")
+            self.logger.error(f"   エラータイプ: {e.error_type}")
+            self.logger.error(f"   不足設定: {e.missing_config}")
+            
+            # データベースに特別なステータスで記録
+            self.execution_db.add_execution_step(
+                execution_id,
+                step_name,
+                'FAILED_INSUFFICIENT_CONFIG',
+                error_message=f"設定不足: {e}",
+                error_traceback=traceback.format_exc()
+            )
+            
+            # 実行を失敗として終了
+            self.execution_db.update_execution_status(
+                execution_id,
+                ExecutionStatus.FAILED,
+                current_operation=f'設定不足により中止: {e.error_type}',
+                error_message=str(e)
+            )
+            
+            raise  # 上位に伝播して銘柄追加を完全に停止
             
         except Exception as e:
             self.logger.error(f"Step {step_name} failed: {e}")

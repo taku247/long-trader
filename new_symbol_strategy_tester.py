@@ -1,6 +1,18 @@
 """
+⚠️ **DEPRECATED - LEGACY FILE WARNING** ⚠️
+
 新シンボル戦略テストシステム
 任意の新しい暗号通貨シンボルに対して、既存の全戦略を自動的にテストするシステム
+
+🚨 **重要な警告**: 
+このファイルはレガシーファイルです。現在のメインシステムでは使用されていません。
+バックテスト結果はランダム生成データに基づいており、実際の市場データとは無関係です。
+
+✅ **現在の推奨方法**: 
+銘柄追加は web_dashboard/app.py のWebインターフェースから実行してください。
+実際の市場データに基づく分析が行われます。
+
+⚠️ **このファイルの使用は推奨されません** - 誤解を招くランダムデータが生成されます
 """
 import pandas as pd
 import numpy as np
@@ -172,59 +184,78 @@ class NewSymbolStrategyTester:
         return pd.DataFrame(results)
     
     def _simulate_backtest(self, symbol, timeframe, strategy_config):
-        """バックテストシミュレーション"""
-        np.random.seed(hash(f"{symbol}_{timeframe}_{strategy_config}") % 2**32)
+        """バックテストシミュレーション - ⚠️ DEPRECATED: ランダムデータ生成のため無効化"""
+        # TODO: ランダムバックテスト生成は品質問題のためコメントアウト (2024-06-18)
+        # 実際の市場データを使用したバックテスト実装が必要
         
-        # 戦略固有のパフォーマンス特性
-        strategy_details = self.existing_strategies['config_details'][strategy_config]
+        # 警告メッセージを表示
+        print("⚠️ 警告: このメソッドはランダムデータを生成するため無効化されています")
+        print("✅ 推奨: web_dashboard/app.py のWebインターフェースを使用してください")
         
-        # シンボル固有の調整（市場特性シミュレーション）
-        symbol_multiplier = self._get_symbol_performance_multiplier(symbol)
-        timeframe_multiplier = self._get_timeframe_performance_multiplier(timeframe)
+        # 無効化されたランダム生成コード
+        # np.random.seed(hash(f"{symbol}_{timeframe}_{strategy_config}") % 2**32)
+        # 
+        # # 戦略固有のパフォーマンス特性
+        # strategy_details = self.existing_strategies['config_details'][strategy_config]
+        # 
+        # # シンボル固有の調整（市場特性シミュレーション）
+        # symbol_multiplier = self._get_symbol_performance_multiplier(symbol)
+        # timeframe_multiplier = self._get_timeframe_performance_multiplier(timeframe)
+        # 
+        # # ベースパフォーマンス計算
+        # base_sharpe = strategy_details['expected_sharpe'] * symbol_multiplier * timeframe_multiplier
+        # base_win_rate = strategy_details['expected_win_rate']
+        # 
+        # # ランダム変動
+        # noise = np.random.normal(1.0, 0.2)
+        # final_sharpe = max(0.1, base_sharpe * noise)
+        # final_win_rate = max(0.3, min(0.8, base_win_rate + np.random.normal(0, 0.05)))
         
-        # ベースパフォーマンス計算
-        base_sharpe = strategy_details['expected_sharpe'] * symbol_multiplier * timeframe_multiplier
-        base_win_rate = strategy_details['expected_win_rate']
+        # # トレード数（ランダム生成 - 無効化済み）
+        # num_trades = int(np.random.normal(120, 30))
+        # num_trades = max(50, num_trades)
+        # 
+        # # トレードデータ生成（ランダム生成 - 無効化済み）
+        # trades = self._generate_trade_data(
+        #     num_trades, 
+        #     final_win_rate, 
+        #     strategy_details['max_leverage'],
+        #     final_sharpe
+        # )
         
-        # ランダム変動
-        noise = np.random.normal(1.0, 0.2)
-        final_sharpe = max(0.1, base_sharpe * noise)
-        final_win_rate = max(0.3, min(0.8, base_win_rate + np.random.normal(0, 0.05)))
+        # 安全なデフォルト値を返す（実行エラー回避）
+        import pandas as pd
+        trades = pd.DataFrame({
+            'cumulative_return': [0.0],
+            'leverage': [1.0],
+            'pnl_pct': [0.0]
+        })
         
-        # トレード数
-        num_trades = int(np.random.normal(120, 30))
-        num_trades = max(50, num_trades)
+        # メトリクス計算（無効化済み - 安全な値を返す）
+        total_return = 0.0  # 無効化済み
+        max_drawdown = 0.0  # 無効化済み
+        avg_leverage = 1.0  # 無効化済み
         
-        # トレードデータ生成
-        trades = self._generate_trade_data(
-            num_trades, 
-            final_win_rate, 
-            strategy_details['max_leverage'],
-            final_sharpe
-        )
+        # Profit Factor計算（無効化済み - 安全な値を返す）
+        # winning_trades = trades[trades['pnl_pct'] > 0]['pnl_pct'].sum()
+        # losing_trades = abs(trades[trades['pnl_pct'] < 0]['pnl_pct'].sum())
+        # profit_factor = winning_trades / losing_trades if losing_trades > 0 else 2.0
+        profit_factor = 0.0  # 無効化済み
         
-        # メトリクス計算
-        total_return = trades['cumulative_return'].iloc[-1] if len(trades) > 0 else 0
-        max_drawdown = self._calculate_max_drawdown(trades['cumulative_return'].values)
-        avg_leverage = trades['leverage'].mean()
-        
-        # Profit Factor計算
-        winning_trades = trades[trades['pnl_pct'] > 0]['pnl_pct'].sum()
-        losing_trades = abs(trades[trades['pnl_pct'] < 0]['pnl_pct'].sum())
-        profit_factor = winning_trades / losing_trades if losing_trades > 0 else 2.0
-        
+        # 無効化済み - 安全なデフォルト値を返す
         return {
             'symbol': symbol,
             'timeframe': timeframe,
             'strategy': strategy_config,
-            'total_return': total_return,
-            'sharpe_ratio': final_sharpe,
-            'win_rate': final_win_rate,
-            'max_drawdown': max_drawdown,
-            'total_trades': num_trades,
-            'avg_leverage': avg_leverage,
-            'profit_factor': profit_factor,
-            'trades_data': trades
+            'total_return': 0.0,     # 無効化済み
+            'sharpe_ratio': 0.0,     # 無効化済み  
+            'win_rate': 0.0,         # 無効化済み
+            'max_drawdown': 0.0,     # 無効化済み
+            'total_trades': 0,       # 無効化済み
+            'avg_leverage': 0.0,     # 無効化済み
+            'profit_factor': 0.0,    # 無効化済み
+            'trades_data': pd.DataFrame(),  # 空DataFrame
+            'status': 'disabled_random_generation'
         }
     
     def _get_symbol_performance_multiplier(self, symbol):
@@ -261,51 +292,71 @@ class NewSymbolStrategyTester:
         return timeframe_multipliers.get(timeframe, 1.0)
     
     def _generate_trade_data(self, num_trades, win_rate, max_leverage, sharpe_ratio):
-        """トレードデータを生成"""
-        trades = []
-        cumulative_return = 0
+        """トレードデータを生成 - ⚠️ DEPRECATED: ランダムデータ生成のため無効化"""
+        # TODO: ランダムトレード生成は品質問題のためコメントアウト (2024-06-18)
+        # 実際の市場データを使用したトレード生成実装が必要
         
-        # 日付生成
-        start_date = pd.Timestamp('2024-01-01')
-        end_date = pd.Timestamp('2024-06-30')
-        dates = pd.date_range(start_date, end_date, periods=num_trades)
+        print("⚠️ 警告: ランダムトレードデータ生成は無効化されています")
         
-        for i, date in enumerate(dates):
-            # 勝敗判定
-            is_win = np.random.random() < win_rate
+        # 無効化されたランダム生成コード
+        # trades = []
+        # cumulative_return = 0
+        # 
+        # # 日付生成
+        # start_date = pd.Timestamp('2024-01-01')
+        # end_date = pd.Timestamp('2024-06-30')
+        # dates = pd.date_range(start_date, end_date, periods=num_trades)
+        # 
+        # for i, date in enumerate(dates):
+        #     # 勝敗判定（ランダム）
+        #     is_win = np.random.random() < win_rate
+        #     
+        #     if is_win:
+        #         # 勝ちトレード: Sharpe比に基づく利益（ランダム）
+        #         pnl_pct = np.random.exponential(0.02 + sharpe_ratio * 0.01)
+        #     else:
+        #         # 負けトレード（ランダム）
+        #         pnl_pct = -np.random.exponential(0.015)
+        #     
+        #     # レバレッジ（ランダム）
+        #     leverage = np.random.uniform(1.5, max_leverage)
+        #     leveraged_pnl = pnl_pct * leverage
+        #     cumulative_return += leveraged_pnl
+        #     
+        #     # エントリー価格（仮想 - ランダム）
+        #     entry_price = np.random.uniform(20, 100)
+        #     exit_price = entry_price * (1 + pnl_pct)
             
-            if is_win:
-                # 勝ちトレード: Sharpe比に基づく利益
-                pnl_pct = np.random.exponential(0.02 + sharpe_ratio * 0.01)
-            else:
-                # 負けトレード
-                pnl_pct = -np.random.exponential(0.015)
-            
-            # レバレッジ
-            leverage = np.random.uniform(1.5, max_leverage)
-            leveraged_pnl = pnl_pct * leverage
-            cumulative_return += leveraged_pnl
-            
-            # エントリー価格（仮想）
-            entry_price = np.random.uniform(20, 100)
-            exit_price = entry_price * (1 + pnl_pct)
-            
-            trade = {
-                'timestamp': date,
-                'entry_price': entry_price,
-                'exit_price': exit_price,
-                'leverage': leverage,
-                'pnl_pct': leveraged_pnl,
-                'raw_pnl_pct': pnl_pct,
-                'cumulative_return': cumulative_return,
-                'position_size': np.random.uniform(100, 1000),
-                'duration_hours': np.random.exponential(2),
-                'is_win': is_win
-            }
-            
-            trades.append(trade)
+        #     trade = {
+        #         'timestamp': date,
+        #         'entry_price': entry_price,
+        #         'exit_price': exit_price,
+        #         'leverage': leverage,
+        #         'pnl_pct': leveraged_pnl,
+        #         'raw_pnl_pct': pnl_pct,
+        #         'cumulative_return': cumulative_return,
+        #         'position_size': np.random.uniform(100, 1000),  # ランダムポジションサイズ
+        #         'duration_hours': np.random.exponential(2),     # ランダム持続時間
+        #         'is_win': is_win
+        #     }
+        #     
+        #     trades.append(trade)
+        # 
+        # return pd.DataFrame(trades)
         
-        return pd.DataFrame(trades)
+        # 安全なデフォルトDataFrameを返す（実行エラー回避）
+        return pd.DataFrame({
+            'timestamp': [pd.Timestamp('2024-01-01')],
+            'entry_price': [0.0],
+            'exit_price': [0.0],
+            'leverage': [1.0],
+            'pnl_pct': [0.0],
+            'raw_pnl_pct': [0.0],
+            'cumulative_return': [0.0],
+            'position_size': [0.0],
+            'duration_hours': [0.0],
+            'is_win': [False]
+        })
     
     def _calculate_max_drawdown(self, cumulative_returns):
         """最大ドローダウンを計算"""
@@ -430,9 +481,26 @@ class NewSymbolStrategyTester:
         return ", ".join(reasons) if reasons else "バランスの取れたパフォーマンス"
 
 def main():
-    """使用例とデモ"""
+    """使用例とデモ - ⚠️ DEPRECATED WARNING"""
+    print("=" * 80)
+    print("⚠️ **DEPRECATED - LEGACY FILE WARNING** ⚠️")
+    print("=" * 80)
+    print("このファイルはレガシーファイルです。ランダムデータ生成により")
+    print("実際の市場データとは無関係な結果が表示されます。")
+    print()
+    print("✅ **推奨**: web_dashboard/app.py のWebインターフェースを使用")
+    print("   → http://localhost:5001")
+    print("=" * 80)
+    print()
+    
+    # 実行を確認
+    response = input("それでも続行しますか？ (y/N): ").strip().lower()
+    if response != 'y':
+        print("実行を中止しました。")
+        return
+    
     print("=" * 60)
-    print("新シンボル戦略テストシステム")
+    print("新シンボル戦略テストシステム（レガシー版）")
     print("=" * 60)
     
     # システム初期化

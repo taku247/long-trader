@@ -179,6 +179,11 @@ def main():
     
     if choice == '1':
         try:
+            print("⚠️ 警告: new_symbol_strategy_tester.py はレガシーファイルです")
+            print("   ランダムデータ生成により実際の市場データとは無関係な結果が表示されます")
+            print("✅ 推奨: web_dashboard/app.py のWebインターフェースを使用してください")
+            print()
+            
             from new_symbol_strategy_tester import NewSymbolStrategyTester
             
             tester = NewSymbolStrategyTester()

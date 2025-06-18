@@ -24,6 +24,20 @@ from interfaces import (
 
 warnings.filterwarnings('ignore')
 
+class InsufficientMarketDataError(Exception):
+    """市場データ不足による分析失敗エラー"""
+    def __init__(self, message: str, error_type: str, missing_data: str):
+        self.error_type = error_type
+        self.missing_data = missing_data
+        super().__init__(message)
+
+class InsufficientConfigurationError(Exception):
+    """設定不足による分析失敗エラー"""
+    def __init__(self, message: str, error_type: str, missing_config: str):
+        self.error_type = error_type
+        self.missing_config = missing_config
+        super().__init__(message)
+
 class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
     """
     コアレバレッジ判定エンジン
@@ -177,26 +191,24 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         """
         
         if not support_levels:
-            reasoning.append("⚠️ サポートレベルが検出されていません")
-            return {
-                'nearest_support_distance': 0.20,  # 20%下落を想定
-                'support_strength': 0.1,
-                'multi_layer_protection': False,
-                'max_leverage_from_support': 2.0
-            }
+            error_msg = f"サポートレベルが検出できませんでした。不完全なデータでの分析は危険です。"
+            raise InsufficientMarketDataError(
+                message=error_msg,
+                error_type="support_detection_failed", 
+                missing_data="support_levels"
+            )
         
         # 最も近いサポートレベルを特定
         nearest_supports = [s for s in support_levels if s.price < current_price]
         nearest_supports.sort(key=lambda x: abs(x.price - current_price))
         
         if not nearest_supports:
-            reasoning.append("⚠️ 現在価格下方にサポートレベルがありません")
-            return {
-                'nearest_support_distance': 0.20,
-                'support_strength': 0.1,
-                'multi_layer_protection': False,
-                'max_leverage_from_support': 2.0
-            }
+            error_msg = f"現在価格({current_price:.4f})下方にサポートレベルが存在しません。安全な分析ができません。"
+            raise InsufficientMarketDataError(
+                message=error_msg,
+                error_type="no_support_below_price",
+                missing_data="support_levels_below_current_price"
+            )
         
         # 最も近いサポートレベル
         nearest_support = nearest_supports[0]
@@ -254,26 +266,24 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         """
         
         if not resistance_levels:
-            reasoning.append("⚠️ レジスタンスレベルが検出されていません")
-            return {
-                'nearest_resistance_distance': 0.05,  # 5%上昇を想定
-                'resistance_strength': 0.5,
-                'breakout_probability': 0.3,
-                'profit_potential': 0.05
-            }
+            error_msg = f"レジスタンスレベルが検出できませんでした。利益ポテンシャルの分析ができません。"
+            raise InsufficientMarketDataError(
+                message=error_msg,
+                error_type="resistance_detection_failed",
+                missing_data="resistance_levels"
+            )
         
         # 最も近いレジスタンスレベルを特定
         nearest_resistances = [r for r in resistance_levels if r.price > current_price]
         nearest_resistances.sort(key=lambda x: abs(x.price - current_price))
         
         if not nearest_resistances:
-            reasoning.append("⚠️ 現在価格上方にレジスタンスレベルがありません")
-            return {
-                'nearest_resistance_distance': 0.10,  # 10%上昇を想定
-                'resistance_strength': 0.5,
-                'breakout_probability': 0.5,
-                'profit_potential': 0.10
-            }
+            error_msg = f"現在価格({current_price:.4f})上方にレジスタンスレベルが存在しません。利益目標の設定ができません。"
+            raise InsufficientMarketDataError(
+                message=error_msg,
+                error_type="no_resistance_above_price",
+                missing_data="resistance_levels_above_current_price"
+            )
         
         # 最も近いレジスタンス
         nearest_resistance = nearest_resistances[0]
@@ -584,9 +594,12 @@ class SimpleMarketContextAnalyzer(IMarketContextAnalyzer):
         """
         try:
             if data.empty:
-                current_price = 1000.0
-                volume_24h = 1000000.0
-                volatility = 0.02
+                error_msg = f"市場データが取得できませんでした。OHLCVデータが空です。"
+                raise InsufficientMarketDataError(
+                    message=error_msg,
+                    error_type="market_data_empty",
+                    missing_data="ohlcv_data"
+                )
             else:
                 # リアルタイム分析の場合
                 if is_realtime:

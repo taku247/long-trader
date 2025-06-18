@@ -22,6 +22,9 @@ from engines.price_consistency_validator import PriceConsistencyValidator, Unifi
 # 進捗ロガーのインポート
 from progress_logger import SymbolProgressLogger
 
+# エラー例外のインポート
+from engines.leverage_decision_engine import InsufficientConfigurationError
+
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -698,19 +701,14 @@ class ScalableAnalysisSystem:
             conditions = config_manager.get_entry_conditions(timeframe, strategy)
             
         except Exception as e:
-            # フォールバック: ハードコード値を使用
-            print(f"⚠️ 統合設定読み込みエラー: {e}, ハードコード値を使用")
-            min_conditions = {
-                '1m': {'min_leverage': 8.0, 'min_confidence': 0.75, 'min_risk_reward': 1.8},
-                '3m': {'min_leverage': 7.0, 'min_confidence': 0.70, 'min_risk_reward': 2.0},
-                '5m': {'min_leverage': 6.0, 'min_confidence': 0.65, 'min_risk_reward': 2.0},
-                '15m': {'min_leverage': 5.0, 'min_confidence': 0.60, 'min_risk_reward': 2.2},
-                '30m': {'min_leverage': 4.0, 'min_confidence': 0.55, 'min_risk_reward': 2.5},
-                '1h': {'min_leverage': 3.0, 'min_confidence': 0.50, 'min_risk_reward': 2.5},
-                '4h': {'min_leverage': 2.5, 'min_confidence': 0.45, 'min_risk_reward': 3.0},
-                '1d': {'min_leverage': 2.0, 'min_confidence': 0.40, 'min_risk_reward': 3.0}
-            }
-            conditions = min_conditions.get(timeframe, min_conditions['1h'])
+            # 設定読み込み失敗時は銘柄追加を停止
+            error_msg = f"エントリー条件設定が読み込めませんでした: {e}"
+            print(f"❌ 設定エラー: {error_msg}")
+            raise InsufficientConfigurationError(
+                message=error_msg,
+                error_type="entry_conditions_config_failed",
+                missing_config="unified_entry_conditions"
+            )
         
         # 条件評価
         conditions_met = []

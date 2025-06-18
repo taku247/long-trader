@@ -184,10 +184,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             print("\n⚖️ レバレッジ判定実行中...")
             
             if not self.leverage_decision_engine:
-                return self._create_error_recommendation(
-                    "レバレッジ判定エンジンが初期化されていません",
-                    market_context.current_price
-                )
+                raise Exception("レバレッジ判定エンジンが初期化されていません - 銘柄追加を中止")
             
             leverage_recommendation = self.leverage_decision_engine.calculate_safe_leverage(
                 symbol=symbol,
@@ -357,21 +354,14 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             
         except Exception as e:
             print(f"市場コンテキスト分析エラー: {e}")
+            raise Exception(f"市場コンテキスト分析に失敗: {e} - 銘柄追加を中止")
         
-        # データ検証とコンテキスト作成
+        # データ検証（フォールバック値は使用しない）
         if data.empty:
             raise Exception("市場データが空のためコンテキスト分析できません")
-        current_price = data['close'].iloc[-1]
-        volume_24h = data['volume'].sum()
         
-        return MarketContext(
-            current_price=current_price,
-            volume_24h=volume_24h,
-            volatility=0.02,
-            trend_direction='SIDEWAYS',
-            market_phase='ACCUMULATION',
-            timestamp=datetime.now(timezone.utc)
-        )
+        # 実データが取得できているがアナライザーが利用できない場合もエラー
+        raise Exception("市場コンテキストアナライザーが初期化されていません - 銘柄追加を中止")
     
     def _display_analysis_summary(self, recommendation: LeverageRecommendation):
         """分析結果サマリーを表示"""
@@ -395,32 +385,12 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         
         print("\n" + "=" * 60)
     
-    def _create_error_recommendation(self, error_message: str, current_price: float) -> LeverageRecommendation:
-        """エラー時の保守的推奨を作成"""
-        
-        market_context = MarketContext(
-            current_price=current_price,
-            volume_24h=1000000.0,
-            volatility=0.05,
-            trend_direction='SIDEWAYS',
-            market_phase='ACCUMULATION',
-            timestamp=datetime.now(timezone.utc)
-        )
-        
-        return LeverageRecommendation(
-            recommended_leverage=1.0,
-            max_safe_leverage=2.0,
-            risk_reward_ratio=1.0,
-            stop_loss_price=current_price * 0.95,
-            take_profit_price=current_price * 1.05,
-            confidence_level=0.1,
-            reasoning=[
-                f"❌ エラー: {error_message}",
-                "🛡️ 保守的な設定を適用",
-                "⚠️ 分析が完了してから取引を検討してください"
-            ],
-            market_conditions=market_context
-        )
+    # def _create_error_recommendation(self, error_message: str, current_price: float) -> LeverageRecommendation:
+    #     """エラー時の保守的推奨を作成 - 使用停止（フォールバック値除去のため）"""
+    #     
+    #     # フォールバック値を含むため使用停止
+    #     # エラー時は例外を発生させて銘柄追加を失敗させる方針に変更
+    #     raise Exception(f"エラー時推奨作成は廃止されました: {error_message}")
     
     def _determine_symbol_category(self, symbol: str) -> str:
         """

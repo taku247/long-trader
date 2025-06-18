@@ -749,13 +749,10 @@ class SimpleMarketContextAnalyzer(IMarketContextAnalyzer):
             raise
         except Exception as e:
             print(f"市場コンテキスト分析エラー: {e}")
-            return MarketContext(
-                current_price=1000.0,
-                volume_24h=1000000.0,
-                volatility=0.02,
-                trend_direction='SIDEWAYS',
-                market_phase='ACCUMULATION',
-                timestamp=datetime.now()
+            raise InsufficientMarketDataError(
+                message=f"市場コンテキスト分析に失敗: {e}",
+                error_type="market_context_analysis_failed",
+                missing_data="market_context"
             )
     
     def detect_anomalies(self, data: pd.DataFrame) -> List[Dict]:

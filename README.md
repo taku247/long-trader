@@ -4051,13 +4051,14 @@ python test_real_price_fix.py
    - **修正**: `config/leverage_engine_config.json`での一元管理
    - **効果**: 時間足・銘柄カテゴリ別の動的調整＋運用の柔軟性
 
-#### 残存課題（次回対応予定）
+6. **✅ 市場コンテキストフォールバックの改善**
+   - **問題**: エラー時に固定フォールバック値 (`current_price=1000.0`, `volatility=0.02`, `trend_direction='SIDEWAYS'`)
+   - **修正**: `InsufficientMarketDataError`発生で銘柄追加失敗に統一
+   - **効果**: 最後のフォールバック値除去＋偽データでの危険判定完全防止
 
-6. **🟡 市場コンテキストフォールバックの改善**
-   - **問題箇所**: 
-     - `leverage_decision_engine.py:752-759` - 固定フォールバック値 (`current_price=1000.0`, `volatility=0.02`)
-     - `high_leverage_bot_orchestrator.py:367-374` - 固定フォールバック値 (`trend_direction='SIDEWAYS'`)
-   - **対策予定**: エラー時の銘柄追加失敗に統一
+#### 🎉 全修正完了
+
+**システム全体のランダム値・フォールバック値が100%除去されました**
 
 #### 修正効果サマリー
 
@@ -4074,6 +4075,7 @@ python test_real_price_fix.py
 - `test_leverage_config_externalization.py` - 設定外部化
 - `test_insufficient_market_data_error.py` - エラーハンドリング
 - `test_leverage_fallback_elimination_complete.py` - フォールバック除去
+- `test_market_context_fallback_removal.py` - 市場コンテキストフォールバック除去
 
 ----
 

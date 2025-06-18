@@ -4077,6 +4077,368 @@ python test_real_price_fix.py
 - `test_leverage_fallback_elimination_complete.py` - フォールバック除去
 - `test_market_context_fallback_removal.py` - 市場コンテキストフォールバック除去
 
+## 🧪 包括的テストガイド
+
+### 📋 テストファイル分類・使用方法
+
+プロジェクトには80+のテストファイルが整備されています。目的別に分類された使用方法：
+
+#### 1. 🏠 **基本動作確認** (開発開始時)
+```bash
+# API接続テスト
+python simple_test.py
+
+# WebUI動作確認
+python test_minimal_app.py
+
+# 基本データ取得
+python test_data_fetch.py
+```
+
+#### 2. 📊 **データ品質・検証** (分析実行前)
+```bash
+# 包括的データ品質チェック
+python tests/test_data_quality_validation.py
+
+# ハードコード値検出
+python tests/test_hardcoded_value_detection.py
+
+# 価格データ整合性
+python test_price_consistency_integration.py
+
+# 信頼度異常値検出
+python tests/test_confidence_anomaly_detection.py
+```
+
+#### 3. 🎯 **銘柄追加・分析** (新銘柄追加時)
+```bash
+# ブラウザ銘柄追加事前チェック (推奨)
+python test_browser_symbol_addition_comprehensive.py
+
+# 単一銘柄追加
+python test_new_symbol_addition.py
+
+# 複数銘柄同時追加
+python test_multiple_symbols_addition.py
+
+# 実銘柄分析精度検証
+python test_real_symbol_analysis.py
+```
+
+#### 4. 🔄 **システム統合・機能** (機能変更時)
+```bash
+# エンドツーエンド統合テスト
+python tests/test_integration.py
+
+# 銘柄追加パイプライン全体
+python tests/test_symbol_addition_pipeline.py
+
+# Webダッシュボード統合
+python test_web_dashboard.py
+
+# レバレッジエンジン堅牢性
+python tests/test_leverage_engine_robustness.py
+```
+
+#### 5. 🌐 **API・通信** (API関連問題時)
+```bash
+# API接続失敗ハンドリング
+python test_api_connection_failure.py
+
+# API障害検出
+python test_api_failure_detection.py
+
+# Gate.io OHLCV取得
+python test_gateio_ohlcv.py
+
+# トレードAPI直接テスト
+python test_trade_api.py
+```
+
+#### 6. 🧠 **バックテスト・戦略** (戦略変更時)
+```bash
+# 時系列バックテスト
+python test_proper_backtest.py
+
+# 強化ML予測システム
+python test_enhanced_ml.py
+
+# ブレイクイーブンロジック
+python test_breakeven_logic.py
+
+# TP/SL計算プラグイン
+python test_sltp_plugin.py
+```
+
+#### 7. 🚨 **エラーハンドリング・例外** (リリース前)
+```bash
+# NameError回帰防止
+python tests/test_nameerror_prevention.py
+
+# 包括的バグ防止
+python test_comprehensive_bug_prevention.py
+
+# 厳格バリデーション
+python test_strict_validation.py
+
+# 異常値検出機能
+python test_anomaly_check_functionality.py
+```
+
+#### 8. ⚡ **パフォーマンス・負荷** (性能確認時)
+```bash
+# リアルタイム価格監視
+python test_realtime_price_monitoring.py
+
+# リアルタイム処理負荷
+python test_realtime_summary.py
+
+# シグナルスキップ性能影響
+python test_signal_skip_performance_impact.py
+```
+
+#### 9. ⚙️ **設定・構成** (設定変更時)
+```bash
+# 統合設定管理
+python test_unified_config_integration.py
+
+# レバレッジ設定外部化
+python test_leverage_config_externalization.py
+
+# 条件ベース設定生成
+python test_condition_based_generation.py
+```
+
+### 🔧 **推奨テスト実行順序**
+
+#### 日常開発時
+```bash
+# 1. 基本確認
+python simple_test.py
+
+# 2. データ品質チェック
+python tests/test_data_quality_validation.py
+
+# 3. 該当機能のテスト実行
+```
+
+#### 新銘柄追加時
+```bash
+# 1. 事前包括チェック (必須)
+python test_browser_symbol_addition_comprehensive.py
+
+# 2. 実際の銘柄追加実行
+
+# 3. 事後データ品質確認
+python tests/test_data_quality_validation.py
+```
+
+#### リリース前検証
+```bash
+# 1. 全バグ回帰防止テスト
+python run_all_validation_tests.py
+
+# 2. 統合テスト
+python tests/test_integration.py
+
+# 3. パフォーマンステスト
+python test_realtime_summary.py
+```
+
+### 🚨 **緊急時デバッグ用**
+```bash
+# プロセス状況確認
+python check_zombie_processes.py
+
+# システム異常検出
+python test_hardcoded_detection_summary.py
+
+# API障害診断
+python test_api_failure_detection.py
+
+# データ異常値検出
+python test_data_anomaly_detection.py
+```
+
+### 📈 **テスト効果・カバレッジ**
+
+- **データ品質**: 158.70バグ等の重要バグ回帰防止
+- **API障害対応**: 外部API障害時の適切なエラーハンドリング
+- **統合機能**: Web API → バリデーション → バックテスト全フロー検証
+- **パフォーマンス**: リアルタイム処理・大量データ処理の性能確保
+- **設定管理**: プラグインシステム・設定外部化の動作保証
+
+### 🔍 **重要テストファイル詳細説明**
+
+#### `run_all_validation_tests.py` - **バグ回帰防止マスタースイート**
+```bash
+python run_all_validation_tests.py
+```
+**目的**: 158.70バグ、信頼度90%異常値等の重要バグ回帰防止
+**内容**: 
+- 全検証テストを2分タイムアウトで自動実行
+- データ品質異常値検出（サポート強度、信頼度、レバレッジ、価格多様性）
+- 重複トレードデータ検出（66%重複問題の回帰防止）
+- ハードコードValue検出
+**実行タイミング**: 毎回のリリース前、週次品質チェック
+
+#### `tests/test_data_quality_validation.py` - **データ品質包括検証**
+```bash
+python tests/test_data_quality_validation.py
+```
+**目的**: トレードデータの異常を自動検知
+**検証項目**:
+- 重複トレードデータ（5%以下が正常）
+- レバレッジ多様性（0.1以上が正常）
+- 価格多様性（0.05以上が正常）
+- 勝率異常値（15%-85%範囲が正常）
+- エントリー価格の統一性
+**実行タイミング**: 分析実行後、データ異常疑いの際
+
+#### `check_zombie_processes.py` - **プロセス状況診断**
+```bash
+python check_zombie_processes.py
+```
+**目的**: WebUIとDBの不整合確認、実行プロセス状況診断
+**機能**:
+- 実行中表示されているプロセスの実際の状況確認
+- ゾンビプロセス（12時間以上実行中）の検出
+- WebUI表示と実際のDB状況の比較
+**実行タイミング**: プロセス状況が不明な時、12時間以上実行中の際
+
+#### `test_browser_symbol_addition_comprehensive.py` - **銘柄追加事前検証**
+```bash
+python test_browser_symbol_addition_comprehensive.py
+```
+**目的**: ブラウザからの銘柄追加前の包括チェック
+**検証段階**:
+1. **事前チェック**: API接続・データ取得・設定ファイル・DB状態・重複確認
+2. **ドライラン**: 全段階シミュレート（initialization → result_storage）
+3. **エラーハンドリング**: 6種エラーシナリオ対応確認
+4. **パフォーマンス**: メモリ使用量・処理時間・リソース監視
+5. **システムヘルス**: WebUI・DB・設定・モジュール動作確認
+**実行タイミング**: 新銘柄追加前（必須）
+
+#### `tests/test_hardcoded_value_detection.py` - **ハードコード値検出**
+```bash
+python tests/test_hardcoded_value_detection.py
+```
+**目的**: ハードコードされた固定値・フォールバック値の検出
+**検出対象**:
+- 固定価格値（1000.0, 158.70等）
+- 固定信頼度（90%等の異常値）
+- 固定レバレッジ値
+- ランダム値生成コード
+**実行タイミング**: コード変更後、品質チェック時
+
+#### `simple_test.py` - **基本動作確認**
+```bash
+python simple_test.py
+```
+**目的**: 最小限の基本動作確認
+**確認項目**:
+- Hyperliquid API基本接続
+- データ取得基本機能
+- システム起動確認
+**実行タイミング**: 開発開始時、基本機能確認時
+
+### 🚀 **テスト実行推奨フロー**
+
+#### 新規開発者向け（初回セットアップ）
+```bash
+# 1. 基本動作確認
+python simple_test.py
+
+# 2. システム全体チェック
+python run_all_validation_tests.py
+
+# 3. データ品質ベースライン確認
+python tests/test_data_quality_validation.py
+```
+
+#### 日常開発時
+```bash
+# 毎回：基本確認
+python simple_test.py
+
+# コード変更時：品質チェック
+python tests/test_data_quality_validation.py
+
+# 機能追加時：該当テスト実行
+```
+
+#### 新銘柄追加時（必須手順）
+```bash
+# 1. 事前包括チェック (必須)
+python test_browser_symbol_addition_comprehensive.py
+
+# 2. 実際の銘柄追加実行（Webダッシュボード経由）
+
+# 3. 事後品質確認
+python tests/test_data_quality_validation.py
+
+# 4. プロセス状況確認
+python check_zombie_processes.py
+```
+
+#### 週次品質チェック
+```bash
+# 全バグ回帰防止チェック
+python run_all_validation_tests.py
+
+# ハードコード値検出
+python tests/test_hardcoded_value_detection.py
+
+# システム統合テスト
+python tests/test_integration.py
+```
+
+#### 緊急時（問題発生時）
+```bash
+# プロセス状況診断
+python check_zombie_processes.py
+
+# データ異常検出
+python tests/test_data_quality_validation.py
+
+# API障害診断
+python test_api_failure_detection.py
+
+# ハードコード値緊急検出
+python test_hardcoded_detection_summary.py
+```
+
+## 📋 今後の開発TODO（memo記載項目）
+
+### ✅ 完了項目（2025年6月19日）
+- ✅ **銘柄追加時の事前エラーチェック強化** - 最初の段階でエラーを防ぐ仕組み実装済み
+- ✅ **ブラウザからの銘柄追加動作検証** - 包括的テストスイート完成
+
+#### 🧪 ブラウザ銘柄追加包括的テスト（新機能）
+```bash
+python test_browser_symbol_addition_comprehensive.py
+```
+**テスト項目**: SOL, LINK, UNI, DOGE の4銘柄で包括検証
+- ✅ **事前チェック**: API接続・データ取得・設定ファイル・DB状態・重複確認
+- ✅ **ドライラン**: 全段階シミュレート（initialization → result_storage）
+- ✅ **エラーハンドリング**: 6種エラーシナリオ対応確認
+- ✅ **パフォーマンス**: メモリ使用量・処理時間・リソース監視
+- ✅ **システムヘルス**: WebUI・DB・設定・モジュール動作確認
+
+**テスト結果**: 全4銘柄で4/4テスト合格、システム安定性確認済み
+
+### 🏆 高優先度
+
+### 📊 中優先度  
+- **バックテスト定期実行＆パフォーマンス順表示** - 高性能戦略の自動抽出
+- **UTC/JST使い分けの一覧化＆チェック** - タイムゾーン問題の解決
+- **同じ銘柄の分析履歴管理** - 日時保存による履歴追跡
+
+### 🎨 低優先度
+- **トレードデータの勝敗表示・PnL** - UI改善
+- **進捗ログブラウザの粒度向上** - ユーザビリティ改善  
+- **サーバーログの見やすさ改善** - 戦略・時間足表示
+
 ----
 
 **⚠️ 免責事項**: このシステムは教育・研究目的のツールです。実際の取引には十分な検証とリスク管理を行ってください。

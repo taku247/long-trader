@@ -162,8 +162,11 @@ class ScalableAnalysisSystem:
         import time
         import random
         
-        # プロセス間の競合を防ぐため、わずかにランダムな遅延を追加
-        time.sleep(random.uniform(0.1, 0.5))
+        # プロセス間の競合を防ぐため、わずかな遅延を追加
+        # TODO: ランダム遅延は品質問題のためコメントアウト (2024-06-18)
+        # time.sleep(random.uniform(0.1, 0.5))
+        # チャンクIDベースの決定的遅延に変更
+        time.sleep(0.1 + (chunk_id % 5) * 0.1)  # 0.1-0.5秒の決定的遅延
         
         processed = 0
         for config in configs_chunk:
@@ -576,12 +579,12 @@ class ScalableAnalysisSystem:
                         elif hour > 12:  # JST 21:00 = UTC 12:00
                             trade_time = trade_time.replace(hour=12)
                         
-                        # フォールバック: 時間足に応じた期間後にクローズ
+                        # フォールバック: 時間足に応じた期間後に建値決済
                         exit_minutes = self._get_fallback_exit_minutes(timeframe)
                         exit_time = trade_time + timedelta(minutes=exit_minutes)
-                        # フォールバック: 信頼度ベースの判定
-                        is_success = np.random.random() < (confidence * 0.8 + 0.2)
-                        exit_price = tp_price if is_success else sl_price
+                        # フォールバック: 判定不能のため建値決済（プラマイ0）
+                        is_success = None  # 判定不能を示す
+                        exit_price = entry_price  # 建値決済
                     
                     # PnL計算
                     pnl_pct = (exit_price - entry_price) / entry_price
@@ -622,6 +625,7 @@ class ScalableAnalysisSystem:
                         'pnl_pct': leveraged_pnl,
                         'confidence': confidence,
                         'is_success': is_success,
+                        'trade_type': 'breakeven' if is_success is None else ('profit' if is_success else 'loss'),
                         'strategy': config,
                         # 価格整合性情報の追加
                         'price_consistency_score': unified_price_data.consistency_score,
@@ -768,42 +772,52 @@ class ScalableAnalysisSystem:
                     return False
             return cursor.fetchone()[0] > 0
     
+    # TODO: ランダムトレード生成は品質問題のためコメントアウト (2024-06-18)
+    # 現在は使用されていないが、将来的に実データベースの方法に置き換える必要あり
+    # def _generate_sample_trades(self, symbol, timeframe, config, num_trades=100):
+    #     """サンプルトレードデータ生成（軽量版）"""
+    #     np.random.seed(hash(f"{symbol}_{timeframe}_{config}") % 2**32)
+    #     
+    #     # 基本性能設定
+    #     base_performance = {
+    #         'Conservative_ML': {'sharpe': 1.2, 'win_rate': 0.65},
+    #         'Aggressive_Traditional': {'sharpe': 1.8, 'win_rate': 0.55},
+    #         'Full_ML': {'sharpe': 2.1, 'win_rate': 0.62}
+    #     }.get(config, {'sharpe': 1.5, 'win_rate': 0.58})
+    #     
+    #     trades = []
+    #     cumulative_return = 0
+    #     
+    #     for i in range(num_trades):
+    #         # ランダムトレード生成
+    #         is_win = np.random.random() < base_performance['win_rate']
+    #         
+    #         if is_win:
+    #             pnl_pct = np.random.exponential(0.03)
+    #         else:
+    #             pnl_pct = -np.random.exponential(0.015)
+    #         
+    #         leverage = np.random.uniform(2.0, 8.0)
+    #         leveraged_pnl = pnl_pct * leverage
+    #         cumulative_return += leveraged_pnl
+    #         
+    #         trades.append({
+    #             'trade_id': i,
+    #             'pnl_pct': leveraged_pnl,
+    #             'leverage': leverage,
+    #             'is_win': is_win,
+    #             'cumulative_return': cumulative_return
+    #         })
+    #     
+    #     return pd.DataFrame(trades)
+    
+    # 暫定実装: エラーを返す
     def _generate_sample_trades(self, symbol, timeframe, config, num_trades=100):
-        """サンプルトレードデータ生成（軽量版）"""
-        np.random.seed(hash(f"{symbol}_{timeframe}_{config}") % 2**32)
-        
-        # 基本性能設定
-        base_performance = {
-            'Conservative_ML': {'sharpe': 1.2, 'win_rate': 0.65},
-            'Aggressive_Traditional': {'sharpe': 1.8, 'win_rate': 0.55},
-            'Full_ML': {'sharpe': 2.1, 'win_rate': 0.62}
-        }.get(config, {'sharpe': 1.5, 'win_rate': 0.58})
-        
-        trades = []
-        cumulative_return = 0
-        
-        for i in range(num_trades):
-            # ランダムトレード生成
-            is_win = np.random.random() < base_performance['win_rate']
-            
-            if is_win:
-                pnl_pct = np.random.exponential(0.03)
-            else:
-                pnl_pct = -np.random.exponential(0.015)
-            
-            leverage = np.random.uniform(2.0, 8.0)
-            leveraged_pnl = pnl_pct * leverage
-            cumulative_return += leveraged_pnl
-            
-            trades.append({
-                'trade_id': i,
-                'pnl_pct': leveraged_pnl,
-                'leverage': leverage,
-                'is_win': is_win,
-                'cumulative_return': cumulative_return
-            })
-        
-        return pd.DataFrame(trades)
+        """サンプルトレードデータ生成（無効化済み）"""
+        raise NotImplementedError(
+            "ランダムトレード生成は品質問題のため無効化されています。"
+            "実際の市場データを使用してください。"
+        )
     
     def _calculate_metrics(self, trades_data):
         """メトリクス計算"""
@@ -824,7 +838,15 @@ class ScalableAnalysisSystem:
             for trade in trades_data:
                 cumulative_return += trade['pnl_pct']
                 trade['cumulative_return'] = cumulative_return
-                trade['is_win'] = trade.get('is_success', trade['pnl_pct'] > 0)
+                
+                # is_win計算の改良（建値決済対応）
+                is_success = trade.get('is_success')
+                if is_success is None:
+                    # 建値決済（判定不能）の場合は勝敗判定対象外
+                    trade['is_win'] = None
+                else:
+                    # 通常の勝敗判定
+                    trade['is_win'] = is_success if is_success is not None else (trade['pnl_pct'] > 0)
             
             trades_df = pd.DataFrame(trades_data)
         else:
@@ -841,7 +863,13 @@ class ScalableAnalysisSystem:
             }
         
         total_return = trades_df['cumulative_return'].iloc[-1] if len(trades_df) > 0 else 0
-        win_rate = trades_df['is_win'].mean() if len(trades_df) > 0 else 0
+        
+        # 勝率計算の改良（建値決済を除外）
+        if len(trades_df) > 0:
+            valid_trades = trades_df['is_win'].notna()  # None以外（勝敗判定可能）
+            win_rate = trades_df[valid_trades]['is_win'].mean() if valid_trades.sum() > 0 else 0
+        else:
+            win_rate = 0
         
         # Sharpe比の簡易計算
         returns = trades_df['pnl_pct'].values
@@ -868,6 +896,23 @@ class ScalableAnalysisSystem:
                 'critical_backtest_issues': 0
             }
         
+        # 建値決済統計の計算
+        breakeven_stats = {}
+        if len(trades_df) > 0:
+            breakeven_count = trades_df['is_win'].isna().sum()
+            total_decisive_trades = len(trades_df) - breakeven_count
+            breakeven_stats = {
+                'breakeven_trades': breakeven_count,
+                'decisive_trades': total_decisive_trades,
+                'breakeven_rate': (breakeven_count / len(trades_df)) if len(trades_df) > 0 else 0
+            }
+        else:
+            breakeven_stats = {
+                'breakeven_trades': 0,
+                'decisive_trades': 0,
+                'breakeven_rate': 0
+            }
+        
         base_metrics = {
             'total_trades': len(trades_df),
             'total_return': total_return,
@@ -876,6 +921,9 @@ class ScalableAnalysisSystem:
             'max_drawdown': max_drawdown,
             'avg_leverage': trades_df['leverage'].mean() if len(trades_df) > 0 else 0
         }
+        
+        # 建値決済統計を追加
+        base_metrics.update(breakeven_stats)
         
         # 価格整合性メトリクスを結合
         base_metrics.update(price_consistency_metrics)

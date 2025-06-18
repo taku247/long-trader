@@ -423,28 +423,52 @@ class AutoSymbolTrainer:
             # ML学習の実装
             # TODO: 実際のML学習ロジックを実装
             
-            # サンプル実装
+            # TODO: ランダムML結果生成は品質問題のためコメントアウト (2024-06-18)
+            # 実際のML学習ロジック実装が必要
             import time
-            import random
+            # import random
             
             # 学習時間をシミュレート
             await asyncio.sleep(2)
             
+            # TODO: 以下のランダム生成は削除し、実際のML学習結果を返すように修正必要
+            # models_trained = {
+            #     'support_resistance_ml': {
+            #         'accuracy': round(random.uniform(0.65, 0.85), 3),
+            #         'f1_score': round(random.uniform(0.6, 0.8), 3),
+            #         'training_samples': random.randint(5000, 15000)
+            #     },
+            #     'breakout_predictor': {
+            #         'accuracy': round(random.uniform(0.6, 0.8), 3),
+            #         'precision': round(random.uniform(0.65, 0.85), 3),
+            #         'training_samples': random.randint(3000, 10000)
+            #     },
+            #     'btc_correlation': {
+            #         'r_squared': round(random.uniform(0.7, 0.9), 3),
+            #         'mae': round(random.uniform(0.02, 0.08), 4),
+            #         'training_samples': random.randint(8000, 20000)
+            #     }
+            # }
+            
+            # 暫定: 実際のML学習未実装のため固定値を返す
             models_trained = {
                 'support_resistance_ml': {
-                    'accuracy': round(random.uniform(0.65, 0.85), 3),
-                    'f1_score': round(random.uniform(0.6, 0.8), 3),
-                    'training_samples': random.randint(5000, 15000)
+                    'accuracy': 0.000,  # 未学習状態を示す
+                    'f1_score': 0.000,
+                    'training_samples': 0,
+                    'status': 'not_implemented'
                 },
                 'breakout_predictor': {
-                    'accuracy': round(random.uniform(0.6, 0.8), 3),
-                    'precision': round(random.uniform(0.65, 0.85), 3),
-                    'training_samples': random.randint(3000, 10000)
+                    'accuracy': 0.000,
+                    'precision': 0.000,
+                    'training_samples': 0,
+                    'status': 'not_implemented'
                 },
                 'btc_correlation': {
-                    'r_squared': round(random.uniform(0.7, 0.9), 3),
-                    'mae': round(random.uniform(0.02, 0.08), 4),
-                    'training_samples': random.randint(8000, 20000)
+                    'r_squared': 0.000,
+                    'mae': 0.000,
+                    'training_samples': 0,
+                    'status': 'not_implemented'
                 }
             }
             
@@ -453,7 +477,8 @@ class AutoSymbolTrainer:
             return {
                 'models_trained': models_trained,
                 'total_training_time': 120,  # seconds
-                'avg_accuracy': sum(m.get('accuracy', m.get('r_squared', 0)) for m in models_trained.values()) / len(models_trained)
+                'avg_accuracy': 0.000,  # ML未実装のため0
+                'status': 'ml_training_not_implemented'
             }
             
         except Exception as e:

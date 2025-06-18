@@ -359,20 +359,31 @@ class ImprovedScalableAnalysisSystem:
         )
         
         # 結果判定
-        is_success = np.random.random() < (confidence * 0.8 + 0.2)
+        # TODO: ランダム判定は品質問題のためコメントアウト (2024-06-18)
+        # 実際のTP/SL到達判定に置き換える必要あり
+        # is_success = np.random.random() < (confidence * 0.8 + 0.2)
         
-        if is_success:
-            exit_price = sltp_levels.take_profit_price * np.random.uniform(0.98, 1.02)
-            pnl_pct = (exit_price - current_price) / current_price
-        else:
-            exit_price = sltp_levels.stop_loss_price * np.random.uniform(0.98, 1.02)
-            pnl_pct = (exit_price - current_price) / current_price
+        # if is_success:
+        #     exit_price = sltp_levels.take_profit_price * np.random.uniform(0.98, 1.02)
+        #     pnl_pct = (exit_price - current_price) / current_price
+        # else:
+        #     exit_price = sltp_levels.stop_loss_price * np.random.uniform(0.98, 1.02)
+        #     pnl_pct = (exit_price - current_price) / current_price
+        
+        # 暫定: 建値決済として処理（プラマイゼロ）
+        is_success = None  # 判定不能
+        exit_price = current_price  # 建値決済
+        pnl_pct = 0.0
         
         leveraged_pnl = pnl_pct * leverage
         
         # 退出時間の計算（時間足に応じて調整）
         exit_minutes = self._get_exit_minutes_by_timeframe(timeframe)
-        exit_time = trade_time + timedelta(minutes=np.random.randint(*exit_minutes))
+        # TODO: ランダム時間もコメントアウト
+        # exit_time = trade_time + timedelta(minutes=np.random.randint(*exit_minutes))
+        # 暫定: 時間足の中央値を使用
+        min_minutes, max_minutes = exit_minutes
+        exit_time = trade_time + timedelta(minutes=(min_minutes + max_minutes) // 2)
         
         # 日本時間で返す
         jst_entry = trade_time + timedelta(hours=9)
@@ -484,7 +495,10 @@ class ImprovedScalableAnalysisSystem:
         import time
         import random
         
-        time.sleep(random.uniform(0.1, 0.5))
+        # TODO: ランダム遅延は品質問題のためコメントアウト (2024-06-18)
+        # time.sleep(random.uniform(0.1, 0.5))
+        # チャンクIDベースの決定的遅延に変更
+        time.sleep(0.1 + (chunk_id % 5) * 0.1)  # 0.1-0.5秒の決定的遅延
         
         processed = 0
         for config in configs_chunk:

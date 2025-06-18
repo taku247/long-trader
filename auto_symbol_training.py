@@ -66,14 +66,20 @@ class AutoSymbolTrainer:
                     metadata={"auto_training": True, "all_strategies": True, "all_timeframes": True}
                 )
             else:
-                # 事前定義されたIDを使用してレコード作成
-                self.execution_db.create_execution_with_id(
-                    execution_id,
-                    ExecutionType.SYMBOL_ADDITION,
-                    symbol=symbol,
-                    triggered_by="USER",
-                    metadata={"auto_training": True, "all_strategies": True, "all_timeframes": True}
-                )
+                # 事前定義されたIDの場合、既存の記録をチェック
+                existing_record = self.execution_db.get_execution(execution_id)
+                if not existing_record:
+                    # 記録が存在しない場合のみ作成
+                    self.execution_db.create_execution_with_id(
+                        execution_id,
+                        ExecutionType.SYMBOL_ADDITION,
+                        symbol=symbol,
+                        triggered_by="USER",
+                        metadata={"auto_training": True, "all_strategies": True, "all_timeframes": True}
+                    )
+                    self.logger.info(f"📝 Created new execution record: {execution_id}")
+                else:
+                    self.logger.info(f"📋 Using existing execution record: {execution_id}")
             
             self.logger.info(f"Execution ID: {execution_id}")
             

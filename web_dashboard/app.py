@@ -1583,20 +1583,49 @@ class WebDashboard:
                 
                 trainer = AutoSymbolTrainer()
                 
-                # Execute training asynchronously with the predetermined ID
+                # 🔧 修正: DB記録を先に同期的に作成
+                try:
+                    from execution_log_database import ExecutionLogDatabase, ExecutionType
+                    db = ExecutionLogDatabase()
+                    
+                    # DB記録を先に作成（同期的）
+                    db_execution_id = db.create_execution_with_id(
+                        execution_id,
+                        ExecutionType.SYMBOL_ADDITION,
+                        symbol=symbol,
+                        triggered_by="USER:WEB_UI",
+                        metadata={"auto_training": True, "source": "web_dashboard"}
+                    )
+                    
+                    self.logger.info(f"📝 DB record created synchronously: {execution_id}")
+                    
+                except Exception as db_error:
+                    self.logger.error(f"Failed to create DB record: {db_error}")
+                    return jsonify({
+                        'error': f'データベース記録の作成に失敗: {str(db_error)}',
+                        'status': 'failed'
+                    }), 500
+                
+                # Execute training asynchronously (DB記録作成後)
                 import threading
                 
                 def run_training():
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     try:
-                        # Pass the execution_id to ensure consistency
+                        # DB記録は既に存在するため、既存のIDを使用
                         result_execution_id = loop.run_until_complete(
                             trainer.add_symbol_with_training(symbol, execution_id=execution_id)
                         )
                         self.logger.info(f"Symbol {symbol} training started with ID: {result_execution_id}")
                     except Exception as e:
                         self.logger.error(f"Training failed for {symbol}: {e}")
+                        # DB記録は存在するため、ステータス更新
+                        try:
+                            from execution_log_database import ExecutionStatus
+                            db.update_execution_status(execution_id, ExecutionStatus.FAILED)
+                        except Exception:
+                            pass
                     finally:
                         loop.close()
                 

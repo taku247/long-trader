@@ -54,6 +54,24 @@ def detect_level_interactions(df, levels, distance_threshold=0.02):
     for level_idx, level in enumerate(levels):
         if level_idx % 10 == 0:
             print(f"  処理中: {level_idx + 1}/{len(levels)} レベル...")
+            
+            # キャンセル確認（10レベル毎にチェック）
+            try:
+                import sqlite3
+                import os
+                execution_db_path = "execution_logs.db"
+                if os.path.exists(execution_db_path):
+                    with sqlite3.connect(execution_db_path) as conn:
+                        cursor = conn.execute('''
+                            SELECT status FROM execution_logs 
+                            WHERE status = 'CANCELLED' AND timestamp_end IS NULL
+                            LIMIT 1
+                        ''')
+                        if cursor.fetchone():
+                            print("キャンセルが検出されました。レベル相互作用検出を停止します。")
+                            return []
+            except Exception:
+                pass  # キャンセル確認に失敗してもメイン処理は継続
         level_price = level['price']
         level_type = level['type']
         

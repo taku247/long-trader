@@ -52,6 +52,9 @@ class ScalableAnalysisSystem:
         
         # データベース初期化
         self.init_database()
+        
+        # 実行制御
+        self.current_execution_id = None
     
     def init_database(self):
         """SQLiteデータベースを初期化"""
@@ -96,6 +99,28 @@ class ScalableAnalysisSystem:
             
             conn.commit()
     
+    def _should_cancel_execution(self, execution_id: str = None) -> bool:
+        """データベースをチェックしてキャンセルされているかを確認"""
+        if not execution_id and hasattr(self, 'current_execution_id'):
+            execution_id = self.current_execution_id
+        
+        if not execution_id:
+            return False
+            
+        try:
+            from execution_log_database import ExecutionLogDatabase
+            db = ExecutionLogDatabase()
+            with sqlite3.connect(db.db_path) as conn:
+                cursor = conn.execute(
+                    'SELECT status FROM execution_logs WHERE execution_id = ?',
+                    (execution_id,)
+                )
+                row = cursor.fetchone()
+                return row and row[0] == 'CANCELLED'
+        except Exception as e:
+            logger.warning(f"Failed to check cancellation status: {e}")
+            return False
+    
     def generate_batch_analysis(self, batch_configs, max_workers=None, symbol=None, execution_id=None):
         """
         バッチで大量の分析を並列生成
@@ -108,6 +133,9 @@ class ScalableAnalysisSystem:
         """
         if max_workers is None:
             max_workers = min(cpu_count(), 4)  # Rate Limit対策で最大4並列
+        
+        # 実行IDを設定
+        self.current_execution_id = execution_id
         
         # 進捗ロガーの初期化
         progress_logger = None
@@ -173,6 +201,12 @@ class ScalableAnalysisSystem:
         
         processed = 0
         for config in configs_chunk:
+            # キャンセル確認（チャンク処理の各設定で確認）
+            if hasattr(self, 'current_execution_id') and self.current_execution_id:
+                if self._should_cancel_execution(self.current_execution_id):
+                    logger.info(f"Cancellation detected for {self.current_execution_id}, stopping chunk {chunk_id}")
+                    break
+            
             try:
                 # 設定の型チェック
                 if not isinstance(config, dict):

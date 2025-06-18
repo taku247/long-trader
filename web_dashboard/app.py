@@ -620,12 +620,62 @@ class WebDashboard:
                     
                     conn.commit()
                     
+                    # 実際のプロセスを強制終了
+                    try:
+                        import psutil
+                        import os
+                        import signal
+                        
+                        killed_processes = []
+                        
+                        # 関連するPythonプロセスを探して強制終了
+                        for proc in psutil.process_iter(['pid', 'cmdline', 'name']):
+                            try:
+                                cmdline = ' '.join(proc.info['cmdline'] or [])
+                                
+                                # 実行IDまたは銘柄名が含まれるプロセスを特定
+                                if (proc.info['name'] == 'python' and 
+                                    (execution_id in cmdline or 
+                                     symbol in cmdline or
+                                     'scalable_analysis_system' in cmdline or
+                                     'auto_symbol_training' in cmdline)):
+                                    
+                                    self.logger.info(f"Terminating process {proc.pid}: {cmdline}")
+                                    proc.terminate()  # SIGTERM送信
+                                    killed_processes.append(proc.pid)
+                                    
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                continue
+                        
+                        # 強制終了を待機
+                        import time
+                        time.sleep(2)
+                        
+                        # まだ動いているプロセスはKILL
+                        for proc in psutil.process_iter(['pid', 'cmdline', 'name']):
+                            try:
+                                if proc.pid in killed_processes and proc.is_running():
+                                    self.logger.warning(f"Force killing process {proc.pid}")
+                                    proc.kill()  # SIGKILL送信
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                continue
+                                
+                        if killed_processes:
+                            self.logger.info(f"Killed processes: {killed_processes}")
+                        else:
+                            self.logger.info(f"No running processes found for {symbol}")
+                            
+                    except ImportError:
+                        self.logger.warning("psutil not available, only database status updated")
+                    except Exception as proc_error:
+                        self.logger.error(f"Error terminating processes: {proc_error}")
+                    
                     self.logger.info(f"Manually reset execution: {symbol} ({execution_id})")
                     
                     return jsonify({
                         'success': True,
                         'symbol': symbol,
-                        'message': f'{symbol}の実行を停止しました'
+                        'message': f'{symbol}の実行を停止しました（プロセスも強制終了）'
                     })
                     
             except Exception as e:

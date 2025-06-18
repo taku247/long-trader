@@ -625,6 +625,7 @@ class WebDashboard:
                         import psutil
                         import os
                         import signal
+                        from datetime import datetime, timedelta
                         
                         killed_processes = []
                         
@@ -651,18 +652,47 @@ class WebDashboard:
                                     
                                     # 3. ProcessPoolExecutorワーカーの特定
                                     elif ('multiprocessing' in cmdline or 
-                                          'Process-' in cmdline):
-                                        # 親プロセスが関連プロセスかチェック
-                                        try:
-                                            parent = proc.parent()
-                                            if parent and parent.name() == 'python':
-                                                parent_cmdline = ' '.join(parent.cmdline())
-                                                if (execution_id in parent_cmdline or
-                                                    symbol in parent_cmdline or
-                                                    'scalable_analysis_system' in parent_cmdline):
-                                                    is_target_process = True
-                                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                            pass
+                                          'Process-' in cmdline or
+                                          'spawn_main' in cmdline):
+                                        # 3-1. 環境変数で直接特定
+                                        if environ.get('CURRENT_EXECUTION_ID') == execution_id:
+                                            is_target_process = True
+                                        
+                                        # 3-2. 親プロセスが関連プロセスかチェック
+                                        elif not is_target_process:
+                                            try:
+                                                parent = proc.parent()
+                                                if parent and parent.name() == 'python':
+                                                    parent_cmdline = ' '.join(parent.cmdline())
+                                                    if (execution_id in parent_cmdline or
+                                                        symbol in parent_cmdline or
+                                                        'scalable_analysis_system' in parent_cmdline):
+                                                        is_target_process = True
+                                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                                pass
+                                        
+                                        # 3-3. 孤児プロセス対策（最後の手段）
+                                        # 特定の銘柄に関連する実行中のプロセスがない場合のみ
+                                        if not is_target_process and symbol:
+                                            # 最近10分以内にプロセスが起動し、関連する親プロセスが見つからない場合
+                                            try:
+                                                create_time = datetime.fromtimestamp(proc.create_time())
+                                                ten_minutes_ago = datetime.now() - timedelta(minutes=10)
+                                                if create_time > ten_minutes_ago:
+                                                    # 他の関連プロセスが存在しない場合は孤児プロセスと判定
+                                                    related_processes = []
+                                                    for other_proc in psutil.process_iter(['name', 'cmdline']):
+                                                        if other_proc.pid != proc.pid and other_proc.info['name'] == 'python':
+                                                            other_cmdline = ' '.join(other_proc.info['cmdline'] or [])
+                                                            if (symbol in other_cmdline or 
+                                                                'scalable_analysis_system' in other_cmdline):
+                                                                related_processes.append(other_proc)
+                                                    
+                                                    if not related_processes:
+                                                        self.logger.warning(f"Orphan multiprocessing process detected for {symbol}: {proc.pid}")
+                                                        is_target_process = True
+                                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                                pass
                                 
                                 if is_target_process:
                                     

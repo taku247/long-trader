@@ -4428,6 +4428,137 @@ python test_browser_symbol_addition_comprehensive.py
 **テスト結果**: 全4銘柄で4/4テスト合格、システム安定性確認済み
 
 ### 🏆 高優先度
+- **銘柄追加Fail Fast（早期失敗）システム** - 処理後半失敗を防ぐ事前チェック機能
+
+#### ⚡ **銘柄追加Fail Fastシステム設計**
+
+**目的**: 銘柄追加処理で処理後半に失敗することを防ぎ、早期段階でエラー要因を検出
+
+**memo記載項目**: "銘柄追加時に、最初の段階でエラーが起きないかをできるだけチェックする形にしたい"
+
+##### **Phase 1: 必須事前チェック（即座に実装）**
+
+**1. 基本環境チェック**
+```python
+# 対象ファイル: auto_symbol_training.py, hyperliquid_api_client.py
+✅ Python依存ライブラリ存在確認
+  - hyperliquid.info, ccxt, pandas, numpy, sklearn等
+  - インポートエラー回避
+
+✅ 設定ファイル読み込み確認
+  - config/leverage_engine_config.json
+  - config/support_resistance_config.json  
+  - exchange_config.json
+  - ファイル存在・JSON妥当性
+
+✅ ディスク容量・権限確認
+  - large_scale_analysis/ ディレクトリ書き込み権限
+  - 最小100MB空き容量確認
+  - SQLiteファイル作成権限
+```
+
+**2. API接続事前テスト**
+```python
+# 対象ファイル: hyperliquid_api_client.py L76-L84
+✅ 取引所API初期化テスト
+  - MultiExchangeAPIClient作成確認
+  - ExchangeType設定妥当性
+  - ネットワーク接続基本確認
+
+✅ 銘柄バリデーション事前チェック
+  - validate_symbol_real() 軽量版実行
+  - 銘柄存在確認（API 1回呼び出し）
+  - アクティブ状態確認
+```
+
+**3. データベース事前確認**
+```python
+# 対象ファイル: scalable_analysis_system.py L32-L54, execution_log_database.py
+✅ SQLite接続テスト
+  - analysis.db, execution_logs.db アクセス確認
+  - スキーマ整合性チェック
+  - 書き込み権限確認
+
+✅ 重複実行チェック
+  - 同一銘柄の実行中プロセス確認
+  - execution_logs テーブル状態確認
+```
+
+##### **Phase 2: データ取得前チェック（短期実装）**
+
+**4. OHLCV取得可能性テスト**
+```python
+# 対象ファイル: hyperliquid_api_client.py L300-L400
+✅ 各時間足の最小データ取得テスト
+  - 1m, 3m, 5m, 15m, 30m, 1h の最初の1件取得
+  - データ形式妥当性確認
+  - 最小データポイント数確認（1000件要件）
+
+✅ 取引所レート制限確認
+  - API呼び出し頻度チェック
+  - タイムアウト設定妥当性
+```
+
+**5. 戦略・設定妥当性チェック**
+```python
+# 対象ファイル: scalable_analysis_system.py L393-L404
+✅ サポート時間足確認
+  - ['1m', '3m', '5m', '15m', '30m', '1h'] 範囲内
+  - timeframe_conditions.json 設定存在
+
+✅ サポート戦略確認  
+  - ['Conservative_ML', 'Aggressive_Traditional', 'Full_ML'] 範囲内
+  - 戦略設定ファイル妥当性
+```
+
+##### **Phase 3: 包括的事前診断（中期実装）**
+
+**6. システムリソース確認**
+```python
+# 対象ファイル: scalable_analysis_system.py L109-L161
+✅ プロセス実行権限テスト
+  - ProcessPoolExecutor 作成テスト
+  - 最大並列数制限確認（max_workers=4）
+
+✅ メモリ使用量推定
+  - 利用可能メモリ vs 必要メモリ
+  - 1プロセス512MB想定での計算
+```
+
+**7. ML・特徴量計算前提条件**
+```python
+# 対象ファイル: enhanced_ml_predictor.py, engines/leverage_decision_engine.py
+✅ ML特徴量計算可能性
+  - サポート・レジスタンス検出前提データ
+  - 技術指標計算に必要な最小データ量
+
+✅ レバレッジエンジン設定妥当性
+  - max_leverage, min_risk_reward 範囲確認
+  - timeframe固有設定存在確認
+```
+
+**8. ファイル保存先・バックテスト設定確認**
+```python
+# 対象ファイル: scalable_analysis_system.py L244-L254, L393-L450
+✅ 保存ディレクトリ作成権限
+  - charts/, data/, compressed/ ディレクトリ
+  - 圧縮ファイル保存権限
+
+✅ バックテスト設定妥当性
+  - 開始日・終了日設定、十分なデータ期間確保
+  - 評価指標計算前提条件
+```
+
+##### **🎯 実装効果**
+
+- **⚡ 処理時間短縮**: 失敗が予想される処理の早期中断（最大30分節約）
+- **📱 ユーザー体験向上**: 即座のエラーフィードバック（処理開始から30秒以内）
+- **🔧 デバッグ効率化**: 具体的なエラー要因の特定
+- **💡 システム安定性**: 処理後半での予期しない失敗を90%削減
+
+##### **🛠️ 実装方式**
+
+新しい事前チェック関数 `pre_flight_checks()` を `auto_symbol_training.py` に追加し、`train_symbol()` の最初で実行。既存の包括的テストスイート（`test_browser_symbol_addition_comprehensive.py`）との統合により、ブラウザからの銘柄追加前の完全な事前検証を実現。
 
 ### 📊 中優先度  
 - **バックテスト定期実行＆パフォーマンス順表示** - 高性能戦略の自動抽出
@@ -4438,6 +4569,67 @@ python test_browser_symbol_addition_comprehensive.py
 - **トレードデータの勝敗表示・PnL** - UI改善
 - **進捗ログブラウザの粒度向上** - ユーザビリティ改善  
 - **サーバーログの見やすさ改善** - 戦略・時間足表示
+
+----
+
+## 🛑 プロセス停止機能（2025-06-18実装）
+
+### 問題と解決
+
+**問題**: Webダッシュボードの停止ボタンを押してもサーバーログが止まらない
+
+**原因**: 
+- データベースのステータス更新のみで実際のプロセスを停止していなかった
+- `ProcessPoolExecutor`の子プロセスがキャンセル指示を受け取らない
+- 長時間実行処理内でのキャンセル確認がない
+
+### 実装した修正
+
+#### 1. **実プロセス強制終了機能** (`web_dashboard/app.py`)
+```python
+# reset-executionエンドポイントに追加
+import psutil
+
+# 関連するPythonプロセスを探して強制終了
+for proc in psutil.process_iter(['pid', 'cmdline', 'name']):
+    if (execution_id in cmdline or symbol in cmdline):
+        proc.terminate()  # SIGTERM送信
+        time.sleep(2)
+        if proc.is_running():
+            proc.kill()  # SIGKILL送信
+```
+
+#### 2. **キャンセル確認機能** (`scalable_analysis_system.py`)
+```python
+def _should_cancel_execution(self, execution_id: str = None) -> bool:
+    """データベースをチェックしてキャンセルされているか確認"""
+    # execution_logsテーブルのstatusがCANCELLEDかチェック
+```
+
+#### 3. **長時間処理でのキャンセル対応** (`support_resistance_ml.py`)
+```python
+# レベル相互作用検出処理に追加（10レベル毎に確認）
+if cursor.fetchone():
+    print("キャンセルが検出されました。レベル相互作用検出を停止します。")
+    return []
+```
+
+### 使用方法
+
+1. **Webダッシュボードから停止**:
+   - 実行中の銘柄の「停止」ボタンをクリック
+   - データベース更新 + 実プロセス強制終了が実行される
+
+2. **効果**:
+   - multiprocessing子プロセスも含めて確実に停止
+   - 「レベルとの相互作用を検出中...」などのログも停止
+   - リソースが即座に解放される
+
+### 技術詳細
+
+- **段階的終了**: SIGTERM → 2秒待機 → SIGKILL
+- **プロセス特定**: execution_id, symbol, ファイル名でマッチング
+- **キャンセル伝播**: データベース経由で子プロセスに伝達
 
 ----
 

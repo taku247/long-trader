@@ -155,7 +155,8 @@ class ScalableAnalysisSystem:
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             for i, chunk in enumerate(chunks):
-                future = executor.submit(self._process_chunk, chunk, i)
+                # execution_idを明示的に渡す
+                future = executor.submit(self._process_chunk, chunk, i, self.current_execution_id)
                 futures.append(future)
             
             # 結果収集（タイムアウト付き）
@@ -188,10 +189,16 @@ class ScalableAnalysisSystem:
         
         return total_processed
     
-    def _process_chunk(self, configs_chunk, chunk_id):
+    def _process_chunk(self, configs_chunk, chunk_id, execution_id=None):
         """チャンクを処理（プロセス内で実行）"""
         import time
         import random
+        import os
+        
+        # execution_idを環境変数に設定（子プロセス用）
+        if execution_id:
+            os.environ['CURRENT_EXECUTION_ID'] = execution_id
+            logger.info(f"チャンク {chunk_id}: execution_id {execution_id} を環境変数に設定")
         
         # プロセス間の競合を防ぐため、わずかな遅延を追加
         # TODO: ランダム遅延は品質問題のためコメントアウト (2024-06-18)
@@ -202,9 +209,11 @@ class ScalableAnalysisSystem:
         processed = 0
         for config in configs_chunk:
             # キャンセル確認（チャンク処理の各設定で確認）
-            if hasattr(self, 'current_execution_id') and self.current_execution_id:
-                if self._should_cancel_execution(self.current_execution_id):
-                    logger.info(f"Cancellation detected for {self.current_execution_id}, stopping chunk {chunk_id}")
+            # ProcessPoolExecutor内では execution_id を引数から取得
+            check_execution_id = execution_id or getattr(self, 'current_execution_id', None)
+            if check_execution_id:
+                if self._should_cancel_execution(check_execution_id):
+                    logger.info(f"Cancellation detected for {check_execution_id}, stopping chunk {chunk_id}")
                     break
             
             try:

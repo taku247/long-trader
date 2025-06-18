@@ -629,16 +629,42 @@ class WebDashboard:
                         killed_processes = []
                         
                         # 関連するPythonプロセスを探して強制終了
-                        for proc in psutil.process_iter(['pid', 'cmdline', 'name']):
+                        for proc in psutil.process_iter(['pid', 'cmdline', 'name', 'environ']):
                             try:
                                 cmdline = ' '.join(proc.info['cmdline'] or [])
+                                environ = proc.info.get('environ', {})
                                 
                                 # 実行IDまたは銘柄名が含まれるプロセスを特定
-                                if (proc.info['name'] == 'python' and 
-                                    (execution_id in cmdline or 
-                                     symbol in cmdline or
-                                     'scalable_analysis_system' in cmdline or
-                                     'auto_symbol_training' in cmdline)):
+                                is_target_process = False
+                                
+                                if proc.info['name'] == 'python':
+                                    # 1. コマンドラインでの特定
+                                    if (execution_id in cmdline or 
+                                        symbol in cmdline or
+                                        'scalable_analysis_system' in cmdline or
+                                        'auto_symbol_training' in cmdline):
+                                        is_target_process = True
+                                    
+                                    # 2. 環境変数での特定
+                                    elif environ.get('CURRENT_EXECUTION_ID') == execution_id:
+                                        is_target_process = True
+                                    
+                                    # 3. ProcessPoolExecutorワーカーの特定
+                                    elif ('multiprocessing' in cmdline or 
+                                          'Process-' in cmdline):
+                                        # 親プロセスが関連プロセスかチェック
+                                        try:
+                                            parent = proc.parent()
+                                            if parent and parent.name() == 'python':
+                                                parent_cmdline = ' '.join(parent.cmdline())
+                                                if (execution_id in parent_cmdline or
+                                                    symbol in parent_cmdline or
+                                                    'scalable_analysis_system' in parent_cmdline):
+                                                    is_target_process = True
+                                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                            pass
+                                
+                                if is_target_process:
                                     
                                     self.logger.info(f"Terminating process {proc.pid}: {cmdline}")
                                     proc.terminate()  # SIGTERM送信

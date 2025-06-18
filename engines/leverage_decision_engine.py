@@ -38,6 +38,13 @@ class InsufficientConfigurationError(Exception):
         self.missing_config = missing_config
         super().__init__(message)
 
+class LeverageAnalysisError(Exception):
+    """レバレッジ分析処理失敗エラー"""
+    def __init__(self, message: str, error_type: str, analysis_stage: str):
+        self.error_type = error_type
+        self.analysis_stage = analysis_stage
+        super().__init__(message)
+
 class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
     """
     コアレバレッジ判定エンジン
@@ -49,12 +56,59 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
     - 市場異常検知
     """
     
-    def __init__(self, sl_tp_calculator: Optional[IStopLossTakeProfitCalculator] = None):
-        self.max_leverage = 100.0
-        self.min_risk_reward = 2.0
-        self.btc_correlation_threshold = 0.7
-        self.min_support_strength = 0.6
-        self.max_drawdown_tolerance = 0.15  # 15%
+    def __init__(self, sl_tp_calculator: Optional[IStopLossTakeProfitCalculator] = None, 
+                 config_manager=None, timeframe: str = None, symbol_category: str = None):
+        # 設定管理システムの初期化
+        if config_manager is None:
+            try:
+                from config.leverage_config_manager import LeverageConfigManager
+                self.config_manager = LeverageConfigManager()
+                print("✅ レバレッジエンジン設定管理システムを初期化")
+            except Exception as e:
+                print(f"❌ 設定管理システム初期化エラー: {e}")
+                raise InsufficientConfigurationError(
+                    message=f"レバレッジエンジン設定管理システムの初期化に失敗: {e}",
+                    error_type="config_manager_init_failed",
+                    missing_config="LeverageConfigManager"
+                )
+        else:
+            self.config_manager = config_manager
+        
+        # 調整済み定数を取得
+        try:
+            adjusted_constants = self.config_manager.get_adjusted_constants(timeframe, symbol_category)
+            
+            # コア定数を設定
+            core_constants = adjusted_constants['core']
+            self.max_leverage = core_constants['max_leverage']
+            self.min_risk_reward = core_constants['min_risk_reward']
+            self.btc_correlation_threshold = core_constants['btc_correlation_threshold']
+            self.min_support_strength = core_constants['min_support_strength']
+            self.max_drawdown_tolerance = core_constants['max_drawdown_tolerance']
+            
+            # その他の定数も保存
+            self.risk_calculation = adjusted_constants['risk_calculation']
+            self.leverage_scaling = adjusted_constants['leverage_scaling']
+            self.stop_loss_take_profit = adjusted_constants['stop_loss_take_profit']
+            self.market_context = adjusted_constants['market_context']
+            self.data_validation = adjusted_constants['data_validation']
+            self.emergency_limits = adjusted_constants['emergency_limits']
+            
+            # メタデータ保存
+            self.timeframe = timeframe
+            self.symbol_category = symbol_category
+            
+            print(f"✅ レバレッジエンジン定数をロード (timeframe: {timeframe}, category: {symbol_category})")
+            print(f"   最大レバレッジ: {self.max_leverage:.1f}x, 最小RR比: {self.min_risk_reward:.1f}")
+            
+        except Exception as e:
+            print(f"❌ 設定定数読み込みエラー: {e}")
+            raise InsufficientConfigurationError(
+                message=f"レバレッジエンジン設定定数の読み込みに失敗: {e}",
+                error_type="config_constants_load_failed",
+                missing_config="leverage_engine_constants"
+            )
+        
         self.sl_tp_calculator = sl_tp_calculator
     
     def calculate_safe_leverage(self, 
@@ -157,24 +211,30 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
                 market_conditions=market_context
             )
             
-        except Exception as e:
-            # エラー時は保守的な推奨を返す
+        except (InsufficientMarketDataError, InsufficientConfigurationError) as e:
+            # データ・設定不足エラーは再スロー（銘柄追加を停止）
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f"🚨 レバレッジ計算エラー: {str(e)}")
-            logger.error(f"   エラータイプ: {type(e).__name__}")
-            import traceback
-            logger.error(f"   スタックトレース: {traceback.format_exc()}")
+            logger.error(f"🚨 データ/設定不足によりレバレッジ分析失敗: {str(e)}")
+            logger.error(f"   エラータイプ: {e.error_type}")
+            logger.error(f"   銘柄追加を中止します")
+            raise  # 上位に伝播して銘柄追加を完全に停止
             
-            return LeverageRecommendation(
-                recommended_leverage=1.0,
-                max_safe_leverage=2.0,
-                risk_reward_ratio=1.0,
-                stop_loss_price=market_context.current_price * 0.95,
-                take_profit_price=market_context.current_price * 1.05,
-                confidence_level=0.1,
-                reasoning=[f"エラーが発生: {str(e)}", "保守的な設定を適用"],
-                market_conditions=market_context
+        except Exception as e:
+            # その他の予期しないエラーも銘柄追加を停止
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"🚨 レバレッジ分析で致命的エラーが発生: {str(e)}")
+            logger.error(f"   エラータイプ: {type(e).__name__}")
+            logger.error(f"   スタックトレース: {traceback.format_exc()}")
+            logger.error(f"   安全のため銘柄追加を中止します")
+            
+            # 新しい例外として再スロー
+            raise LeverageAnalysisError(
+                message=f"レバレッジ分析処理で致命的エラー: {str(e)}",
+                error_type="leverage_calculation_failed",
+                analysis_stage="comprehensive_analysis"
             )
     
     def _analyze_downside_risk(self, current_price: float, 
@@ -227,7 +287,7 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
             reasoning.append("⚠️ 単層サポート: 追加のサポートレベルが不足")
         
         # サポートレベルでの反発確率を予測から取得
-        support_bounce_probability = 0.5  # デフォルト
+        support_bounce_probability = self.risk_calculation.get('support_bounce_probability_default', 0.5)
         for prediction in breakout_predictions:
             if prediction.level.price == nearest_support.price:
                 support_bounce_probability = prediction.bounce_probability
@@ -238,7 +298,7 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         # 強いサポートが近くにある場合はより高いレバレッジが可能
         support_factor = nearest_support.strength * support_bounce_probability
         distance_factor = max(0.3, min(1.0, support_distance_pct / 0.1))  # 10%距離を基準
-        multi_layer_factor = 1.3 if multi_layer_protection else 1.0
+        multi_layer_factor = self.risk_calculation.get('multi_layer_protection_factor', 1.3) if multi_layer_protection else 1.0
         
         max_leverage_from_support = min(
             self.max_leverage,
@@ -292,7 +352,7 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         reasoning.append(f"🎯 最近レジスタンス: {nearest_resistance.price:.4f} ({resistance_distance_pct*100:.1f}%上)")
         
         # ブレイクアウト確率を予測から取得
-        breakout_probability = 0.3  # デフォルト
+        breakout_probability = self.risk_calculation.get('breakout_probability_default', 0.3)
         for prediction in breakout_predictions:
             if prediction.level.price == nearest_resistance.price:
                 breakout_probability = prediction.breakout_probability
@@ -403,7 +463,8 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         }.get(market_phase, 1.0)
         
         # ボラティリティによるリスク調整（高ボラはリスク高）
-        volatility_risk_factor = 1.0 + min(volatility * 2, 1.0)
+        volatility_multiplier = self.risk_calculation.get('volatility_risk_multiplier', 2.0)
+        volatility_risk_factor = 1.0 + min(volatility * volatility_multiplier, 1.0)
         
         # 総合リスクファクター
         total_risk_factor = trend_risk_factor * phase_risk_factor * volatility_risk_factor
@@ -453,12 +514,18 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         reasoning.append(f"⚖️ リスクリワード比: {risk_reward_ratio:.2f}")
         
         # リスクリワード比が低い場合はレバレッジを制限
-        if risk_reward_ratio >= 2.0:
-            rr_max_leverage = min(self.max_leverage, risk_reward_ratio * 5)
-        elif risk_reward_ratio >= 1.0:
-            rr_max_leverage = min(self.max_leverage, risk_reward_ratio * 3)
+        high_rr_threshold = self.leverage_scaling.get('high_rr_threshold', 2.0)
+        high_rr_max_leverage = self.leverage_scaling.get('high_rr_max_leverage', 10.0)
+        medium_rr_threshold = self.leverage_scaling.get('medium_rr_threshold', 1.0)
+        medium_rr_max_leverage = self.leverage_scaling.get('medium_rr_max_leverage', 2.0)
+        low_rr_max_leverage = self.leverage_scaling.get('low_rr_max_leverage', 1.0)
+        
+        if risk_reward_ratio >= high_rr_threshold:
+            rr_max_leverage = min(self.max_leverage, high_rr_max_leverage)
+        elif risk_reward_ratio >= medium_rr_threshold:
+            rr_max_leverage = min(self.max_leverage, medium_rr_max_leverage)
         else:
-            rr_max_leverage = 2.0
+            rr_max_leverage = low_rr_max_leverage
         
         # 3. BTC相関リスクからの制約
         btc_max_leverage = self.max_leverage
@@ -480,7 +547,9 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         
         # === 推奨レバレッジは市場条件に基づく調整 ===
         # 市場の状況に応じて保守的さを調整（固定70%ではなく）
-        market_conservatism = 0.5 + (market_context.volatility * 0.3)  # 0.5-0.8の範囲
+        conservatism_base = self.risk_calculation.get('market_conservatism_base', 0.5)
+        conservatism_vol_factor = self.risk_calculation.get('market_conservatism_volatility_factor', 0.3)
+        market_conservatism = conservatism_base + (market_context.volatility * conservatism_vol_factor)
         market_conservatism = max(0.5, min(0.9, market_conservatism))
         
         recommended_leverage = max_safe_leverage * market_conservatism
@@ -538,11 +607,14 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
         support_strength = min(1.0, downside_analysis['support_strength'])  # 1.0に制限
         
         # サポート強度が低い場合はより早めに損切り
-        stop_loss_buffer = 0.02 * (1.2 - support_strength)  # 強度に応じて調整
+        buffer_base = self.stop_loss_take_profit.get('stop_loss_buffer_base', 0.02)
+        strength_factor = self.stop_loss_take_profit.get('stop_loss_strength_factor', 1.2)
+        stop_loss_buffer = buffer_base * (strength_factor - support_strength)
         stop_loss_distance = support_distance + stop_loss_buffer
         
-        # レバレッジを考慮した損切り（資金の10%を上限）
-        max_loss_pct = 0.10 / leverage
+        # レバレッジを考慮した損切り（設定値上限）
+        max_loss_base = self.stop_loss_take_profit.get('max_loss_pct_base', 0.10)
+        max_loss_pct = max_loss_base / leverage
         stop_loss_distance = min(stop_loss_distance, max_loss_pct)
         
         # 損切りラインが現在価格より下になるよう確保（ロングポジション用）

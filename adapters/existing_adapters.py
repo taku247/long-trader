@@ -265,16 +265,9 @@ class ExistingMLPredictorAdapter(IBreakoutPredictor):
         """
         try:
             if not self.is_trained:
-                # デフォルト予測を返す
-                return BreakoutPrediction(
-                    level=level,
-                    breakout_probability=0.5,
-                    bounce_probability=0.5,
-                    prediction_confidence=0.3,
-                    predicted_price_target=None,
-                    time_horizon_minutes=60,
-                    model_name="ExistingMLAdapter"
-                )
+                # 未訓練の場合はシグナルスキップ
+                print("⚠️ MLモデルが未訓練のため、シグナル検知をスキップ")
+                return None  # シグナルスキップ
             
             # 既存のML予測ロジック（簡略化）
             current_price = current_data['close'].iloc[-1]
@@ -317,16 +310,9 @@ class ExistingMLPredictorAdapter(IBreakoutPredictor):
             
         except Exception as e:
             print(f"ブレイクアウト予測エラー: {e}")
-            # エラー時はデフォルト値を返す
-            return BreakoutPrediction(
-                level=level,
-                breakout_probability=0.5,
-                bounce_probability=0.5,
-                prediction_confidence=0.1,
-                predicted_price_target=None,
-                time_horizon_minutes=60,
-                model_name="ExistingMLAdapter_Error"
-            )
+            # エラー時はシグナルスキップ
+            print("⚠️ 予測処理でエラーが発生したため、シグナル検知をスキップ")
+            return None  # シグナルスキップ
     
     def get_model_accuracy(self) -> Dict[str, float]:
         """モデル精度を取得"""

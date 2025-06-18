@@ -164,7 +164,15 @@ class EnhancedMLPredictor(IBreakoutPredictor):
         
         # === 4. レベル特異的特徴量 ===
         if levels:
-            features = self._add_level_features(features, levels)
+            level_features = self._add_level_features(features, levels)
+            # レベル特徴量の追加に失敗した場合はシグナルスキップ
+            if level_features is None:
+                return None  # シグナル検知スキップ
+            features = level_features
+        else:
+            # レベルが空の場合はシグナルスキップ
+            print("⚠️ サポート・レジスタンスレベルが提供されていません - シグナル検知をスキップ")
+            return None  # シグナル検知スキップ
         
         # === 5. 基本的な価格レンジ特徴量（必要な特徴量を先に作成） ===
         features['high_low_ratio'] = (features['high'] - features['low']) / features['close']
@@ -209,9 +217,8 @@ class EnhancedMLPredictor(IBreakoutPredictor):
             features['support_strength'] = nearest_support.strength
             features['support_touches'] = nearest_support.touch_count
         else:
-            features['support_distance'] = 0.1  # デフォルト値
-            features['support_strength'] = 0.5
-            features['support_touches'] = 1
+            # 実データが利用できない場合はNoneを返してシグナルスキップを促す
+            return None  # シグナル検知スキップ
         
         if resistances:
             nearest_resistance = min(resistances, key=lambda x: abs(x.price - current_price))
@@ -219,9 +226,8 @@ class EnhancedMLPredictor(IBreakoutPredictor):
             features['resistance_strength'] = nearest_resistance.strength
             features['resistance_touches'] = nearest_resistance.touch_count
         else:
-            features['resistance_distance'] = 0.1  # デフォルト値
-            features['resistance_strength'] = 0.5
-            features['resistance_touches'] = 1
+            # 実データが利用できない場合はNoneを返してシグナルスキップを促す
+            return None  # シグナル検知スキップ
         
         # レベル間ポジション
         if supports and resistances:
@@ -229,7 +235,8 @@ class EnhancedMLPredictor(IBreakoutPredictor):
             current_position = (current_price - supports[0].price) / total_range
             features['level_position'] = current_position
         else:
-            features['level_position'] = 0.5
+            # サポートまたはレジスタンスが検出できない場合はシグナルスキップ
+            return None  # シグナル検知スキップ
         
         return features
     
@@ -242,6 +249,11 @@ class EnhancedMLPredictor(IBreakoutPredictor):
             
             # 特徴量エンジニアリング
             features = self.create_enhanced_features(data, levels)
+            
+            # 実データが利用できない場合は訓練失敗
+            if features is None:
+                print("❌ サポート・レジスタンスの実データが不足しているため、ML訓練をスキップ")
+                return False
             
             if len(features) < 200:
                 print("⚠️ 訓練データが不足しています（200件未満）")
@@ -323,8 +335,14 @@ class EnhancedMLPredictor(IBreakoutPredictor):
             # 特徴量作成
             features = self.create_enhanced_features(current_data, [level])
             
+            # 実データが利用できない場合はシグナルスキップ
+            if features is None:
+                print("⚠️ サポート・レジスタンスの実データが不足 - シグナル検知をスキップ")
+                return None  # シグナルスキップ
+            
             if features.empty or len(features) < 10:
-                return self._create_default_prediction(level)
+                print("⚠️ 十分な特徴量データがありません - シグナル検知をスキップ")
+                return None  # シグナルスキップ
             
             # 最新データポイントを使用
             X = features[self.feature_columns].iloc[-1:].fillna(0)

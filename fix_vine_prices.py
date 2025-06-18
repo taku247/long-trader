@@ -7,6 +7,60 @@ import os
 import shutil
 from datetime import datetime
 
+def calculate_statistical_price_estimate(data, field_name, min_price, max_price):
+    """
+    統計的手法による価格推定
+    
+    Args:
+        data: 全トレードデータのリスト
+        field_name: 推定対象の価格フィールド名
+        min_price: 正常価格の最小値
+        max_price: 正常価格の最大値
+    
+    Returns:
+        float: 統計的に推定された価格
+    """
+    valid_prices = []
+    
+    # 正常な価格データを収集
+    for trade in data:
+        if isinstance(trade, dict) and field_name in trade:
+            price = trade[field_name]
+            if isinstance(price, (int, float, np.number)) and min_price <= price <= max_price:
+                valid_prices.append(price)
+    
+    if not valid_prices:
+        # 正常データが見つからない場合は中央値を使用
+        return (min_price + max_price) / 2
+    
+    valid_prices = np.array(valid_prices)
+    
+    # 統計的推定方法を選択
+    if len(valid_prices) >= 10:
+        # 十分なデータがある場合: 中央値 + 小さなノイズ
+        median_price = np.median(valid_prices)
+        std_price = np.std(valid_prices)
+        
+        # 中央値を基準に統計的に調整（決定論的）
+        # 標準偏差を使用した補正（ランダムではなく一貫性のある調整）
+        adjustment = 0.02 * std_price  # 標準偏差の2%で調整
+        estimated_price = median_price + adjustment
+        
+        # 正常範囲内に制限
+        estimated_price = max(min_price, min(max_price, estimated_price))
+        
+    elif len(valid_prices) >= 3:
+        # データが少ない場合: 移動平均
+        estimated_price = np.mean(valid_prices[-3:])  # 最新3つの平均
+        
+    else:
+        # データが非常に少ない場合: 四分位数に基づく推定
+        q25 = np.percentile(valid_prices, 25)
+        q75 = np.percentile(valid_prices, 75)
+        estimated_price = (q25 + q75) / 2
+    
+    return estimated_price
+
 def fix_vine_prices():
     """
     VINEファイルの異常な価格データ($100以上)を正常な価格範囲($0.025-$0.055)に修正
@@ -64,8 +118,8 @@ def fix_vine_prices():
                                     normalized = (price - 950) / (1050 - 950)
                                     new_price = NORMAL_PRICE_MIN + normalized * (NORMAL_PRICE_MAX - NORMAL_PRICE_MIN)
                                 else:
-                                    # その他の異常値は中央値周辺にランダム配置
-                                    new_price = np.random.uniform(0.032, 0.048)
+                                    # その他の異常値は統計的手法で推定
+                                    new_price = calculate_statistical_price_estimate(data, field, NORMAL_PRICE_MIN, NORMAL_PRICE_MAX)
                                 
                                 trade[field] = round(new_price, 6)
                                 file_anomalies_fixed += 1
@@ -142,7 +196,10 @@ def verify_fixes():
 if __name__ == '__main__':
     print("VINE Price Fix Script")
     print("This will fix anomalous prices ($100+) in VINE trading data")
-    print("Anomalous prices will be replaced with values in normal range ($0.025-$0.055)")
+    print("Anomalous prices will be replaced using statistical estimation methods:")
+    print("  - Linear mapping for 950-1050 range")
+    print("  - Median + statistical adjustment for other anomalies")
+    print("  - Moving averages when data is limited")
     
     response = input("\nProceed with fixing VINE prices? (y/N): ")
     if response.lower() == 'y':

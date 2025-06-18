@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from real_time_system.utils.colored_log import get_colored_logger
 from scalable_analysis_system import ScalableAnalysisSystem
 from execution_log_database import ExecutionLogDatabase, ExecutionType, ExecutionStatus
-from engines.leverage_decision_engine import InsufficientMarketDataError, InsufficientConfigurationError
+from engines.leverage_decision_engine import InsufficientMarketDataError, InsufficientConfigurationError, LeverageAnalysisError
 
 
 class AutoSymbolTrainer:
@@ -221,6 +221,31 @@ class AutoSymbolTrainer:
                 execution_id,
                 ExecutionStatus.FAILED,
                 current_operation=f'設定不足により中止: {e.error_type}',
+                error_message=str(e)
+            )
+            
+            raise  # 上位に伝播して銘柄追加を完全に停止
+            
+        except LeverageAnalysisError as e:
+            # レバレッジ分析エラーの場合は特別な処理
+            self.logger.error(f"❌ レバレッジ分析失敗により銘柄追加を中止: {e}")
+            self.logger.error(f"   エラータイプ: {e.error_type}")
+            self.logger.error(f"   分析段階: {e.analysis_stage}")
+            
+            # データベースに特別なステータスで記録
+            self.execution_db.add_execution_step(
+                execution_id,
+                step_name,
+                'FAILED_LEVERAGE_ANALYSIS',
+                error_message=f"レバレッジ分析失敗: {e}",
+                error_traceback=traceback.format_exc()
+            )
+            
+            # 実行を失敗として終了
+            self.execution_db.update_execution_status(
+                execution_id,
+                ExecutionStatus.FAILED,
+                current_operation=f'レバレッジ分析失敗により中止: {e.error_type}',
                 error_message=str(e)
             )
             

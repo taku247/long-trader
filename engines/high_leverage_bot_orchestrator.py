@@ -89,8 +89,10 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             self.market_context_analyzer = SimpleMarketContextAnalyzer()
             print("✅ 市場コンテキスト分析器を初期化")
             
+            # 現在の分析対象に応じてレバレッジエンジンを初期化
+            # Note: timeframeとsymbol_categoryは分析時に決定されるため、後で更新可能
             self.leverage_decision_engine = CoreLeverageDecisionEngine()
-            print("✅ レバレッジ判定エンジンを初期化")
+            print("✅ レバレッジ判定エンジンを初期化（デフォルト設定）")
             
             print("🎉 全てのプラグインが正常に初期化されました")
             
@@ -121,6 +123,20 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         try:
             print(f"\n🎯 ハイレバレッジ機会分析開始: {symbol} ({timeframe})")
             print("=" * 60)
+            
+            # 銘柄カテゴリの判定
+            symbol_category = self._determine_symbol_category(symbol)
+            print(f"📊 銘柄カテゴリ: {symbol_category}")
+            
+            # レバレッジエンジンを時間足・銘柄カテゴリに応じて再初期化
+            try:
+                self.leverage_decision_engine = CoreLeverageDecisionEngine(
+                    timeframe=timeframe, 
+                    symbol_category=symbol_category
+                )
+                print(f"🔧 レバレッジエンジンを調整済み設定で初期化")
+            except Exception as e:
+                print(f"⚠️ レバレッジエンジン再初期化エラー: {e}, デフォルト設定を継続使用")
             
             # 短期間足の場合は時間軸に応じた最適化を適用
             is_short_timeframe = timeframe in ['1m', '3m', '5m']
@@ -295,7 +311,11 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                 for level in levels:
                     try:
                         prediction = self.breakout_predictor.predict_breakout(data, level)
-                        predictions.append(prediction)
+                        # Noneの場合はシグナルスキップとして処理
+                        if prediction is not None:
+                            predictions.append(prediction)
+                        else:
+                            print(f"レベル{level.price}のシグナル検知をスキップ（実データ不足）")
                     except Exception as e:
                         print(f"レベル{level.price}の予測エラー: {e}")
                         continue
@@ -401,6 +421,39 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             ],
             market_conditions=market_context
         )
+    
+    def _determine_symbol_category(self, symbol: str) -> str:
+        """
+        銘柄カテゴリを判定
+        
+        Args:
+            symbol: 銘柄シンボル
+            
+        Returns:
+            str: 銘柄カテゴリ ('large_cap', 'mid_cap', 'small_cap', 'meme_coin')
+        """
+        symbol_upper = symbol.upper()
+        
+        # 大型銘柄
+        large_cap_symbols = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOT', 'AVAX', 'LINK', 'MATIC']
+        if symbol_upper in large_cap_symbols:
+            return 'large_cap'
+        
+        # ミームコイン
+        meme_symbols = ['DOGE', 'SHIB', 'PEPE', 'FLOKI', 'BONK', 'WIF', 'BRETT', 'POPCAT']
+        if symbol_upper in meme_symbols:
+            return 'meme_coin'
+        
+        # 中型銘柄（主要アルトコイン）
+        mid_cap_symbols = [
+            'UNI', 'ATOM', 'LTC', 'BCH', 'ETC', 'FIL', 'AAVE', 'SUSHI', 'COMP', 'YFI',
+            'SNX', 'MKR', 'CRV', 'BAL', 'ALPHA', 'CAKE', 'BAKE', 'AUTO', 'BELT'
+        ]
+        if symbol_upper in mid_cap_symbols:
+            return 'mid_cap'
+        
+        # デフォルトは小型銘柄
+        return 'small_cap'
     
     # _generate_sample_data method removed - no fallback data allowed
     

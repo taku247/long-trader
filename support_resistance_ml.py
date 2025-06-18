@@ -31,10 +31,59 @@ except ImportError:
 import joblib
 import argparse
 import warnings
+import os
 warnings.filterwarnings('ignore')
+
+# 現在の実行IDを環境変数から取得
+CURRENT_EXECUTION_ID = os.environ.get('EXECUTION_ID', None)
 
 # サポレジ検出機能をインポート
 from support_resistance_visualizer import find_all_levels
+
+def check_cancellation_requested():
+    """キャンセルリクエストを確認"""
+    try:
+        import sqlite3
+        from datetime import datetime, timedelta
+        
+        # 1. 環境変数から実行IDを使用
+        if CURRENT_EXECUTION_ID:
+            with sqlite3.connect("execution_logs.db") as conn:
+                cursor = conn.execute('''
+                    SELECT status FROM execution_logs 
+                    WHERE execution_id = ?
+                ''', (CURRENT_EXECUTION_ID,))
+                result = cursor.fetchone()
+                if result and result[0] == 'CANCELLED':
+                    return True
+        
+        # 2. 環境変数がない場合は、現在実行中のプロセスのみチェック
+        else:
+            with sqlite3.connect("execution_logs.db") as conn:
+                # 現在RUNNINGステータスのプロセスのみを確認
+                cursor = conn.execute('''
+                    SELECT execution_id, status, symbol FROM execution_logs 
+                    WHERE status = 'RUNNING'
+                    AND (current_operation LIKE '%support_resistance%' 
+                         OR current_operation LIKE '%ML%'
+                         OR current_operation LIKE '%機械学習%'
+                         OR symbol IS NOT NULL)
+                    ORDER BY timestamp_start DESC
+                    LIMIT 1
+                ''')
+                
+                recent_record = cursor.fetchone()
+                
+                if recent_record:
+                    execution_id, status, symbol = recent_record
+                    # RUNNINGの場合はキャンセルされていない
+                    return False
+        
+        return False
+        
+    except Exception as e:
+        # エラーがあっても処理を継続
+        return False
 
 def detect_level_interactions(df, levels, distance_threshold=0.02):
     """
@@ -56,22 +105,9 @@ def detect_level_interactions(df, levels, distance_threshold=0.02):
             print(f"  処理中: {level_idx + 1}/{len(levels)} レベル...")
             
             # キャンセル確認（10レベル毎にチェック）
-            try:
-                import sqlite3
-                import os
-                execution_db_path = "execution_logs.db"
-                if os.path.exists(execution_db_path):
-                    with sqlite3.connect(execution_db_path) as conn:
-                        cursor = conn.execute('''
-                            SELECT status FROM execution_logs 
-                            WHERE status = 'CANCELLED' AND timestamp_end IS NULL
-                            LIMIT 1
-                        ''')
-                        if cursor.fetchone():
-                            print("キャンセルが検出されました。レベル相互作用検出を停止します。")
-                            return []
-            except Exception:
-                pass  # キャンセル確認に失敗してもメイン処理は継続
+            if check_cancellation_requested():
+                print("レベル相互作用検出を停止します。")
+                return []
         level_price = level['price']
         level_type = level['type']
         

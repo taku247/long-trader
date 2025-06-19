@@ -15,6 +15,76 @@ python app.py
 
 ⚠️ **注意**: `demo_dashboard.py`は古いデモ版です。**必ず`web_dashboard/app.py`を使用してください。**
 
+## ⚠️ 既知の問題と制限事項
+
+### 🛑 手動リセット機能の最終改善完了（2025年6月19日更新）
+
+**✅ 完全解決**: 手動リセット機能とフロントエンド同期問題を完全解決しました。
+
+**最終改善内容**:
+1. **multiprocessingプロセス検出の完全強化**
+   - ✅ PPID=1の孤児プロセスを直接検出
+   - ✅ 年齢制限を完全撤廃（force_all時）
+   - ✅ resource_trackerプロセスの適切な順序終了
+   - ✅ lokyバックエンド関連のKeyErrorメッセージ削減
+
+2. **フロントエンド同期問題の解決**
+   - ✅ 銘柄「追加済み」表示の不整合を修正
+   - ✅ データベース削除後のフロントエンドキャッシュ問題解決
+   - ✅ symbolsData自動更新による古いデータ復元問題の対処
+
+**解決した具体的問題**:
+- 手動リセット後もmultiprocessingプロセスが残る問題 → ✅ 解決
+- NEARなど削除済み銘柄が「追加済み」と表示される問題 → ✅ 解決
+- resource_trackerプロセスの残留によるシステムリソース問題 → ✅ 解決
+
+**現在の状態**: **完全に動作** ✅
+- multiprocessingプロセスは手動リセットで完全に終了
+- フロントエンドとバックエンドのデータ同期が正常
+- 銘柄追加・削除・再追加が正しく動作
+
+**手動での確認方法**:
+```bash
+# multiprocessingプロセスの確認（正常時は出力なし）
+ps aux | grep -E "(multiprocessing|spawn_main|resource_tracker)" | grep -v grep
+
+# 必要に応じて手動停止（通常は不要）
+kill -TERM [PID番号]
+```
+
+**💡 フロントエンド問題の対処法**:
+データベース手動削除後に銘柄が「追加済み」と表示される場合:
+1. ブラウザを完全リロード（Ctrl+F5 / Cmd+Shift+R）
+2. または一時的に自動更新を停止してからクリア操作
+
+### 🗄️ データベースファイルの分離問題（要修正）
+
+**問題**: execution_logs.dbが2箇所に存在し、システムが異なるDBを参照している
+
+**現状**:
+- `./execution_logs.db` - ルートディレクトリ（古い場所）
+- `./web_dashboard/execution_logs.db` - web_dashboardディレクトリ（新しい場所）
+
+**影響**:
+- Webダッシュボードは`web_dashboard/execution_logs.db`を使用
+- 一部のスクリプトは`./execution_logs.db`を参照
+- 手動リセット機能やテストスクリプトが正しいDBを参照できない場合がある
+
+**必要な対応**:
+1. すべてのコードで統一したDBパスを使用するよう修正
+2. 既存のDBレコードを統合
+3. 古いDBファイルの削除またはリダイレクト
+
+**一時的な回避策**:
+```bash
+# 正しいDBの場所を確認
+sqlite3 web_dashboard/execution_logs.db "SELECT COUNT(*) FROM execution_logs;"
+sqlite3 execution_logs.db "SELECT COUNT(*) FROM execution_logs;"
+
+# 手動でDBを操作する際は正しいパスを使用
+sqlite3 web_dashboard/execution_logs.db "SELECT * FROM execution_logs WHERE symbol = 'XXXX';"
+```
+
 ### 🔄 取引所切り替え機能
 - **Hyperliquid** ⇄ **Gate.io** をワンクリックで切り替え
 - ナビゲーションバーの「🔄 取引所切り替えボタン」から選択

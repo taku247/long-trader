@@ -88,7 +88,11 @@ class ExecutionRecord:
 class ExecutionLogDatabase:
     """実行ログデータベース管理"""
     
-    def __init__(self, db_path: str = "execution_logs.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            # 絶対パスでルートディレクトリのDBを指定
+            project_root = Path(__file__).parent
+            db_path = str(project_root / "execution_logs.db")
         self.db_path = Path(db_path)
         self.logger = get_colored_logger(__name__)
         self._init_database()

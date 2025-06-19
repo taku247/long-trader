@@ -728,6 +728,106 @@ class WebDashboard:
                     
                     self.logger.info(f"Manually reset execution: {symbol} ({execution_id})")
                     
+                    # 積極的クリーンアップ（手動リセット時）
+                    try:
+                        import psutil
+                        import time
+                        
+                        self.logger.info("🧹 Performing aggressive cleanup after manual reset...")
+                        killed_count = 0
+                        scanned_count = 0
+                        resource_trackers = []  # resource_trackerプロセスを後で終了
+                        
+                        # multiprocessingプロセスを強制終了（改善版）
+                        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'ppid']):
+                            try:
+                                proc_info = proc.info
+                                scanned_count += 1
+                                
+                                if not proc_info['cmdline']:
+                                    continue
+                                
+                                cmdline_list = proc_info.get('cmdline', [])
+                                if cmdline_list is None:
+                                    cmdline_list = []
+                                cmdline = ' '.join(str(x) for x in cmdline_list)
+                                
+                                # より包括的なmultiprocessing関連プロセス検出
+                                is_target = False
+                                reason = ""
+                                
+                                if 'python' in proc_info['name'].lower():
+                                    # 1. multiprocessing関連キーワード検出
+                                    mp_keywords = [
+                                        'multiprocessing', 'spawn_main', 'resource_tracker',
+                                        'Pool', 'Process-', 'ProcessPoolExecutor'
+                                    ]
+                                    
+                                    for keyword in mp_keywords:
+                                        if keyword in cmdline:
+                                            is_target = True
+                                            reason = f"keyword:{keyword}"
+                                            break
+                                    
+                                    # 2. 特定のコマンドパターン検出
+                                    if not is_target:
+                                        target_patterns = [
+                                            'from multiprocessing.spawn import spawn_main',
+                                            'from multiprocessing.resource_tracker import main',
+                                            '--multiprocessing-fork'
+                                        ]
+                                        
+                                        for pattern in target_patterns:
+                                            if pattern in cmdline:
+                                                is_target = True
+                                                reason = f"pattern:{pattern[:20]}..."
+                                                break
+                                    
+                                    # 3. 引数による検出（main関数の数字引数）
+                                    if not is_target and 'main(' in cmdline and any(c.isdigit() for c in cmdline):
+                                        is_target = True
+                                        reason = "main_with_args"
+                                
+                                if is_target:
+                                    self.logger.warning(f"🧹 Force killing multiprocessing process: PID {proc_info['pid']} ({reason})")
+                                    self.logger.debug(f"  Command: {cmdline[:100]}...")
+                                    
+                                    # resource_trackerは最後に終了（他のプロセスのクリーンアップを待つ）
+                                    if 'resource_tracker' in cmdline:
+                                        # 一旦リストに保存
+                                        resource_trackers.append({
+                                            'proc': proc,
+                                            'pid': proc_info['pid'],
+                                            'cmdline': cmdline
+                                        })
+                                    else:
+                                        proc.kill()
+                                        killed_count += 1
+                                    
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                continue
+                        
+                        # resource_trackerプロセスを最後に終了（1秒待機後）
+                        if resource_trackers:
+                            self.logger.info(f"🧹 Waiting 1 second before terminating {len(resource_trackers)} resource_tracker processes...")
+                            time.sleep(1)
+                            
+                            for rt in resource_trackers:
+                                try:
+                                    rt['proc'].kill()
+                                    killed_count += 1
+                                    self.logger.warning(f"🧹 Force killed resource_tracker: PID {rt['pid']}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        
+                        self.logger.info(f"🧹 Aggressive cleanup completed: scanned {scanned_count} processes, terminated {killed_count} multiprocessing processes")
+                        
+                        if killed_count == 0:
+                            self.logger.info("🧹 No multiprocessing processes found to terminate")
+                        
+                    except Exception as cleanup_error:
+                        self.logger.warning(f"Aggressive cleanup failed after manual reset: {cleanup_error}")
+                    
                     return jsonify({
                         'success': True,
                         'symbol': symbol,

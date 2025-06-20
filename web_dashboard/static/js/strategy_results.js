@@ -687,19 +687,21 @@ class StrategyResultsManager {
             const match = dateTimeStr.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
             if (match) {
                 const [, year, month, day, hour, minute] = match;
-                return `${month}/${day} ${hour}:${minute}`;
+                return `${month}/${day} ${hour}:${minute} JST`;
             }
             
-            // Fallback: try to parse as date
+            // Fallback: try to parse as date and convert to JST
             const dateStr = dateTimeStr.replace(' JST', '');
             const date = new Date(dateStr);
             if (!isNaN(date.getTime())) {
-                return date.toLocaleString('ja-JP', { 
+                const formatted = date.toLocaleString('ja-JP', { 
+                    timeZone: 'Asia/Tokyo',
                     month: '2-digit', 
                     day: '2-digit', 
                     hour: '2-digit', 
                     minute: '2-digit' 
                 });
+                return `${formatted} JST`;
             }
             
             // If all else fails, return original

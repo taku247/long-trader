@@ -397,3 +397,239 @@ class AggressiveSLTPCalculator(IStopLossTakeProfitCalculator):
             reasoning.append(f"🚀 高ボラ環境: 利確目標を20%拡張")
         
         return current_price * (1 + take_profit_distance)
+
+
+class TraditionalSLTPCalculator(IStopLossTakeProfitCalculator):
+    """
+    従来型損切り・利確計算器
+    
+    技術指標ベースの従来手法による損切り・利確計算
+    Aggressive_Traditional戦略で使用
+    """
+    
+    def __init__(self):
+        self.name = "Traditional"
+        self.max_loss_pct_base = 0.12  # 12%を上限（積極的）
+        self.min_stop_loss_distance = 0.015  # 1.5%
+        self.max_stop_loss_distance = 0.20  # 20%（より広い）
+    
+    def calculate_levels(self,
+                        current_price: float,
+                        leverage: float,
+                        support_levels: List[SupportResistanceLevel],
+                        resistance_levels: List[SupportResistanceLevel],
+                        market_context: MarketContext,
+                        position_direction: str = "long") -> StopLossTakeProfitLevels:
+        """従来型手法による損切り・利確計算"""
+        
+        reasoning = []
+        
+        # 従来型（技術指標重視）の損切り計算
+        stop_loss_price = self._calculate_traditional_stop_loss(
+            current_price, leverage, support_levels, market_context, reasoning
+        )
+        
+        # 従来型の利確計算（より積極的）
+        take_profit_price = self._calculate_traditional_take_profit(
+            current_price, resistance_levels, market_context, reasoning
+        )
+        
+        # 距離計算
+        stop_loss_distance_pct = abs(current_price - stop_loss_price) / current_price
+        take_profit_distance_pct = abs(take_profit_price - current_price) / current_price
+        
+        # リスクリワード比率
+        risk_reward_ratio = take_profit_distance_pct / stop_loss_distance_pct if stop_loss_distance_pct > 0 else 0
+        
+        reasoning.append(f"🎯 従来型R/R比率: {risk_reward_ratio:.2f}")
+        
+        return StopLossTakeProfitLevels(
+            stop_loss_price=stop_loss_price,
+            take_profit_price=take_profit_price,
+            risk_reward_ratio=risk_reward_ratio,
+            stop_loss_distance_pct=stop_loss_distance_pct,
+            take_profit_distance_pct=take_profit_distance_pct,
+            calculation_method=self.name,
+            confidence_level=0.7,  # 従来型は中程度の信頼度
+            reasoning=reasoning
+        )
+    
+    def _calculate_traditional_stop_loss(self, current_price: float, leverage: float,
+                                       support_levels: List[SupportResistanceLevel],
+                                       market_context: MarketContext, reasoning: List[str]) -> float:
+        """従来型損切り計算（技術指標重視）"""
+        
+        # サポートベースの損切り（従来手法）
+        if support_levels:
+            nearest_supports = [s for s in support_levels if s.price < current_price]
+            if nearest_supports:
+                nearest_support = min(nearest_supports, key=lambda x: abs(x.price - current_price))
+                support_distance = (current_price - nearest_support.price) / current_price
+                
+                # 従来型はサポートをそのまま使用（より積極的）
+                stop_loss_distance = support_distance * 0.9  # サポートの90%位置
+                reasoning.append(f"📊 従来型サポートベース: {support_distance*100:.1f}% → {stop_loss_distance*100:.1f}%")
+            else:
+                stop_loss_distance = 0.05  # 5%（デフォルト）
+                reasoning.append(f"📊 従来型デフォルト損切り: {stop_loss_distance*100:.1f}%")
+        else:
+            stop_loss_distance = 0.04  # 4%
+            reasoning.append(f"📊 従来型固定損切り: {stop_loss_distance*100:.1f}%")
+        
+        # レバレッジ考慮（従来型は緩め）
+        max_loss_pct = self.max_loss_pct_base / leverage
+        stop_loss_distance = min(stop_loss_distance, max_loss_pct)
+        
+        # 制限適用
+        stop_loss_distance = max(self.min_stop_loss_distance, 
+                               min(self.max_stop_loss_distance, stop_loss_distance))
+        
+        return current_price * (1 - stop_loss_distance)
+    
+    def _calculate_traditional_take_profit(self, current_price: float,
+                                         resistance_levels: List[SupportResistanceLevel],
+                                         market_context: MarketContext, reasoning: List[str]) -> float:
+        """従来型利確計算（積極的）"""
+        
+        if resistance_levels:
+            nearest_resistances = [r for r in resistance_levels if r.price > current_price]
+            if nearest_resistances:
+                # 従来型は最初のレジスタンスを積極的に狙う
+                target_resistance = min(nearest_resistances, key=lambda x: abs(x.price - current_price))
+                resistance_distance = (target_resistance.price - current_price) / current_price
+                
+                # より積極的（レジスタンスの95%まで）
+                take_profit_distance = resistance_distance * 0.95
+                reasoning.append(f"🎯 従来型レジスタンス狙い: {resistance_distance*100:.1f}% → {take_profit_distance*100:.1f}%")
+            else:
+                take_profit_distance = 0.08  # 8%（積極的デフォルト）
+                reasoning.append(f"🎯 従来型積極利確: {take_profit_distance*100:.1f}%")
+        else:
+            take_profit_distance = 0.06  # 6%
+            reasoning.append(f"🎯 従来型固定利確: {take_profit_distance*100:.1f}%")
+        
+        return current_price * (1 + take_profit_distance)
+
+
+class MLSLTPCalculator(IStopLossTakeProfitCalculator):
+    """
+    機械学習型損切り・利確計算器
+    
+    機械学習予測に完全依存した損切り・利確計算
+    Full_ML戦略で使用
+    """
+    
+    def __init__(self):
+        self.name = "ML"
+        self.max_loss_pct_base = 0.15  # 15%を上限（最積極的）
+        self.min_stop_loss_distance = 0.02  # 2%
+        self.max_stop_loss_distance = 0.25  # 25%（最も広い）
+    
+    def calculate_levels(self,
+                        current_price: float,
+                        leverage: float,
+                        support_levels: List[SupportResistanceLevel],
+                        resistance_levels: List[SupportResistanceLevel],
+                        market_context: MarketContext,
+                        position_direction: str = "long") -> StopLossTakeProfitLevels:
+        """機械学習型損切り・利確計算"""
+        
+        reasoning = []
+        
+        # ML予測ベースの損切り計算
+        stop_loss_price = self._calculate_ml_stop_loss(
+            current_price, leverage, support_levels, market_context, reasoning
+        )
+        
+        # ML予測ベースの利確計算（最積極的）
+        take_profit_price = self._calculate_ml_take_profit(
+            current_price, resistance_levels, market_context, reasoning
+        )
+        
+        # 距離計算
+        stop_loss_distance_pct = abs(current_price - stop_loss_price) / current_price
+        take_profit_distance_pct = abs(take_profit_price - current_price) / current_price
+        
+        # リスクリワード比率
+        risk_reward_ratio = take_profit_distance_pct / stop_loss_distance_pct if stop_loss_distance_pct > 0 else 0
+        
+        reasoning.append(f"🤖 ML予測R/R比率: {risk_reward_ratio:.2f}")
+        
+        return StopLossTakeProfitLevels(
+            stop_loss_price=stop_loss_price,
+            take_profit_price=take_profit_price,
+            risk_reward_ratio=risk_reward_ratio,
+            stop_loss_distance_pct=stop_loss_distance_pct,
+            take_profit_distance_pct=take_profit_distance_pct,
+            calculation_method=self.name,
+            confidence_level=0.85,  # ML戦略は高信頼度
+            reasoning=reasoning
+        )
+    
+    def _calculate_ml_stop_loss(self, current_price: float, leverage: float,
+                              support_levels: List[SupportResistanceLevel],
+                              market_context: MarketContext, reasoning: List[str]) -> float:
+        """ML予測ベース損切り計算"""
+        
+        # ML予測を模擬（実際にはMLモデルから予測値を取得）
+        if support_levels:
+            nearest_supports = [s for s in support_levels if s.price < current_price]
+            if nearest_supports:
+                # ML予測: サポート強度を重み付け
+                weighted_support = min(nearest_supports, key=lambda x: abs(x.price - current_price))
+                support_distance = (current_price - weighted_support.price) / current_price
+                
+                # ML予測による動的調整（サポート強度に応じて）
+                strength_multiplier = min(weighted_support.strength, 1.0) if hasattr(weighted_support, 'strength') else 0.8
+                stop_loss_distance = support_distance * (1.2 - strength_multiplier * 0.4)  # 0.8-1.2の範囲
+                
+                reasoning.append(f"🤖 ML動的損切り: 強度{strength_multiplier:.2f} → {stop_loss_distance*100:.1f}%")
+            else:
+                stop_loss_distance = 0.06  # 6%（ML推奨）
+                reasoning.append(f"🤖 ML推奨損切り: {stop_loss_distance*100:.1f}%")
+        else:
+            stop_loss_distance = 0.05  # 5%
+            reasoning.append(f"🤖 MLデフォルト損切り: {stop_loss_distance*100:.1f}%")
+        
+        # レバレッジ考慮（MLは最も柔軟）
+        max_loss_pct = self.max_loss_pct_base / leverage
+        stop_loss_distance = min(stop_loss_distance, max_loss_pct)
+        
+        # 制限適用
+        stop_loss_distance = max(self.min_stop_loss_distance, 
+                               min(self.max_stop_loss_distance, stop_loss_distance))
+        
+        return current_price * (1 - stop_loss_distance)
+    
+    def _calculate_ml_take_profit(self, current_price: float,
+                                resistance_levels: List[SupportResistanceLevel],
+                                market_context: MarketContext, reasoning: List[str]) -> float:
+        """ML予測ベース利確計算（最積極的）"""
+        
+        if resistance_levels:
+            # ML予測: 複数レジスタンスの動的分析
+            resistances_above = [r for r in resistance_levels if r.price > current_price]
+            if resistances_above:
+                # ML戦略は最も遠いレジスタンスも狙える
+                if len(resistances_above) >= 2:
+                    # 2番目のレジスタンスを狙う（最積極的）
+                    sorted_resistances = sorted(resistances_above, key=lambda x: x.price)
+                    target_resistance = sorted_resistances[1]
+                    reasoning.append("🤖 ML予測: 第2レジスタンス突破狙い")
+                else:
+                    target_resistance = resistances_above[0]
+                    reasoning.append("🤖 ML予測: 第1レジスタンス突破狙い")
+                
+                resistance_distance = (target_resistance.price - current_price) / current_price
+                
+                # ML予測による利確最適化（99%まで積極的に）
+                take_profit_distance = resistance_distance * 0.99
+                reasoning.append(f"🤖 ML最適利確: {resistance_distance*100:.1f}% → {take_profit_distance*100:.1f}%")
+            else:
+                take_profit_distance = 0.12  # 12%（最積極的デフォルト）
+                reasoning.append(f"🤖 ML積極利確: {take_profit_distance*100:.1f}%")
+        else:
+            take_profit_distance = 0.10  # 10%
+            reasoning.append(f"🤖 ML推奨利確: {take_profit_distance*100:.1f}%")
+        
+        return current_price * (1 + take_profit_distance)

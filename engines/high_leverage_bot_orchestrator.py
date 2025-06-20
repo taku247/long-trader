@@ -288,8 +288,10 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             return support_levels[:max_levels], resistance_levels[:max_levels]
             
         except Exception as e:
-            print(f"サポレジ分析エラー: {e}")
-            return [], []
+            print(f"🚨 サポレジ分析で致命的エラーが発生: {e}")
+            import traceback
+            print(f"スタックトレース: {traceback.format_exc()}")
+            raise Exception(f"サポート・レジスタンス分析に失敗: {e} - 不完全なデータでの分析は危険です")
     
     def _predict_breakouts(self, data: pd.DataFrame, levels: list) -> list:
         """ブレイクアウト予測"""

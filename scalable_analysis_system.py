@@ -449,7 +449,10 @@ class ScalableAnalysisSystem:
                         raise Exception(f"Missing current_price in analysis result for {symbol}")
                     
                     # TP/SL計算機能を使用
-                    from engines.stop_loss_take_profit_calculators import DefaultSLTPCalculator, ConservativeSLTPCalculator, AggressiveSLTPCalculator
+                    from engines.stop_loss_take_profit_calculators import (
+                        DefaultSLTPCalculator, ConservativeSLTPCalculator, AggressiveSLTPCalculator,
+                        TraditionalSLTPCalculator, MLSLTPCalculator
+                    )
                     from interfaces.data_types import MarketContext
                     
                     # 条件満足時の実際のタイムスタンプ
@@ -458,8 +461,12 @@ class ScalableAnalysisSystem:
                     # 戦略に応じたTP/SL計算器を選択
                     if 'Conservative' in config:
                         sltp_calculator = ConservativeSLTPCalculator()
+                    elif 'Aggressive_Traditional' in config:
+                        sltp_calculator = TraditionalSLTPCalculator()
                     elif 'Aggressive' in config:
                         sltp_calculator = AggressiveSLTPCalculator()
+                    elif 'Full_ML' in config:
+                        sltp_calculator = MLSLTPCalculator()
                     else:
                         sltp_calculator = DefaultSLTPCalculator()
                     

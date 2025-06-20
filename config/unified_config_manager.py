@@ -98,8 +98,10 @@ class UnifiedConfigManager:
         strategies = self.trading_config.get('strategy_configs', {})
         
         if strategy not in strategies:
-            print(f"⚠️ 未定義の戦略: {strategy}, デフォルト(Balanced)を使用")
-            strategy = 'Balanced'
+            available_strategies = list(strategies.keys())
+            error_msg = f"未定義の戦略: '{strategy}'. 利用可能な戦略: {available_strategies}"
+            print(f"❌ {error_msg}")
+            raise ValueError(error_msg)
         
         return copy.deepcopy(strategies.get(strategy, {}))
     

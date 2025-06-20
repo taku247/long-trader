@@ -9,7 +9,7 @@ import asyncio
 import time
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple, Union
 import logging
 import json
@@ -344,7 +344,7 @@ class MultiExchangeAPIClient:
                 'tick_size': float(symbol_info.get('pxDecimals', 0.01)),
                 'funding_rate': 0.0,  # TODO: 資金調達率の取得
                 'volume_24h': 0.0,    # TODO: 24時間出来高の取得
-                'last_updated': datetime.now().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             self.logger.error(f"❌ Failed to get Hyperliquid market info for {symbol}: {e}")
@@ -385,7 +385,7 @@ class MultiExchangeAPIClient:
                 'tick_size': float(market_info.get('precision', {}).get('price', 0.01)),
                 'funding_rate': 0.0,  # TODO: 資金調達率の取得
                 'volume_24h': float(ticker.get('baseVolume', 0)),
-                'last_updated': datetime.now().isoformat()
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             self.logger.error(f"❌ Failed to get Gate.io market info for {symbol}: {e}")
@@ -445,7 +445,7 @@ class MultiExchangeAPIClient:
             day_end = min(current_ms + one_day_ms, end_ms)
             
             try:
-                self.logger.debug(f"   Fetching day {day_count + 1}: {datetime.fromtimestamp(day_start/1000)}")
+                self.logger.debug(f"   Fetching day {day_count + 1}: {datetime.fromtimestamp(day_start/1000, tz=timezone.utc)}")
                 
                 # Hyperliquid APIからキャンドルデータを取得（マッピング後のシンボル使用）
                 candles = self.hyperliquid_client.candles_snapshot(hyperliquid_symbol, timeframe, day_start, day_end)
@@ -456,7 +456,7 @@ class MultiExchangeAPIClient:
                 else:
                     for candle in candles:
                         row = {
-                            "timestamp": datetime.fromtimestamp(candle["t"] / 1000),
+                            "timestamp": datetime.fromtimestamp(candle["t"] / 1000, tz=timezone.utc),
                             "open": float(candle["o"]),
                             "high": float(candle["h"]),
                             "low": float(candle["l"]),
@@ -524,7 +524,7 @@ class MultiExchangeAPIClient:
             
             # 1回のリクエストで1000本取得、必要に応じて複数回リクエスト
             while current_since < end_timestamp:
-                self.logger.debug(f"   Fetching OHLCV from {datetime.fromtimestamp(current_since/1000)}")
+                self.logger.debug(f"   Fetching OHLCV from {datetime.fromtimestamp(current_since/1000, tz=timezone.utc)}")
                 
                 # 非同期でOHLCVデータを取得
                 ohlcv = await asyncio.get_event_loop().run_in_executor(
@@ -540,9 +540,9 @@ class MultiExchangeAPIClient:
                 if not ohlcv:
                     # 最新データが存在しない場合は警告を出すが継続（取引所の最新データがまだ生成されていない可能性）
                     if current_since >= end_timestamp - (1000 * 60 * 60):  # 最後の1時間以内
-                        self.logger.debug(f"No data for {gateio_symbol} at {datetime.fromtimestamp(current_since/1000)} (might be too recent)")
+                        self.logger.debug(f"No data for {gateio_symbol} at {datetime.fromtimestamp(current_since/1000, tz=timezone.utc)} (might be too recent)")
                     else:
-                        self.logger.warning(f"⚠️ No data returned for {gateio_symbol} from {datetime.fromtimestamp(current_since/1000)}")
+                        self.logger.warning(f"⚠️ No data returned for {gateio_symbol} from {datetime.fromtimestamp(current_since/1000, tz=timezone.utc)}")
                     break
                 
                 all_ohlcv.extend(ohlcv)
@@ -563,17 +563,18 @@ class MultiExchangeAPIClient:
             # DataFrameに変換
             df = pd.DataFrame(all_ohlcv, columns=['timestamp_ms', 'open', 'high', 'low', 'close', 'volume'])
             
-            # タイムスタンプをdatetimeに変換
-            df['timestamp'] = pd.to_datetime(df['timestamp_ms'], unit='ms')
+            # タイムスタンプをdatetimeに変換（UTC aware）
+            df['timestamp'] = pd.to_datetime(df['timestamp_ms'], unit='ms', utc=True)
             
             # 不要な列を削除
             df = df.drop('timestamp_ms', axis=1)
             
-            # 指定期間でフィルタリング（タイムゾーン対応）
-            # start_timeとend_timeがタイムゾーン情報を持つ場合の処理
-            if hasattr(start_time, 'tzinfo') and start_time.tzinfo is not None:
-                # DataFrameのタイムスタンプをUTCとして扱う
-                df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize('UTC')
+            # 指定期間でフィルタリング
+            # start_timeとend_timeがtimezone-naiveの場合はUTCに変換してから比較
+            if start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+            if end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
             
             df = df[(df['timestamp'] >= start_time) & (df['timestamp'] <= end_time)]
             
@@ -610,7 +611,7 @@ class MultiExchangeAPIClient:
         
         self.logger.info(f"🎯 OHLCV REQUEST: {symbol} {timeframe} for {days} days (timeframe config)")
         
-        end_time = datetime.now()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=days)
         
         return await self.get_ohlcv_data(symbol, timeframe, start_time, end_time)

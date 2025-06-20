@@ -10,7 +10,7 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -163,7 +163,7 @@ class SymbolEarlyFailValidator:
             return EarlyFailResult(
                 symbol=symbol,
                 passed=True,
-                metadata={"validation_time": datetime.now().isoformat(), "enhanced": True}
+                metadata={"validation_time": datetime.now(timezone.utc).isoformat(), "enhanced": True}
             )
             
         except Exception as e:
@@ -234,7 +234,7 @@ class SymbolEarlyFailValidator:
             api_client = MultiExchangeAPIClient(exchange_type=exchange)
             
             # 指定日数前のデータを軽量チェック
-            test_start = datetime.now() - timedelta(days=required_days)
+            test_start = datetime.now(timezone.utc) - timedelta(days=required_days)
             test_end = test_start + timedelta(hours=2)
             
             for timeframe in test_timeframes:
@@ -397,7 +397,7 @@ class SymbolEarlyFailValidator:
             timeout_seconds = strict_config.get('timeout_seconds', 30)
             
             # 直近指定日数分で品質チェック（軽量）
-            end_time = datetime.now()
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(days=sample_days)
             
             from hyperliquid_api_client import MultiExchangeAPIClient
@@ -550,7 +550,7 @@ class SymbolEarlyFailValidator:
             self.logger.success(f"✅ {symbol}: Early Fail検証合格（強化版）")
             return
         
-        validation_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        validation_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         banner_style = log_config.get('banner_style', 'full')
         
         if banner_style == 'full':

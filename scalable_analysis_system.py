@@ -372,7 +372,7 @@ class ScalableAnalysisSystem:
                         sys.stderr = old_stderr
             
             # 条件ベースのシグナル生成期間設定
-            end_time = datetime.now()
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(days=evaluation_period_days)
             
             # 時間足設定から評価間隔を取得

@@ -68,6 +68,7 @@ class WebDashboard:
         
         self.logger.info("Web dashboard initialized")
     
+    
     def _setup_routes(self):
         """Setup Flask routes."""
         
@@ -1671,6 +1672,45 @@ class WebDashboard:
                         'validation_status': 'format_error',
                         'symbol': symbol,
                         'suggestion': '銘柄名は2-10文字の英数字で入力してください'
+                    }), 400
+
+                # Early Fail検証システム使用
+                try:
+                    self.logger.info(f"🔍 Early Fail検証開始: {symbol}")
+                    
+                    from symbol_early_fail_validator import SymbolEarlyFailValidator
+                    validator = SymbolEarlyFailValidator()
+                    
+                    # 非同期検証実行
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        validation_result = loop.run_until_complete(validator.validate_symbol(symbol))
+                    finally:
+                        loop.close()
+                    
+                    if not validation_result.passed:
+                        self.logger.warning(f"❌ {symbol}: Early Fail検証失敗 - {validation_result.fail_reason.value}")
+                        return jsonify({
+                            'error': validation_result.error_message,
+                            'validation_status': validation_result.fail_reason.value,
+                            'symbol': symbol,
+                            'suggestion': validation_result.suggestion,
+                            'metadata': validation_result.metadata
+                        }), 400
+                    
+                    self.logger.success(f"✅ {symbol}: Early Fail検証合格")
+
+                except Exception as check_error:
+                    # Early Fail検証で予期しないエラーが出た場合も拒否
+                    error_msg = str(check_error)
+                    self.logger.error(f"❌ {symbol}: Early Fail検証失敗 - {error_msg}")
+                    
+                    return jsonify({
+                        'error': f'{symbol}の事前検証に失敗しました: {error_msg}',
+                        'validation_status': 'early_fail_error',
+                        'symbol': symbol,
+                        'suggestion': '銘柄名を確認するか、しばらく時間をおいて再度お試しください'
                     }), 400
                 
                 # Generate execution ID first, then start training

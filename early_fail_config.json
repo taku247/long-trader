@@ -1,0 +1,31 @@
+{
+  "required_historical_days": 90,
+  "min_data_points": 1000,
+  "supported_exchanges": ["hyperliquid", "gateio"],
+  "test_timeframes": ["1h"],
+  "max_validation_time_seconds": 30,
+  "enable_ohlcv_check": true,
+  "enable_symbol_existence_check": true,
+  "enable_exchange_support_check": true,
+  "custom_rules": {
+    "max_symbol_length": 8,
+    "min_symbol_length": 2,
+    "allow_meme_coins": true,
+    "require_minimum_volume": false,
+    "minimum_24h_volume": 1000000
+  },
+  "fail_messages": {
+    "insufficient_historical_data": "{symbol}は新規上場銘柄のため、十分な履歴データがありません（{required_days}日分必要）",
+    "symbol_not_found": "{symbol}は{exchange}で取引されていません",
+    "exchange_not_supported": "取引所 {exchange} はサポートされていません",
+    "api_connection_failed": "API接続に失敗しました",
+    "custom_rule_violation": "カスタムルールに違反しています"
+  },
+  "suggestions": {
+    "insufficient_historical_data": "{symbol}の上場から{required_days}日経過後に再度お試しください",
+    "symbol_not_found": "銘柄名のスペルを確認するか、別の取引所で確認してください",
+    "exchange_not_supported": "サポートされている取引所: {supported_exchanges}",
+    "api_connection_failed": "しばらく時間をおいて再度お試しください",
+    "custom_rule_violation": "ルール詳細を確認してください"
+  }
+}

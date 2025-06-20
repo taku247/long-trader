@@ -20,7 +20,7 @@ import os
 import time
 import asyncio
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 import traceback
 
@@ -307,8 +307,8 @@ def check_data_availability(symbol: str) -> Dict:
         
         client = MultiExchangeAPIClient()
         
-        # 少量のデータ取得テスト
-        end_time = datetime.now()
+        # 少量のデータ取得テスト（UTC aware）
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=1)
         
         loop = asyncio.new_event_loop()

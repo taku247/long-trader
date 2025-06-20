@@ -115,9 +115,9 @@ class Dashboard {
             symbolsContainer.innerHTML = '<span class="text-muted">なし</span>';
         }
         
-        // Update last update time
+        // Update last update time with JST notation
         const lastUpdate = status.start_time ? 
-            new Date().toLocaleString('ja-JP') : '-';
+            new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) + ' JST' : '-';
         document.getElementById('last-update').textContent = lastUpdate;
     }
     

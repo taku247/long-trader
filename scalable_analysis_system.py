@@ -1243,10 +1243,10 @@ class ScalableAnalysisSystem:
                         market_data = market_data.rename(columns={'index': 'timestamp'})
                 else:
                     # インデックスがタイムスタンプでない場合は作成
-                    market_data['timestamp'] = pd.to_datetime(market_data.index)
+                    market_data['timestamp'] = pd.to_datetime(market_data.index, utc=True)
             
             # timestampカラムをdatetime型に確実に変換
-            market_data['timestamp'] = pd.to_datetime(market_data['timestamp'])
+            market_data['timestamp'] = pd.to_datetime(market_data['timestamp'], utc=True)
             
             # trade_timeをUTCに変換
             if trade_time.tzinfo is None:
@@ -1374,10 +1374,10 @@ class ScalableAnalysisSystem:
                     if 'index' in market_data.columns:
                         market_data = market_data.rename(columns={'index': 'timestamp'})
                 else:
-                    market_data['timestamp'] = pd.to_datetime(market_data.index)
+                    market_data['timestamp'] = pd.to_datetime(market_data.index, utc=True)
             
             # タイムスタンプを統一
-            market_data['timestamp'] = pd.to_datetime(market_data['timestamp'])
+            market_data['timestamp'] = pd.to_datetime(market_data['timestamp'], utc=True)
             if market_data['timestamp'].dt.tz is None:
                 market_data['timestamp'] = market_data['timestamp'].dt.tz_localize('UTC')
             else:

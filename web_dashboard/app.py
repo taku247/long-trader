@@ -7,7 +7,7 @@ import sys
 import os
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -229,7 +229,7 @@ class WebDashboard:
                             "futures_only": True
                         }
                     },
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
                     "updated_via": "web_dashboard"
                 }
                 
@@ -293,7 +293,7 @@ class WebDashboard:
                 
                 # Filter by days
                 from datetime import datetime, timedelta
-                cutoff_date = datetime.now() - timedelta(days=days)
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
                 alerts = [a for a in alerts if a.timestamp >= cutoff_date]
                 
                 # Filter by strategy if specified
@@ -458,7 +458,7 @@ class WebDashboard:
                             end_dt = datetime.fromisoformat(end_time)
                             elapsed_seconds = (end_dt - start_dt).total_seconds()
                         else:
-                            elapsed_seconds = (datetime.now() - start_dt).total_seconds()
+                            elapsed_seconds = (datetime.now(timezone.utc) - start_dt).total_seconds()
                     except:
                         elapsed_seconds = 0
                     
@@ -545,7 +545,7 @@ class WebDashboard:
                             error_data = [{
                                 "error_type": "ProcessTimeout",
                                 "error_message": "Process terminated after 12+ hours of inactivity",
-                                "timestamp": datetime.now().isoformat()
+                                "timestamp": datetime.now(timezone.utc).isoformat()
                             }]
                             
                             conn.execute('''
@@ -608,7 +608,7 @@ class WebDashboard:
                     error_data = [{
                         "error_type": "ManualReset",
                         "error_message": "Manually reset by user",
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     }]
                     
                     conn.execute('''
@@ -677,8 +677,8 @@ class WebDashboard:
                                         if not is_target_process and symbol:
                                             # 最近10分以内にプロセスが起動し、関連する親プロセスが見つからない場合
                                             try:
-                                                create_time = datetime.fromtimestamp(proc.create_time())
-                                                ten_minutes_ago = datetime.now() - timedelta(minutes=10)
+                                                create_time = datetime.fromtimestamp(proc.create_time(), tz=timezone.utc)
+                                                ten_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
                                                 if create_time > ten_minutes_ago:
                                                     # 他の関連プロセスが存在しない場合は孤児プロセスと判定
                                                     related_processes = []
@@ -877,7 +877,7 @@ class WebDashboard:
                     json.dump(current_config, f, ensure_ascii=False, indent=2)
                 
                 self.logger.info("Settings saved successfully")
-                return jsonify({'status': 'saved', 'timestamp': datetime.now().isoformat()})
+                return jsonify({'status': 'saved', 'timestamp': datetime.now(timezone.utc).isoformat()})
                 
             except Exception as e:
                 self.logger.error(f"Error saving settings: {e}")
@@ -1148,7 +1148,7 @@ class WebDashboard:
                         'started_at': latest_execution.get('started_at') if latest_execution else None
                     },
                     'recent_executions': symbol_executions[:5],
-                    'last_updated': datetime.now().isoformat()
+                    'last_updated': datetime.now(timezone.utc).isoformat()
                 }
                 
                 return jsonify(progress_data)
@@ -1719,7 +1719,7 @@ class WebDashboard:
                 import uuid
                 
                 # Create execution ID that will be used
-                execution_id = f"symbol_addition_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                execution_id = f"symbol_addition_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
                 
                 trainer = AutoSymbolTrainer()
                 
@@ -1848,7 +1848,7 @@ class WebDashboard:
                 import uuid
                 
                 exec_db = ExecutionLogDatabase()
-                retry_execution_id = f"retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                retry_execution_id = f"retry_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
                 
                 exec_db.create_execution_with_id(
                     retry_execution_id,
@@ -2346,7 +2346,7 @@ class WebDashboard:
                     else:
                         last_time = datetime.fromisoformat(latest_completion)
                     
-                    time_since_last = datetime.now() - last_time
+                    time_since_last = datetime.now(timezone.utc) - last_time
                     
                     # Consider stalled if no progress for 2+ hours and still running
                     if (time_since_last > timedelta(hours=2) and 
@@ -2491,9 +2491,9 @@ class WebDashboard:
                             (execution_id, execution_type, symbol, status, timestamp_start, triggered_by, metadata)
                             VALUES (?, 'DATA_DELETION', ?, 'SUCCESS', ?, 'web_dashboard', ?)
                         """, (
-                            f"delete_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            f"delete_{symbol}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
                             symbol,
-                            datetime.now().isoformat(),
+                            datetime.now(timezone.utc).isoformat(),
                             json.dumps(results)
                         ))
                         conn.commit()

@@ -6,7 +6,7 @@ Hyperliquid銘柄バリデーションシステム
 
 import asyncio
 from typing import Dict, List, Optional, Set
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from enum import Enum
 import json
@@ -226,12 +226,12 @@ class HyperliquidValidator:
             
             # 3. シンプルなOHLCVデータ取得テスト
             from hyperliquid_api_client import HyperliquidAPIClient
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
             
             client = HyperliquidAPIClient()
             
-            # 直近1日分の1時間足データを取得してみる
-            end_time = datetime.now()
+            # 直近1日分の1時間足データを取得してみる（UTC aware）
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(days=1)
             
             self.logger.info(f"🧪 Testing OHLCV data fetch for {hyperliquid_symbol}...")
@@ -528,7 +528,7 @@ class HyperliquidValidator:
     
     async def _fetch_market_info_cached(self, symbol: str) -> Optional[Dict]:
         """キャッシュ付きの市場情報取得"""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         
         # キャッシュチェック
         if (symbol in self._market_info_cache and 
@@ -557,8 +557,8 @@ class HyperliquidValidator:
             
             client = HyperliquidAPIClient()
             
-            # 直近7日間のデータを試しに取得
-            end_time = datetime.now()
+            # 直近7日間のデータを試しに取得（UTC aware）
+            end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(days=7)
             
             self.logger.info(f"🔍 Checking data availability for {symbol}...")

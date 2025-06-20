@@ -34,8 +34,10 @@ import warnings
 import os
 warnings.filterwarnings('ignore')
 
-# 現在の実行IDを環境変数から取得
-CURRENT_EXECUTION_ID = os.environ.get('EXECUTION_ID', None)
+# 現在の実行IDを動的に取得する関数
+def get_current_execution_id():
+    """現在の実行IDを環境変数から動的に取得"""
+    return os.environ.get('CURRENT_EXECUTION_ID') or os.environ.get('EXECUTION_ID')
 
 # サポレジ検出機能をインポート
 from support_resistance_visualizer import find_all_levels
@@ -47,12 +49,13 @@ def check_cancellation_requested():
         from datetime import datetime, timedelta
         
         # 1. 環境変数から実行IDを使用
-        if CURRENT_EXECUTION_ID:
+        current_execution_id = get_current_execution_id()
+        if current_execution_id:
             with sqlite3.connect("execution_logs.db") as conn:
                 cursor = conn.execute('''
                     SELECT status FROM execution_logs 
                     WHERE execution_id = ?
-                ''', (CURRENT_EXECUTION_ID,))
+                ''', (current_execution_id,))
                 result = cursor.fetchone()
                 if result and result[0] == 'CANCELLED':
                     return True

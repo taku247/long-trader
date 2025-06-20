@@ -3,10 +3,32 @@
   "min_data_points": 1000,
   "supported_exchanges": ["hyperliquid", "gateio"],
   "test_timeframes": ["1h"],
-  "max_validation_time_seconds": 30,
+  "max_validation_time_seconds": 120,
   "enable_ohlcv_check": true,
   "enable_symbol_existence_check": true,
   "enable_exchange_support_check": true,
+  "strict_data_quality": {
+    "max_failure_rate": 0.05,
+    "min_completeness": 0.95,
+    "sample_days": 30,
+    "timeout_seconds": 30
+  },
+  "api_timeouts": {
+    "connection_check": 10,
+    "market_info": 10,
+    "data_quality": 30
+  },
+  "resource_thresholds": {
+    "max_cpu_percent": 85,
+    "max_memory_percent": 85,
+    "min_free_disk_gb": 2.0
+  },
+  "logging": {
+    "enable_success_highlight": true,
+    "success_log_level": "info",
+    "include_system_notification": true,
+    "banner_style": "full"
+  },
   "custom_rules": {
     "max_symbol_length": 8,
     "min_symbol_length": 2,
@@ -19,13 +41,23 @@
     "symbol_not_found": "{symbol}は{exchange}で取引されていません",
     "exchange_not_supported": "取引所 {exchange} はサポートされていません",
     "api_connection_failed": "API接続に失敗しました",
-    "custom_rule_violation": "カスタムルールに違反しています"
+    "custom_rule_violation": "カスタムルールに違反しています",
+    "api_timeout": "{symbol}: API応答が{timeout}秒でタイムアウトしました",
+    "symbol_not_tradable": "{symbol}は{exchange}で取引停止中です",
+    "insufficient_liquidity": "{symbol}は{exchange}で24時間取引量が0です",
+    "insufficient_data_quality": "{symbol}: データ品質不足（欠落率{missing_rate} > 5%許容）",
+    "insufficient_resources": "システムリソース不足: {resource_type}使用率が{usage}%で上限{limit}%を超過"
   },
   "suggestions": {
     "insufficient_historical_data": "{symbol}の上場から{required_days}日経過後に再度お試しください",
     "symbol_not_found": "銘柄名のスペルを確認するか、別の取引所で確認してください",
     "exchange_not_supported": "サポートされている取引所: {supported_exchanges}",
     "api_connection_failed": "しばらく時間をおいて再度お試しください",
-    "custom_rule_violation": "ルール詳細を確認してください"
+    "custom_rule_violation": "ルール詳細を確認してください",
+    "api_timeout": "ネットワーク接続を確認するか、しばらく時間をおいて再度お試しください",
+    "symbol_not_tradable": "{exchange}での取引再開をお待ちください",
+    "insufficient_liquidity": "流動性のある銘柄を選択してください",
+    "insufficient_data_quality": "データ完全性が95%以上の銘柄を選択してください",
+    "insufficient_resources": "システム負荷が下がってから再度お試しください"
   }
 }

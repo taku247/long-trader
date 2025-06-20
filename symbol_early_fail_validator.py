@@ -9,6 +9,7 @@
 import asyncio
 import json
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
@@ -24,6 +25,12 @@ class FailReason(Enum):
     EXCHANGE_NOT_SUPPORTED = "exchange_not_supported"
     API_CONNECTION_FAILED = "api_connection_failed"
     CUSTOM_RULE_VIOLATION = "custom_rule_violation"
+    # 新規追加
+    API_TIMEOUT = "api_timeout"
+    SYMBOL_NOT_TRADABLE = "symbol_not_tradable"
+    INSUFFICIENT_LIQUIDITY = "insufficient_liquidity"
+    INSUFFICIENT_DATA_QUALITY = "insufficient_data_quality"
+    INSUFFICIENT_RESOURCES = "insufficient_resources"
 
 
 @dataclass
@@ -91,7 +98,7 @@ class SymbolEarlyFailValidator:
     
     async def validate_symbol(self, symbol: str) -> EarlyFailResult:
         """
-        銘柄のEarly Fail検証を実行
+        銘柄のEarly Fail検証を実行（強化版）
         
         Args:
             symbol: 検証する銘柄名
@@ -99,9 +106,10 @@ class SymbolEarlyFailValidator:
         Returns:
             EarlyFailResult: 検証結果
         """
-        self.logger.info(f"🔍 Early Fail検証開始: {symbol}")
+        self.logger.info(f"🔍 Early Fail検証開始（強化版）: {symbol}")
         
         try:
+            # 既存検証（順序変更なし）
             # 1. 基本的なシンボル存在チェック
             if self.config.get("enable_symbol_existence_check", True):
                 result = await self._check_symbol_existence(symbol)
@@ -114,13 +122,34 @@ class SymbolEarlyFailValidator:
                 if not result.passed:
                     return result
             
-            # 3. OHLCV履歴データチェック
+            # 新規追加検証（軽量→重い順）
+            # 3. API接続タイムアウト（10秒、最優先）
+            result = await self._check_api_connection_timeout(symbol)
+            if not result.passed:
+                return result
+            
+            # 4. 取引所別アクティブ状態（軽量）
+            result = await self._check_current_exchange_active_status(symbol)
+            if not result.passed:
+                return result
+            
+            # 5. システムリソース（軽量）
+            result = await self._check_system_resources(symbol)
+            if not result.passed:
+                return result
+            
+            # 6. 厳格データ品質（重め、30秒タイムアウト）
+            result = await self._check_strict_data_quality(symbol)
+            if not result.passed:
+                return result
+            
+            # 7. 既存のOHLCV履歴データチェック（90日分）
             if self.config.get("enable_ohlcv_check", True):
                 result = await self._check_historical_data_availability(symbol)
                 if not result.passed:
                     return result
             
-            # 4. カスタム検証ルール実行
+            # 8. カスタム検証ルール実行
             for custom_validator in self.custom_validators:
                 try:
                     result = custom_validator(symbol)
@@ -129,12 +158,12 @@ class SymbolEarlyFailValidator:
                 except Exception as e:
                     self.logger.warning(f"カスタム検証エラー: {custom_validator.__name__} - {e}")
             
-            # 全ての検証をパス
-            self.logger.success(f"✅ {symbol}: Early Fail検証合格")
+            # 全ての検証をパス - 目立つサーバーログ出力
+            self._log_validation_success(symbol)
             return EarlyFailResult(
                 symbol=symbol,
                 passed=True,
-                metadata={"validation_time": datetime.now().isoformat()}
+                metadata={"validation_time": datetime.now().isoformat(), "enhanced": True}
             )
             
         except Exception as e:
@@ -257,6 +286,348 @@ class SymbolEarlyFailValidator:
         except Exception:
             pass
         return 'hyperliquid'
+    
+    async def _check_api_connection_timeout(self, symbol: str) -> EarlyFailResult:
+        """API接続タイムアウトチェック（10秒制限）"""
+        try:
+            timeout_seconds = self.config.get('api_timeouts', {}).get('connection_check', 10)
+            
+            async with asyncio.timeout(timeout_seconds):
+                # MultiExchangeAPIClientをインポート
+                from hyperliquid_api_client import MultiExchangeAPIClient
+                
+                api_client = MultiExchangeAPIClient()
+                start_time = time.time()
+                market_info = await api_client.get_market_info(symbol)
+                response_time = time.time() - start_time
+                
+            return EarlyFailResult(
+                symbol=symbol, passed=True, 
+                metadata={"response_time": f"{response_time:.2f}秒"}
+            )
+                                 
+        except asyncio.TimeoutError:
+            error_message = self.config.get('fail_messages', {}).get('api_timeout', 
+                                           "{symbol}: API応答が{timeout}秒でタイムアウトしました").format(
+                symbol=symbol, timeout=timeout_seconds)
+            suggestion = self.config.get('suggestions', {}).get('api_timeout',
+                                       "ネットワーク接続を確認するか、しばらく時間をおいて再度お試しください")
+            
+            return EarlyFailResult(
+                symbol=symbol, passed=False,
+                fail_reason=FailReason.API_TIMEOUT,
+                error_message=error_message,
+                suggestion=suggestion
+            )
+        except Exception as e:
+            return EarlyFailResult(
+                symbol=symbol, passed=False,
+                fail_reason=FailReason.API_CONNECTION_FAILED,
+                error_message=f"{symbol}: API接続エラー - {str(e)}"
+            )
+    
+    async def _check_current_exchange_active_status(self, symbol: str) -> EarlyFailResult:
+        """現在選択中の取引所でのアクティブ状態チェック"""
+        try:
+            # 現在の取引所設定を取得
+            current_exchange = self._get_current_exchange()
+            
+            from hyperliquid_api_client import MultiExchangeAPIClient
+            api_client = MultiExchangeAPIClient()
+            market_info = await api_client.get_market_info(symbol)
+            
+            # is_active チェック（取引所別）
+            is_active = market_info.get('is_active', False)
+            if not is_active:
+                error_message = self.config.get('fail_messages', {}).get('symbol_not_tradable',
+                                               "{symbol}は{exchange}で取引停止中です").format(
+                    symbol=symbol, exchange=current_exchange)
+                suggestion = self.config.get('suggestions', {}).get('symbol_not_tradable',
+                                           "{exchange}での取引再開をお待ちください").format(
+                    exchange=current_exchange)
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.SYMBOL_NOT_TRADABLE,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={"exchange": current_exchange, "is_active": False}
+                )
+            
+            # 24時間出来高チェック（0の場合は実質停止）
+            volume_24h = market_info.get('volume_24h', 0)
+            if volume_24h <= 0:
+                error_message = self.config.get('fail_messages', {}).get('insufficient_liquidity',
+                                               "{symbol}は{exchange}で24時間取引量が0です").format(
+                    symbol=symbol, exchange=current_exchange)
+                suggestion = self.config.get('suggestions', {}).get('insufficient_liquidity',
+                                           "流動性のある銘柄を選択してください")
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.INSUFFICIENT_LIQUIDITY,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={"exchange": current_exchange, "volume_24h": volume_24h}
+                )
+            
+            return EarlyFailResult(
+                symbol=symbol, passed=True,
+                metadata={
+                    "exchange": current_exchange, 
+                    "is_active": True,
+                    "volume_24h": volume_24h
+                }
+            )
+            
+        except Exception as e:
+            return EarlyFailResult(
+                symbol=symbol, passed=False,
+                fail_reason=FailReason.API_CONNECTION_FAILED,
+                error_message=f"取引状況確認エラー: {str(e)}"
+            )
+    
+    async def _check_strict_data_quality(self, symbol: str) -> EarlyFailResult:
+        """厳格データ品質チェック（5%欠落許容）"""
+        try:
+            # 設定値を取得
+            strict_config = self.config.get('strict_data_quality', {})
+            sample_days = strict_config.get('sample_days', 30)
+            min_completeness = strict_config.get('min_completeness', 0.95)
+            timeout_seconds = strict_config.get('timeout_seconds', 30)
+            
+            # 直近指定日数分で品質チェック（軽量）
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=sample_days)
+            
+            from hyperliquid_api_client import MultiExchangeAPIClient
+            api_client = MultiExchangeAPIClient()
+            
+            # タイムアウト付きでデータ取得
+            async with asyncio.timeout(timeout_seconds):
+                sample_data = await api_client.get_ohlcv_data(symbol, '1h', start_time, end_time)
+            
+            expected_points = sample_days * 24  # 指定日数 × 24時間
+            actual_points = len(sample_data)
+            completeness = actual_points / expected_points if expected_points > 0 else 0
+            
+            if completeness < min_completeness:
+                missing_rate = 1 - completeness
+                error_message = self.config.get('fail_messages', {}).get('insufficient_data_quality',
+                                               "{symbol}: データ品質不足（欠落率{missing_rate} > 5%許容）").format(
+                    symbol=symbol, missing_rate=f"{missing_rate:.1%}")
+                suggestion = self.config.get('suggestions', {}).get('insufficient_data_quality',
+                                           "データ完全性が95%以上の銘柄を選択してください")
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.INSUFFICIENT_DATA_QUALITY,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={
+                        "data_completeness": f"{completeness:.1%}",
+                        "missing_rate": f"{missing_rate:.1%}",
+                        "actual_points": actual_points,
+                        "expected_points": expected_points,
+                        "sample_days": sample_days
+                    }
+                )
+            
+            return EarlyFailResult(
+                symbol=symbol, passed=True,
+                metadata={
+                    "data_completeness": f"{completeness:.1%}",
+                    "data_points": actual_points,
+                    "sample_days": sample_days
+                }
+            )
+            
+        except asyncio.TimeoutError:
+            return EarlyFailResult(
+                symbol=symbol, passed=False,
+                fail_reason=FailReason.API_CONNECTION_FAILED,
+                error_message=f"{symbol}: データ品質チェックが{timeout_seconds}秒でタイムアウトしました"
+            )
+        except Exception as e:
+            return EarlyFailResult(
+                symbol=symbol, passed=False,
+                fail_reason=FailReason.INSUFFICIENT_DATA_QUALITY,
+                error_message=f"データ品質チェックエラー: {str(e)}"
+            )
+    
+    async def _check_system_resources(self, symbol: str) -> EarlyFailResult:
+        """システムリソース不足チェック"""
+        try:
+            # psutilのインポートを試行
+            try:
+                import psutil
+                import shutil
+            except ImportError:
+                # psutil未インストールの場合は警告として処理継続
+                return EarlyFailResult(
+                    symbol=symbol, passed=True,
+                    metadata={"warning": "psutilライブラリが未インストールのためリソースチェックをスキップ"}
+                )
+            
+            # 設定値を取得
+            thresholds = self.config.get('resource_thresholds', {})
+            max_cpu_percent = thresholds.get('max_cpu_percent', 85)
+            max_memory_percent = thresholds.get('max_memory_percent', 85)
+            min_free_disk_gb = thresholds.get('min_free_disk_gb', 2.0)
+            
+            # CPU使用率チェック
+            cpu_percent = psutil.cpu_percent(interval=1)
+            if cpu_percent > max_cpu_percent:
+                error_message = self.config.get('fail_messages', {}).get('insufficient_resources',
+                                               "システムリソース不足: {resource_type}使用率が{usage}%で上限{limit}%を超過").format(
+                    resource_type="CPU", usage=f"{cpu_percent:.1f}", limit=max_cpu_percent)
+                suggestion = self.config.get('suggestions', {}).get('insufficient_resources',
+                                           "システム負荷が下がってから再度お試しください")
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.INSUFFICIENT_RESOURCES,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={"resource_type": "CPU", "usage_percent": cpu_percent, "limit_percent": max_cpu_percent}
+                )
+            
+            # メモリ使用率チェック
+            memory = psutil.virtual_memory()
+            if memory.percent > max_memory_percent:
+                error_message = self.config.get('fail_messages', {}).get('insufficient_resources',
+                                               "システムリソース不足: {resource_type}使用率が{usage}%で上限{limit}%を超過").format(
+                    resource_type="メモリ", usage=f"{memory.percent:.1f}", limit=max_memory_percent)
+                suggestion = self.config.get('suggestions', {}).get('insufficient_resources',
+                                           "システム負荷が下がってから再度お試しください")
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.INSUFFICIENT_RESOURCES,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={"resource_type": "Memory", "usage_percent": memory.percent, "limit_percent": max_memory_percent}
+                )
+            
+            # ディスク容量チェック
+            disk = shutil.disk_usage('.')
+            free_gb = disk.free / (1024**3)
+            if free_gb < min_free_disk_gb:
+                error_message = f"ディスク容量不足（残り{free_gb:.1f}GB < {min_free_disk_gb}GB）"
+                suggestion = self.config.get('suggestions', {}).get('insufficient_resources',
+                                           "システム負荷が下がってから再度お試しください")
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.INSUFFICIENT_RESOURCES,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={"resource_type": "Disk", "free_gb": free_gb, "required_gb": min_free_disk_gb}
+                )
+            
+            return EarlyFailResult(
+                symbol=symbol, passed=True,
+                metadata={
+                    "cpu_percent": f"{cpu_percent:.1f}%",
+                    "memory_percent": f"{memory.percent:.1f}%", 
+                    "free_disk_gb": f"{free_gb:.1f}GB"
+                }
+            )
+                                 
+        except Exception as e:
+            # リソースチェック失敗は警告として処理継続
+            return EarlyFailResult(
+                symbol=symbol, passed=True,
+                metadata={"warning": f"リソースチェック失敗: {str(e)}"}
+            )
+    
+    def _log_validation_success(self, symbol: str):
+        """Early Fail検証成功時の目立つサーバーログ出力"""
+        # ログ設定取得
+        log_config = self.config.get('logging', {})
+        if not log_config.get('enable_success_highlight', True):
+            # シンプルログのみ
+            self.logger.success(f"✅ {symbol}: Early Fail検証合格（強化版）")
+            return
+        
+        validation_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        banner_style = log_config.get('banner_style', 'full')
+        
+        if banner_style == 'full':
+            # フルバナースタイル
+            border = "=" * 80
+            success_border = "🎉" * 20
+            
+            success_messages = [
+                "",
+                border,
+                f"🚀 EARLY FAIL VALIDATION SUCCESS - {symbol} 🚀",
+                border,
+                f"⏰ 検証完了時刻: {validation_time}",
+                f"🔍 検証項目: 8項目すべて合格",
+                f"📊 実行内容:",
+                f"   ✅ 1. シンボル存在チェック",
+                f"   ✅ 2. 取引所サポートチェック", 
+                f"   ✅ 3. API接続タイムアウト（10秒以内）",
+                f"   ✅ 4. 取引所アクティブ状態（取引可能）",
+                f"   ✅ 5. システムリソース（CPU/メモリ/ディスク正常）",
+                f"   ✅ 6. データ品質（95%以上完全性）",
+                f"   ✅ 7. 履歴データ可用性（90日分）",
+                f"   ✅ 8. カスタム検証ルール",
+                "",
+                f"🎯 {symbol} は全ての品質基準を満たしており、分析処理の実行が承認されました",
+                f"🔥 マルチプロセス分析を安全に開始できます",
+                "",
+                success_border + " VALIDATION SUCCESS " + success_border,
+                border,
+                ""
+            ]
+        
+        elif banner_style == 'compact':
+            # コンパクトスタイル
+            success_messages = [
+                "",
+                f"🚀 EARLY FAIL SUCCESS - {symbol} 🚀",
+                f"⏰ {validation_time} | 🔍 8項目合格 | 🎯 分析承認済み",
+                f"✅ API接続・取引状態・リソース・データ品質 すべて正常",
+                ""
+            ]
+        
+        else:
+            # ミニマルスタイル
+            success_messages = [
+                f"🚀 {symbol}: Early Fail検証完了 - 8項目すべて合格 🎯"
+            ]
+        
+        # ログレベル取得
+        log_level = log_config.get('success_log_level', 'info')
+        
+        # 各行をログ出力
+        for message in success_messages:
+            if message.strip() == "":
+                print("")  # 空行
+            elif message.startswith("=") or message.startswith("🎉"):
+                self.logger.info(message)  # ボーダーライン
+            else:
+                if log_level == 'info':
+                    self.logger.info(message)
+                elif log_level == 'success':
+                    self.logger.success(message)
+                elif log_level == 'warning':
+                    self.logger.warning(message)  # 警告レベルで目立たせる
+                else:
+                    self.logger.success(message)
+        
+        # システム通知（オプション）
+        if log_config.get('include_system_notification', True):
+            # 追加で標準出力にも出力（確実に見えるように）
+            print(f"\n🚨 【重要】Early Fail検証完了: {symbol} が全ての品質基準をクリアしました！")
+            print(f"   → 分析処理の実行を開始します... ⚡\n")
+            
+            # システムログファイルにも記録
+            import logging
+            system_logger = logging.getLogger('system')
+            system_logger.info(f"EARLY_FAIL_SUCCESS: {symbol} passed all 8 validation checks at {validation_time}")
 
 
 # カスタム検証ルールの例

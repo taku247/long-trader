@@ -291,8 +291,9 @@ class ScalableAnalysisSystem:
         if self._should_generate_chart(metrics):
             chart_path = self._generate_lightweight_chart(analysis_id, trades_data, metrics)
         
-        # データベース保存
-        self._save_to_database(symbol, timeframe, config, metrics, chart_path, compressed_path)
+        # データベース保存（execution_id付き）
+        execution_id = os.environ.get('CURRENT_EXECUTION_ID')
+        self._save_to_database(symbol, timeframe, config, metrics, chart_path, compressed_path, execution_id)
         
         return True, metrics
     
@@ -1013,21 +1014,25 @@ class ScalableAnalysisSystem:
         
         return str(chart_path)
     
-    def _save_to_database(self, symbol, timeframe, config, metrics, chart_path, compressed_path):
-        """データベースに保存"""
+    def _save_to_database(self, symbol, timeframe, config, metrics, chart_path, compressed_path, execution_id=None):
+        """データベースに保存（execution_id対応）"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            
+            # execution_idを環境変数または引数から取得
+            if not execution_id:
+                execution_id = os.environ.get('CURRENT_EXECUTION_ID')
             
             cursor.execute('''
                 INSERT INTO analyses 
                 (symbol, timeframe, config, total_trades, win_rate, total_return, 
-                 sharpe_ratio, max_drawdown, avg_leverage, chart_path, data_compressed_path, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
+                 sharpe_ratio, max_drawdown, avg_leverage, chart_path, data_compressed_path, status, execution_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)
             ''', (
                 symbol, timeframe, config,
                 metrics['total_trades'], metrics['win_rate'], metrics['total_return'],
                 metrics['sharpe_ratio'], metrics['max_drawdown'], metrics['avg_leverage'],
-                chart_path, compressed_path
+                chart_path, compressed_path, execution_id
             ))
             
             conn.commit()

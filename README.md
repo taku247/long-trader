@@ -17,6 +17,132 @@ python app.py
 
 ## ⚠️ 既知の問題と制限事項
 
+### 🔍 銘柄追加時の時間足・戦略選択機能調査結果（2025年6月21日）
+
+**調査目的**: 銘柄追加時に時間足と戦略を選択可能にする機能の実現可能性
+
+#### 📊 現在の実装状況
+- **固定パターン**: 6時間足 × 5戦略 = **30パターン固定実行**
+- **APIエンドポイント**: `symbol`のみ受け取り、選択機能なし
+- **自動学習**: `auto_symbol_training.py`が全パターンを自動生成
+
+#### 🏗️ システム設計上の制約
+
+**1. データベース構造**
+```sql
+-- analyses テーブル
+symbol TEXT NOT NULL,
+timeframe TEXT NOT NULL, 
+config TEXT NOT NULL,     -- 戦略名
+-- ユニーク制約なし（重複実行可能）
+```
+
+**2. 進捗表示の固定設計**
+```python
+# 18パターン固定前提（現在は30パターン）
+total_patterns = len(strategies) * len(timeframes)
+completion_rate = (total_completed / total_patterns) * 100
+```
+
+**3. completed取得フロー**
+```python
+# データベースから完了済みレコード数を取得
+results = system.query_analyses(filters={'symbol': symbol})
+total_completed = len(results)  # 実際のDB レコード数
+```
+
+#### ⚠️ 重大な影響範囲
+
+**1. X/Y件表示の不整合**
+- 現在: `[15/30完了] 50%` （固定30パターン前提）
+- 部分実行時: `[3/30完了] 10%` （永遠に未完了扱い）
+- 重複実行時: `[31/30完了] 103%` （表示破綻）
+
+**2. データ整合性リスク**
+- 同じ組み合わせの重複実行が可能
+- どのパターンが実行済みか識別不可
+- 銘柄単位の完了判定が不正確
+
+**3. フェーズ別進捗の推定エラー**
+```python
+# 固定3戦略前提の進捗推定
+strategy_groups = [('1h_strategies', 3), ...]
+# → 可変戦略数に対応不可
+```
+
+#### 🚧 実装に必要な大規模改修
+
+**Phase 1: データベース改修**
+- `(symbol, timeframe, config)`のユニーク制約追加
+- パターン管理テーブルの新設
+- 既存データの整合性確保
+
+**Phase 2: API・ロジック改修**
+```python
+# 新APIパラメータ
+{
+    "symbol": "BTC",
+    "timeframes": ["1h", "30m"],     # 選択された時間足
+    "strategies": ["Conservative_ML"] # 選択された戦略
+}
+```
+
+**Phase 3: UI/UX全面改修**
+- 選択UI（チェックボックス等）の実装
+- 可変パターン数対応の進捗表示
+- 既存パターン管理・追加実行機能
+
+#### 📝 結論
+
+**実現可能だが、システム全体の大規模改修が必要**
+
+- **影響範囲**: API、DB、UI、進捗表示、データ整合性
+- **工数**: 大（3週間以上の開発期間を想定）
+- **リスク**: 既存機能との非互換性、ユーザー混乱
+- **推奨**: 段階的実装アプローチでリスク軽減
+
+現在の固定パターン設計は安定しており、選択機能の追加は慎重な検討が必要。
+
+#### 🆔 execution_id による実行管理状況
+
+**✅ 完全な固有値管理が実装済み**
+
+**1. execution_id生成方法**
+```python
+# 生成パターン
+execution_id = f"symbol_addition_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+# 例: "symbol_addition_20250621_123045_a1b2c3d4"
+```
+
+**2. 管理フロー**
+```
+APIリクエスト → execution_id生成 → DB記録作成 → 非同期処理開始 → 進捗追跡 → UI表示
+```
+
+**3. データベース記録**
+```python
+{
+    "execution_id": "symbol_addition_20250621_123045_a1b2c3d4",
+    "execution_type": "SYMBOL_ADDITION",
+    "symbol": "BTC", 
+    "status": "PENDING/RUNNING/COMPLETED/FAILED",
+    "triggered_by": "USER:WEB_UI",
+    "metadata": {"auto_training": True}
+}
+```
+
+**4. フロントエンド活用**
+- **進捗表示**: 実行ID別の個別進捗追跡
+- **手動停止**: 特定実行のみを停止可能
+- **状態管理**: 銘柄単位ではなく実行単位での管理
+
+**💡 選択機能への適用可能性**
+- 各選択パターンに独立したexecution_idを生成可能
+- 部分実行・追加実行の正確な識別・管理が実現可能
+- 現在の実行管理システムをそのまま活用可能
+
+---
+
 ### 🛑 手動リセット機能の最終改善完了（2025年6月19日更新）
 
 **✅ 完全解決**: 手動リセット機能とフロントエンド同期問題を完全解決しました。
@@ -57,23 +183,169 @@ kill -TERM [PID番号]
 1. ブラウザを完全リロード（Ctrl+F5 / Cmd+Shift+R）
 2. または一時的に自動更新を停止してからクリア操作
 
-### 🗄️ データベースファイルの分離問題（要修正）
+### 🗄️ データベース構造と戦略分析結果管理
+
+#### データベース構成
+
+**2つの独立したDBファイル**:
+- `web_dashboard/execution_logs.db`: 実行管理用
+- `web_dashboard/large_scale_analysis/analysis.db`: 分析結果用
+
+#### execution_logs.db（実行管理）
+
+```sql
+-- メインテーブル：実行ログ
+execution_logs:
+├── execution_id: "symbol_addition_20250620_001523_b2658d4d"  -- 一意の実行ID
+├── execution_type: "SYMBOL_ADDITION"                          -- 実行タイプ
+├── symbol: "BTC"                                             -- 対象銘柄
+├── status: "PENDING" → "RUNNING" → "SUCCESS/FAILED"         -- 実行ステータス
+├── progress_percentage: 0 → 100                              -- 進捗率
+├── current_operation: "データ取得中", "バックテスト実行中"      -- 現在の処理
+├── metadata: {"auto_training": true, "strategy_count": 5}     -- メタデータ（JSON）
+└── errors: [...]                                             -- エラー情報（JSON配列）
+
+-- 詳細ステップテーブル
+execution_steps:
+├── execution_id (FK)                                         -- 実行ログへの参照
+├── step_name: "data_fetch", "ml_training", "backtest_Conservative_ML"
+├── status: "SUCCESS", "FAILED"                              -- ステップのステータス
+├── result_data: {...}                                        -- ステップの結果データ（JSON）
+└── error_message/error_traceback: エラー詳細
+```
+
+#### analysis.db（戦略分析結果）
+
+```sql
+-- メインテーブル：分析結果
+analyses:
+├── id: 1, 2, 3...                                           -- 分析ID
+├── symbol: "SNX", "BTC", "ETH"                              -- 銘柄名
+├── timeframe: "1h", "30m", "15m", "5m", "3m"                -- 時間足
+├── config: "Conservative_ML", "Aggressive_ML", "Full_ML"     -- 戦略設定
+├── total_trades: 49                                         -- 総取引数
+├── win_rate: 0.469                                          -- 勝率（46.9%）
+├── sharpe_ratio: 0.294                                      -- シャープレシオ
+├── max_drawdown: -0.15                                      -- 最大ドローダウン
+├── avg_leverage: 12.5                                       -- 平均レバレッジ
+├── data_compressed_path: "SNX_15m_Aggressive_Traditional.pkl.gz"
+└── status: "completed"                                       -- 分析ステータス
+
+-- 詳細メトリクス
+backtest_summary:
+├── analysis_id (FK to analyses.id)                          -- 分析への参照
+├── metric_name: "max_leverage", "avg_profit", "volatility"   -- メトリクス名
+└── metric_value: 15.2, 0.05, 0.12                          -- メトリクス値
+```
+
+#### 銘柄追加時のデータフロー
+
+```
+1. WebUI → /api/symbol/add
+   ↓
+2. Early Fail検証（90日履歴、データ品質95%等）
+   ↓
+3. execution_logs作成
+   execution_id: symbol_addition_20250621_123456_abc123
+   status: PENDING → RUNNING
+   ↓
+4. AutoSymbolTrainer実行（30パターン並列処理）
+   ├── データ取得・検証
+   ├── ML学習（5戦略 × 6時間足）
+   └── バックテスト並列実行
+   ↓
+5. 各戦略結果をanalysis.dbに保存
+   ├── SNX_1h_Conservative_ML → analyses.id=1
+   ├── SNX_1h_Aggressive_ML → analyses.id=2
+   ├── SNX_1h_Full_ML → analyses.id=3
+   └── ... (30件の組み合わせ)
+   ↓
+6. execution_logs更新
+   status: SUCCESS
+   progress_percentage: 100
+```
+
+#### データ保存形式
+
+**メタデータ**: SQLiteテーブル（高速検索・フィルタリング用）  
+**取引詳細**: 圧縮ファイル（90%ストレージ削減）
+```
+web_dashboard/large_scale_analysis/compressed/
+├── SNX_1h_Conservative_ML.pkl.gz      -- 取引詳細データ（pickle + gzip）
+├── SNX_15m_Aggressive_Traditional.pkl.gz
+└── ...
+```
+
+**チャート**: HTML（高性能戦略のみ自動生成）
+```
+web_dashboard/large_scale_analysis/charts/
+├── SNX_3m_Full_ML.html                -- インタラクティブチャート
+└── ...
+```
+
+#### テーブル間の関係性
+
+```
+execution_logs (1:N) execution_steps     -- 実行とステップの関係
+
+⚠️ 問題：execution_logs と analyses は直接紐づいていない
+現在の関連付け：銘柄名（symbol）での間接的関連のみ
+
+analyses (1:N) backtest_summary          -- 分析と詳細メトリクスの関係
+analyses (1:1) compressed_data_files     -- 分析と圧縮データファイルの関係
+```
+
+#### ⚠️ 重要な設計上の問題
+
+**execution_logsとanalysesテーブルが直接紐づいていません**
+
+**現在の問題**:
+- `analyses`テーブルに`execution_id`フィールドがない
+- 銘柄名でのみ間接的に関連付け
+- 同一銘柄の複数実行時の区別が困難
+- 分析結果の由来（どの実行で生成されたか）が追跡不可能
+- キャンセル/失敗した実行の分析結果が残留する可能性
+
+**改善が必要な理由**:
+```bash
+# 例：BTCの実行はキャンセルされたが...
+execution_logs: symbol_addition_20250620_001523_b2658d4d|BTC|CANCELLED
+
+# 分析結果には関連付けがないため、どの実行の結果か不明
+analyses: BTC|1h|Conservative_ML|49|0.5|1.2|...
+```
+
+**推奨改善案**:
+1. `analyses`テーブルに`execution_id`フィールド追加
+2. 外部キー制約の設定
+3. 分析結果保存時の`execution_id`関連付け実装
+
+#### 重要な特徴
+
+- **30パターン固定**: 5戦略 × 6時間足の組み合わせ
+- **並列処理**: ProcessPoolExecutorで同時実行
+- **進捗追跡**: リアルタイムで進捗率を更新（0-100%）
+- **完全なトレーサビリティ**: 実行IDで全履歴追跡可能
+- **圧縮効率**: pickle + gzipで90%のストレージ削減
+- **高速検索**: インデックス最適化済み
+
+#### 実際のデータ例
+
+```sql
+-- execution_logs例
+symbol_addition_20250620_001523_b2658d4d|SYMBOL_ADDITION|BTC|SUCCESS|100.0
+
+-- analyses例  
+SNX|15m|Aggressive_Traditional|49|0.469|0.294|-0.15|12.5|completed
+```
+
+#### データベースファイルの分離問題（要修正）
 
 **問題**: execution_logs.dbが2箇所に存在し、システムが異なるDBを参照している
 
 **現状**:
 - `./execution_logs.db` - ルートディレクトリ（古い場所）
-- `./web_dashboard/execution_logs.db` - web_dashboardディレクトリ（新しい場所）
-
-**影響**:
-- Webダッシュボードは`web_dashboard/execution_logs.db`を使用
-- 一部のスクリプトは`./execution_logs.db`を参照
-- 手動リセット機能やテストスクリプトが正しいDBを参照できない場合がある
-
-**必要な対応**:
-1. すべてのコードで統一したDBパスを使用するよう修正
-2. 既存のDBレコードを統合
-3. 古いDBファイルの削除またはリダイレクト
+- `./web_dashboard/execution_logs.db` - web_dashboardディレクトリ（新しい場所、推奨）
 
 **一時的な回避策**:
 ```bash

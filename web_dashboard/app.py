@@ -829,10 +829,40 @@ class WebDashboard:
                     except Exception as cleanup_error:
                         self.logger.warning(f"Aggressive cleanup failed after manual reset: {cleanup_error}")
                     
+                    # 🔧 CRITICAL FIX: 分析結果のクリーンアップ（execution_id紐づけ不足問題の解決）
+                    try:
+                        analysis_db_path = Path(__file__).parent / 'large_scale_analysis' / 'analysis.db'
+                        if analysis_db_path.exists():
+                            with sqlite3.connect(analysis_db_path) as analysis_conn:
+                                # execution_idが一致する分析結果を削除
+                                cursor = analysis_conn.execute('''
+                                    DELETE FROM analyses WHERE execution_id = ?
+                                ''', (execution_id,))
+                                deleted_count = cursor.rowcount
+                                
+                                # 古い方式の銘柄名のみでの削除もカバー（既存の孤立データ対策）
+                                if deleted_count == 0:
+                                    cursor = analysis_conn.execute('''
+                                        DELETE FROM analyses 
+                                        WHERE symbol = ? AND execution_id IS NULL
+                                        AND generated_at > datetime('now', '-1 hour')
+                                    ''', (symbol,))
+                                    deleted_count = cursor.rowcount
+                                
+                                analysis_conn.commit()
+                                
+                                if deleted_count > 0:
+                                    self.logger.info(f"🧹 Cleaned up {deleted_count} analysis results for {symbol} ({execution_id})")
+                                else:
+                                    self.logger.info(f"🧹 No analysis results found to clean up for {symbol} ({execution_id})")
+                    
+                    except Exception as analysis_cleanup_error:
+                        self.logger.error(f"Failed to clean up analysis results: {analysis_cleanup_error}")
+                    
                     return jsonify({
                         'success': True,
                         'symbol': symbol,
-                        'message': f'{symbol}の実行を停止しました（プロセスも強制終了）'
+                        'message': f'{symbol}の実行を停止しました（プロセス・分析結果も削除）'
                     })
                     
             except Exception as e:

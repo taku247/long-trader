@@ -421,6 +421,11 @@ class WebDashboard:
             """New symbol management page with integrated progress display."""
             return render_template('symbols_new.html')
         
+        @self.app.route('/symbols-enhanced')
+        def symbols_enhanced_page():
+            """Enhanced symbol management page with strategy customization."""
+            return render_template('symbols_enhanced.html')
+        
         @self.app.route('/api/symbols/status')
         def api_symbols_status():
             """Get symbols status with detailed progress information."""

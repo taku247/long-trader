@@ -297,6 +297,136 @@ backtest_summary:
 
 **メタデータ**: SQLiteテーブル（高速検索・フィルタリング用）  
 **取引詳細**: 圧縮ファイル（90%ストレージ削減）
+
+## 🚀 新銘柄追加システム設計（2025年6月23日 - 実装予定）
+
+### 設計思想
+
+**統一戦略管理 + 事前タスク作成 + 詳細進捗追跡**
+
+全ての戦略（デフォルト・カスタム）を`strategy_configurations`テーブルで統一管理し、Early Fail検証後に実行予定の全タスクを`analyses`テーブルに事前作成。各戦略×時間足の組み合わせをstatusで個別管理する。
+
+### データベース構造
+
+#### 1. strategy_configurations（統一戦略管理）
+```sql
+CREATE TABLE strategy_configurations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,                    -- "Conservative ML - 1h", "カスタム積極戦略"
+    base_strategy TEXT NOT NULL,           -- "Conservative_ML", "Aggressive_ML", "Balanced"
+    timeframe TEXT NOT NULL,               -- "15m", "30m", "1h", "4h", "1d", "1w"
+    parameters TEXT NOT NULL,              -- JSON: カスタムパラメータ
+    description TEXT,                      -- 戦略の説明
+    is_default BOOLEAN DEFAULT 0,          -- デフォルト戦略かどうか
+    is_active BOOLEAN DEFAULT 1,           -- 有効/無効
+    created_by TEXT DEFAULT 'system',      -- 作成者
+    version INTEGER DEFAULT 1,             -- バージョン管理
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(name, base_strategy, timeframe)
+);
+```
+
+#### 2. execution_logs（実行管理）
+```sql
+ALTER TABLE execution_logs ADD COLUMN selected_strategy_ids TEXT; -- JSON配列
+ALTER TABLE execution_logs ADD COLUMN execution_mode TEXT;        -- "default", "selective", "custom"
+ALTER TABLE execution_logs ADD COLUMN estimated_patterns INTEGER; -- 予想実行パターン数
+```
+
+#### 3. analyses（事前タスク作成 + 結果管理）
+```sql
+ALTER TABLE analyses ADD COLUMN task_status TEXT DEFAULT 'pending'; 
+-- 'pending' → 'running' → 'completed' | 'failed' | 'cancelled'
+
+ALTER TABLE analyses ADD COLUMN task_created_at TIMESTAMP;  -- タスク作成時刻
+ALTER TABLE analyses ADD COLUMN task_started_at TIMESTAMP;  -- 実行開始時刻
+ALTER TABLE analyses ADD COLUMN task_completed_at TIMESTAMP; -- 完了時刻
+ALTER TABLE analyses ADD COLUMN error_message TEXT;         -- エラー詳細
+ALTER TABLE analyses ADD COLUMN retry_count INTEGER DEFAULT 0; -- リトライ回数
+```
+
+### 銘柄追加フロー
+
+#### Phase 1: 戦略選択・検証
+```
+1. WebUI: /symbols-enhanced
+   ├── 実行モード選択
+   │   ├── デフォルト実行: 全戦略×全時間足
+   │   ├── 選択実行: チェックボックスで戦略・時間足指定
+   │   └── カスタム戦略実行: ユーザー作成戦略のみ
+   │
+2. Early Fail検証
+   ├── 90日履歴チェック
+   ├── データ品質95%チェック
+   ├── API接続確認
+   └── システムリソース確認
+```
+
+#### Phase 2: タスク事前作成
+```
+3. execution_logs作成
+   ├── execution_id: symbol_addition_20250623_143022_xyz789
+   ├── selected_strategy_ids: [1, 3, 5, 8] (JSON配列)
+   ├── execution_mode: "selective"
+   └── estimated_patterns: 4
+
+4. analyses事前タスク作成 (Early Fail通過後)
+   ├── SOL + Strategy[1] → analyses.id=100, task_status='pending'
+   ├── SOL + Strategy[3] → analyses.id=101, task_status='pending'
+   ├── SOL + Strategy[5] → analyses.id=102, task_status='pending'
+   └── SOL + Strategy[8] → analyses.id=103, task_status='pending'
+```
+
+#### Phase 3: 並列実行・進捗追跡
+```
+5. マルチプロセス実行
+   ├── analyses.id=100: task_status='pending' → 'running'
+   ├── データ取得・ML学習・バックテスト
+   ├── 完了: task_status='completed', 結果保存
+   └── 次タスク: analyses.id=101開始
+
+6. リアルタイム進捗表示
+   ├── WebUI: 4タスク中2完了 (50%)
+   ├── 個別戦略進捗: "Conservative ML - 1h" ✅, "Aggressive ML - 4h" 🔄
+   └── エラー詳細: analyses.error_message
+```
+
+### 実装利点
+
+1. **透明性**: 実行前に全タスクが見える
+2. **追跡性**: execution_logs → selected_strategy_ids → analyses
+3. **中断・再開**: 途中停止時も残タスクが明確
+4. **拡張性**: 新戦略タイプも同じ仕組み
+5. **デバッグ性**: エラー箇所の特定が瞬時
+6. **UX向上**: 戦略別プログレスバー表示可能
+
+### API変更点
+
+```python
+# 新しい銘柄追加API
+POST /api/symbol/add
+{
+    "symbol": "SOL",
+    "execution_mode": "selective",
+    "selected_strategy_ids": [1, 3, 5],  # strategy_configurations.id
+    "custom_parameters": {...}           # オプション
+}
+
+# 進捗取得API  
+GET /api/execution/{execution_id}/progress
+{
+    "overall_progress": 75,
+    "tasks": [
+        {"strategy_name": "Conservative ML - 1h", "status": "completed"},
+        {"strategy_name": "Aggressive ML - 4h", "status": "running", "progress": 45},
+        {"strategy_name": "Custom Strategy", "status": "pending"}
+    ]
+}
+```
+
+この設計により、銘柄追加の透明性・追跡性・拡張性が大幅に向上し、ユーザーは実行前から完了まで詳細な状況を把握できるようになります。
 ```
 web_dashboard/large_scale_analysis/compressed/
 ├── SNX_1h_Conservative_ML.pkl.gz      -- 取引詳細データ（pickle + gzip）

@@ -78,7 +78,7 @@
                     <!-- Exchange Switcher -->
                     <div class="dropdown me-3">
                         <button class="btn btn-outline-warning btn-sm dropdown-toggle" type="button" id="exchangeDropdown" data-bs-toggle="dropdown">
-                            <i class="fas fa-exchange-alt"></i> <span id="current-exchange">Hyperliquid</span>
+                            <i class="fas fa-exchange-alt"></i> <span id="current-exchange">Gate.io</span>
                         </button>
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="#" onclick="switchExchange('hyperliquid')">
@@ -655,6 +655,46 @@
                 submitButton.disabled = false;
             }
         });
+
+        // 取引所切り替え機能
+        async function switchExchange(exchange) {
+            try {
+                const response = await axios.post('/api/exchange/switch', {
+                    exchange: exchange
+                });
+                
+                if (response.data.success) {
+                    // 表示を更新
+                    const exchangeSpan = document.getElementById('current-exchange');
+                    exchangeSpan.textContent = exchange === 'gateio' ? 'Gate.io' : 'Hyperliquid';
+                    
+                    showAlert(`取引所を${exchange === 'gateio' ? 'Gate.io' : 'Hyperliquid'}に切り替えました`, 'success');
+                } else {
+                    showAlert('取引所の切り替えに失敗しました', 'danger');
+                }
+            } catch (error) {
+                console.error('取引所切り替えエラー:', error);
+                showAlert('取引所の切り替えに失敗しました', 'danger');
+            }
+        }
+
+        // 現在の取引所設定を読み込み
+        async function loadCurrentExchange() {
+            try {
+                const response = await axios.get('/api/exchange/current');
+                
+                if (response.data.success) {
+                    const currentExchange = response.data.current_exchange;
+                    const exchangeSpan = document.getElementById('current-exchange');
+                    exchangeSpan.textContent = currentExchange === 'gateio' ? 'Gate.io' : 'Hyperliquid';
+                }
+            } catch (error) {
+                console.error('取引所設定読み込みエラー:', error);
+                // デフォルトでGate.ioを表示
+                const exchangeSpan = document.getElementById('current-exchange');
+                exchangeSpan.textContent = 'Gate.io';
+            }
+        }
 
         // 事前検証
         async function validateSymbol() {

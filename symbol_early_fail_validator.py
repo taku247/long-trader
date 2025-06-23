@@ -300,14 +300,16 @@ class SymbolEarlyFailValidator:
         try:
             timeout_seconds = self.config.get('api_timeouts', {}).get('connection_check', 10)
             
-            async with asyncio.timeout(timeout_seconds):
-                # MultiExchangeAPIClientをインポート
-                from hyperliquid_api_client import MultiExchangeAPIClient
-                
-                api_client = MultiExchangeAPIClient()
-                start_time = time.time()
-                market_info = await api_client.get_market_info(symbol)
-                response_time = time.time() - start_time
+            # MultiExchangeAPIClientをインポート
+            from hyperliquid_api_client import MultiExchangeAPIClient
+            
+            api_client = MultiExchangeAPIClient()
+            start_time = time.time()
+            market_info = await asyncio.wait_for(
+                api_client.get_market_info(symbol), 
+                timeout=timeout_seconds
+            )
+            response_time = time.time() - start_time
                 
             return EarlyFailResult(
                 symbol=symbol, passed=True, 
@@ -412,8 +414,10 @@ class SymbolEarlyFailValidator:
             api_client = MultiExchangeAPIClient()
             
             # タイムアウト付きでデータ取得
-            async with asyncio.timeout(timeout_seconds):
-                sample_data = await api_client.get_ohlcv_data(symbol, '1h', start_time, end_time)
+            sample_data = await asyncio.wait_for(
+                api_client.get_ohlcv_data(symbol, '1h', start_time, end_time),
+                timeout=timeout_seconds
+            )
             
             expected_points = sample_days * 24  # 指定日数 × 24時間
             actual_points = len(sample_data)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TRX強制追加テスト
+TRX強制追加テスト（BaseTest使用版）
 データベースの既存チェックをスキップして新規追加をテスト
 """
 
@@ -8,58 +8,67 @@ import sys
 import os
 from datetime import datetime
 import sqlite3
+from pathlib import Path
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
-def clear_trx_from_db():
-    """データベースからTRXエントリを削除"""
-    print("🗑️ データベースからTRXエントリを削除...")
-    try:
-        db_path = "large_scale_analysis/analysis.db"
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM analyses WHERE symbol='TRX'")
-            deleted = cursor.rowcount
-            conn.commit()
-            print(f"✅ {deleted}件のTRXエントリを削除")
-    except Exception as e:
-        print(f"❌ DB削除エラー: {e}")
+from tests_organized.base_test import BaseTest
 
-def test_trx_direct():
-    """TRXを直接分析（既存チェックなし）"""
-    print("\n🔍 TRX直接分析テスト")
-    print("=" * 70)
+class TRXForceAdditionTest(BaseTest):
+    """TRX強制追加テスト"""
     
-    try:
-        from scalable_analysis_system import ScalableAnalysisSystem
-        import numpy as np
-        from datetime import timedelta, timezone
+    def custom_setup(self):
+        """テスト固有のセットアップ"""
+        self.test_symbol = "TRX"
+    
+    def clear_trx_from_test_db(self):
+        """テストDBからTRXエントリを削除"""
+        print("🗑️ テストDBからTRXエントリを削除...")
+        try:
+            with sqlite3.connect(self.analysis_db) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM analyses WHERE symbol=?", (self.test_symbol,))
+                deleted = cursor.rowcount
+                conn.commit()
+                print(f"✅ {deleted}件のTRXエントリを削除")
+        except Exception as e:
+            print(f"❌ DB削除エラー: {e}")
+
+    def test_trx_direct_analysis(self):
+        """TRXを直接分析（既存チェックなし）"""
+        print("\n🔍 TRX直接分析テスト")
+        print("=" * 70)
         
-        system = ScalableAnalysisSystem()
-        
-        # _generate_real_analysisを直接呼び出し
-        print("📊 TRXの実データ分析を実行...")
-        
-        symbol = "TRX"
-        timeframe = "1h"
-        config = "Conservative_ML"
-        
-        start_time = datetime.now()
-        
-        # 直接実データ分析を実行（サンプル数を減らして高速化）
-        trades_data = system._generate_real_analysis(symbol, timeframe, config, num_trades=10)
-        
-        end_time = datetime.now()
-        
-        print(f"\n✅ 分析完了")
-        print(f"⏱️ 処理時間: {(end_time - start_time).total_seconds():.2f}秒")
-        
-        # 結果を検証
-        if isinstance(trades_data, list):
-            print(f"📊 生成トレード数: {len(trades_data)}")
+        try:
+            from scalable_analysis_system import ScalableAnalysisSystem
+            import numpy as np
+            from datetime import timedelta, timezone
+            
+            system = ScalableAnalysisSystem()
+            
+            # _generate_real_analysisを直接呼び出し
+            print("📊 TRXの実データ分析を実行...")
+            
+            timeframe = "1h"
+            config = "Conservative_ML"
+            
+            start_time = datetime.now()
+            
+            # 直接実データ分析を実行（サンプル数を減らして高速化）
+            trades_data = system._generate_real_analysis(self.test_symbol, timeframe, config, num_trades=10)
+            
+            end_time = datetime.now()
+            
+            print(f"\n✅ 分析完了")
+            print(f"⏱️ 処理時間: {(end_time - start_time).total_seconds():.2f}秒")
+            
+            # 結果を検証
+            self.assertIsInstance(trades_data, list, "分析結果はリスト形式である必要があります")
             
             if trades_data:
+                print(f"📊 生成トレード数: {len(trades_data)}")
+                
                 # 最初のトレードを詳細表示
                 first_trade = trades_data[0]
                 print("\n最初のトレード詳細:")
@@ -82,6 +91,7 @@ def test_trx_direct():
                                     print(f"\n❌ ハードコード値検出: {key} = {value}")
                                     hardcoded_found = True
                 
+                self.assertFalse(hardcoded_found, "ハードコードされた価格値が検出されました")
                 if not hardcoded_found:
                     print("\n✅ ハードコード値なし！")
                     
@@ -90,32 +100,49 @@ def test_trx_direct():
                 if entry_prices:
                     avg_price = np.mean(entry_prices)
                     print(f"\n💰 TRX平均エントリー価格: ${avg_price:.6f}")
+                    self.assertGreaterEqual(avg_price, 0.01, "TRXの価格が低すぎます")
+                    self.assertLessEqual(avg_price, 1.0, "TRXの価格が高すぎます")
                     if 0.01 <= avg_price <= 1.0:
                         print("✅ TRXの妥当な価格範囲内")
-                    else:
-                        print("⚠️ TRXの通常価格範囲外")
-                        
-        else:
-            print(f"❓ 予期しないデータ型: {type(trades_data)}")
-            
-    except Exception as e:
-        print(f"❌ エラー: {e}")
-        import traceback
-        traceback.print_exc()
+                    
+        except Exception as e:
+            self.fail(f"TRX分析中にエラーが発生しました: {e}")
+    
+    def test_trx_force_addition_workflow(self):
+        """TRX強制追加ワークフローテスト"""
+        print("\n🚀 TRX強制追加ワークフローテスト")
+        print("=" * 70)
+        
+        # 1. データベースクリア
+        self.clear_trx_from_test_db()
+        
+        # 2. 直接分析テスト
+        self.test_trx_direct_analysis()
+        
+        print("\n" + "=" * 70)
+        print("✅ ワークフローテスト完了")
 
-def main():
-    """メイン実行関数"""
-    print("🚀 TRX強制追加テスト")
-    print("=" * 70)
+
+def run_trx_force_addition_tests():
+    """TRX強制追加テスト実行"""
+    import unittest
     
-    # 1. データベースクリア
-    clear_trx_from_db()
+    # テストスイート作成
+    suite = unittest.TestSuite()
+    test_class = TRXForceAdditionTest
     
-    # 2. 直接分析テスト
-    test_trx_direct()
+    # 個別テストメソッドを追加
+    suite.addTest(test_class('test_trx_direct_analysis'))
+    suite.addTest(test_class('test_trx_force_addition_workflow'))
     
-    print("\n" + "=" * 70)
-    print("✅ テスト完了")
+    # テスト実行
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
+
 
 if __name__ == '__main__':
-    main()
+    import sys
+    success = run_trx_force_addition_tests()
+    sys.exit(0 if success else 1)

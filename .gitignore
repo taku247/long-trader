@@ -75,3 +75,6 @@ compressed/
 config.json
 api_keys.json
 secrets.jsonconfig.json
+
+# Git worktree
+.worktrees/

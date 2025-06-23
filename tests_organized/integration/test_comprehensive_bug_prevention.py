@@ -11,7 +11,6 @@
 6. 統合テスト - エンドツーエンドの動作確認
 """
 
-import unittest
 import asyncio
 import sys
 import os
@@ -19,13 +18,14 @@ import pandas as pd
 import numpy as np
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
-import tempfile
-import shutil
 import sqlite3
 from typing import List, Dict, Any
 
 # プロジェクトルートをパスに追加
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# BaseTestをインポート
+from tests_organized.base_test import BaseTest
 
 from engines.stop_loss_take_profit_calculators import (
     CriticalAnalysisError, 
@@ -46,11 +46,11 @@ from interfaces.data_types import SupportResistanceLevel
 from scalable_analysis_system import ScalableAnalysisSystem
 
 
-class TestCriticalAnalysisErrorHandling(unittest.TestCase):
+class TestCriticalAnalysisErrorHandling(BaseTest):
     """Level 1厳格バリデーションのテストケース"""
     
-    def setUp(self):
-        """テスト前準備"""
+    def custom_setup(self):
+        """テスト前準備 (BaseTest統合版)"""
         self.calculators = [
             DefaultSLTPCalculator(),
             ConservativeSLTPCalculator(),

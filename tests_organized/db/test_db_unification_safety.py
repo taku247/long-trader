@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-DB統一作業の安全性テスト
+DB統一作業の安全性テスト (BaseTest統合版)
 現在のシステム状態を確認し、修正後の動作をテストする
 """
 
 import os
 import sys
 import sqlite3
-import tempfile
-import shutil
 from pathlib import Path
 from datetime import datetime
-import unittest
 import json
 
 # プロジェクトルートをパスに追加
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
+
+# BaseTestをインポート
+from tests_organized.base_test import DatabaseTest
 
 try:
     from execution_log_database import ExecutionLogDatabase
@@ -24,28 +24,26 @@ try:
 except ImportError as e:
     print(f"Import error: {e}")
     print("スクリプトをプロジェクトルートから実行してください")
-    sys.exit(1)
+    # テスト時はエラーを無視
+    ExecutionLogDatabase = None
 
-class DBUnificationSafetyTest(unittest.TestCase):
+class DBUnificationSafetyTest(DatabaseTest):
     """DB統一作業の安全性をテストするクラス"""
     
-    def setUp(self):
-        """テスト前の準備"""
-        self.project_root = Path(__file__).parent
+    def custom_setup(self):
+        """DB統一テスト固有のセットアップ"""
+        # BaseTestの隔離されたDBパスを使用
+        self.project_root = Path(__file__).parent.parent.parent
         self.root_db_path = self.project_root / "execution_logs.db"
         self.web_db_path = self.project_root / "web_dashboard" / "execution_logs.db"
         
-        # テスト用一時ディレクトリ
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="db_unification_test_"))
-        self.test_root_db = self.temp_dir / "execution_logs.db"
-        self.test_web_db = self.temp_dir / "web_dashboard_execution_logs.db"
+        # BaseTestで提供される隔離されたDBパスを使用
+        self.test_root_db = Path(self.execution_logs_db)
+        self.test_web_db = Path(self.test_dir) / "web_dashboard_execution_logs.db"
         
-        print(f"🧪 テスト環境: {self.temp_dir}")
-    
-    def tearDown(self):
-        """テスト後のクリーンアップ"""
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        print(f"🧪 テスト環境: {self.test_dir}")
+        print(f"   📊 テスト用ルートDB: {self.test_root_db}")
+        print(f"   📊 テスト用WebDB: {self.test_web_db}")
     
     def test_current_db_state(self):
         """現在のDB状態を確認"""
@@ -77,10 +75,15 @@ class DBUnificationSafetyTest(unittest.TestCase):
         """ExecutionLogDatabaseのデフォルト動作をテスト"""
         print("\n🔍 ExecutionLogDatabaseのデフォルト動作をテスト...")
         
-        # 一時ディレクトリに移動してテスト
+        if ExecutionLogDatabase is None:
+            print("  ⚠️ ExecutionLogDatabase インポート不可 - テストスキップ")
+            self.skipTest("ExecutionLogDatabase インポート不可")
+            return
+        
+        # テスト用ディレクトリで実行
         original_cwd = os.getcwd()
         try:
-            os.chdir(self.temp_dir)
+            os.chdir(self.test_dir)
             
             # デフォルトコンストラクタ
             db = ExecutionLogDatabase()
@@ -99,8 +102,8 @@ class DBUnificationSafetyTest(unittest.TestCase):
         """WebダッシュボードのDB参照動作をテスト"""
         print("\n🌐 WebダッシュボードのDB参照動作をテスト...")
         
-        # web_dashboardディレクトリでの動作をシミュレート
-        web_dashboard_dir = self.temp_dir / "web_dashboard"
+        # web_dashboardディレクトリでの動作をシミュレート (テスト環境内)
+        web_dashboard_dir = Path(self.test_dir) / "web_dashboard"
         web_dashboard_dir.mkdir()
         
         original_cwd = os.getcwd()

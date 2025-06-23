@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-削除機能の安全性テスト
+削除機能の安全性テスト (BaseTest統合版)
 
 このテストでは以下の懸念点を検証します：
 1. 他銘柄への影響がないこと
@@ -10,9 +10,7 @@
 5. システム継続性が保たれること
 """
 
-import unittest
 import sqlite3
-import tempfile
 import os
 import json
 import shutil
@@ -24,16 +22,18 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web_dashboard'))
 
-class TestDeleteFunctionality(unittest.TestCase):
+# BaseTestをインポート
+from tests_organized.base_test import BaseTest
+
+class TestDeleteFunctionality(BaseTest):
     """削除機能の包括的テスト"""
     
-    def setUp(self):
-        """テストの前準備"""
-        # テスト用ディレクトリの作成
-        self.test_dir = tempfile.mkdtemp()
-        self.analysis_db_path = os.path.join(self.test_dir, 'analysis.db')
-        self.alert_db_path = os.path.join(self.test_dir, 'alert_history.db')
-        self.exec_db_path = os.path.join(self.test_dir, 'execution_logs.db')
+    def custom_setup(self):
+        """削除機能テスト固有のセットアップ"""
+        # BaseTestのDBパスを使用
+        self.analysis_db_path = self.analysis_db
+        self.alert_db_path = os.path.join(self.test_dir, 'alert_history.db') 
+        self.exec_db_path = self.execution_logs_db
         self.compressed_dir = os.path.join(self.test_dir, 'compressed')
         
         # ディレクトリ作成
@@ -44,39 +44,22 @@ class TestDeleteFunctionality(unittest.TestCase):
         self._create_test_data()
         
         # 削除機能のインポート
-        from app import WebDashboard
-        self.dashboard = WebDashboard()
-    
-    def tearDown(self):
-        """テスト後のクリーンアップ"""
-        shutil.rmtree(self.test_dir, ignore_errors=True)
+        try:
+            from app import WebDashboard
+            self.dashboard = WebDashboard()
+        except ImportError:
+            print("⚠️ WebDashboard インポートエラー - モック使用")
+            self.dashboard = None
     
     def _init_test_databases(self):
-        """テスト用データベースの初期化"""
+        """テスト用データベースの初期化 (BaseTestのDBを拡張)"""
         
-        # analysis.db
+        # analysis.db (BaseTestで作成済みのテーブルに追加テーブルを作成)
         with sqlite3.connect(self.analysis_db_path) as conn:
             cursor = conn.cursor()
+            # BaseTestで既にanalysesテーブルが作成されているため、追加テーブルのみ作成
             cursor.execute('''
-                CREATE TABLE analyses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol TEXT NOT NULL,
-                    timeframe TEXT NOT NULL,
-                    config TEXT NOT NULL,
-                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    total_trades INTEGER,
-                    win_rate REAL,
-                    total_return REAL,
-                    sharpe_ratio REAL,
-                    max_drawdown REAL,
-                    avg_leverage REAL,
-                    chart_path TEXT,
-                    data_compressed_path TEXT,
-                    status TEXT DEFAULT 'completed'
-                )
-            ''')
-            cursor.execute('''
-                CREATE TABLE backtest_summary (
+                CREATE TABLE IF NOT EXISTS backtest_summary (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     analysis_id INTEGER,
                     metric_name TEXT,
@@ -85,7 +68,7 @@ class TestDeleteFunctionality(unittest.TestCase):
                 )
             ''')
             cursor.execute('''
-                CREATE TABLE leverage_calculation_details (
+                CREATE TABLE IF NOT EXISTS leverage_calculation_details (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     analysis_id INTEGER,
                     trade_number INTEGER,
@@ -142,35 +125,7 @@ class TestDeleteFunctionality(unittest.TestCase):
                 )
             ''')
         
-        # execution_logs.db
-        with sqlite3.connect(self.exec_db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE execution_logs (
-                    execution_id TEXT PRIMARY KEY,
-                    execution_type TEXT NOT NULL,
-                    symbol TEXT,
-                    symbols TEXT,
-                    timestamp_start TEXT NOT NULL,
-                    timestamp_end TEXT,
-                    status TEXT NOT NULL,
-                    duration_seconds REAL,
-                    triggered_by TEXT,
-                    server_id TEXT,
-                    version TEXT,
-                    current_operation TEXT,
-                    progress_percentage REAL DEFAULT 0,
-                    completed_tasks TEXT,
-                    total_tasks INTEGER DEFAULT 0,
-                    cpu_usage_avg REAL,
-                    memory_peak_mb INTEGER,
-                    disk_io_mb INTEGER,
-                    metadata TEXT,
-                    errors TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
+        # execution_logs.db (BaseTestで作成済み、追加の処理は不要)
     
     def _create_test_data(self):
         """テスト用データの作成"""
@@ -229,13 +184,8 @@ class TestDeleteFunctionality(unittest.TestCase):
                         VALUES (?, ?, ?, ?, ?)
                     ''', (alert_id, symbol, True, 5.2, 3.1))
             
-            # execution_logs.db にデータ挿入
-            with sqlite3.connect(self.exec_db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO execution_logs (execution_id, execution_type, symbol, status, timestamp_start)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (f"test_exec_{symbol}", 'SYMBOL_ADDITION', symbol, 'SUCCESS', datetime.now().isoformat()))
+            # execution_logs.db にデータ挿入 (BaseTestのヘルパーメソッドを使用)
+            self.insert_test_execution_log(f"test_exec_{symbol}", symbol, 'SUCCESS')
             
             # テスト用ファイル作成
             for config in ['Conservative_ML', 'Aggressive_Traditional']:

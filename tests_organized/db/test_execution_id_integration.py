@@ -15,53 +15,62 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from tests_organized.base_test import BaseTest
 
-class ExecutionIdIntegrationTest:
+class ExecutionIdIntegrationTest(BaseTest):
     """execution_id統合テストクラス"""
     
-    def __init__(self):
+    def custom_setup(self):
+        """execution_id統合テスト固有のセットアップ"""
         self.test_results = []
-        self.temp_dirs = []
         
-    def setup_test_environment(self):
-        """テスト環境のセットアップ"""
-        print("🔧 テスト環境セットアップ中...")
-        
-        # テスト用一時ディレクトリ作成
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="execution_id_test_"))
-        self.temp_dirs.append(self.temp_dir)
-        
-        # テスト用DB作成
-        self.test_execution_db = self.temp_dir / "execution_logs.db"
-        self.test_analysis_db = self.temp_dir / "analysis.db"
-        
-        # 実際のDBからスキーマをコピー
+        # 実際のDBからスキーマをテスト用DBにコピー
         self._copy_db_schema()
         
-        print(f"✅ テスト環境: {self.temp_dir}")
+        print(f"✅ execution_id統合テスト環境: {self.temp_dir}")
+        
+    def setup_test_environment(self):
+        """BaseTestのセットアップを利用"""
+        # BaseTestが既にセットアップを行っているので、追加のセットアップのみ実行
+        self.custom_setup()
         
     def _copy_db_schema(self):
-        """実際のDBスキーマをテスト用DBにコピー"""
-        # execution_logs.db スキーマ
-        real_execution_db = Path("web_dashboard/execution_logs.db")
-        if real_execution_db.exists():
-            shutil.copy2(real_execution_db, self.test_execution_db)
-            # テストデータをクリア
-            with sqlite3.connect(self.test_execution_db) as conn:
-                conn.execute("DELETE FROM execution_logs")
-                conn.execute("DELETE FROM execution_steps")
+        """BaseTestのDBスキーマを使用（実際のDBからのコピーは不要）"""
+        # BaseTestが既に適切なスキーマでDBを作成しているため、
+        # 追加のテーブル作成のみ実行
+        try:
+            with sqlite3.connect(self.execution_logs_db) as conn:
+                # execution_stepsテーブルが存在しない場合は作成
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS execution_steps (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        execution_id TEXT NOT NULL,
+                        step_name TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        started_at TEXT,
+                        completed_at TEXT,
+                        error_message TEXT,
+                        FOREIGN KEY (execution_id) REFERENCES execution_logs(execution_id)
+                    )
+                """)
                 conn.commit()
-        
-        # analysis.db スキーマ
-        real_analysis_db = Path("web_dashboard/large_scale_analysis/analysis.db")
-        if real_analysis_db.exists():
-            shutil.copy2(real_analysis_db, self.test_analysis_db)
-            # テストデータをクリア
-            with sqlite3.connect(self.test_analysis_db) as conn:
-                conn.execute("DELETE FROM analyses")
-                conn.execute("DELETE FROM backtest_summary")
+                
+            with sqlite3.connect(self.analysis_db) as conn:
+                # backtest_summaryテーブルが存在しない場合は作成
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS backtest_summary (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        analysis_id INTEGER,
+                        summary_data TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (analysis_id) REFERENCES analyses(id)
+                    )
+                """)
                 conn.commit()
+        except Exception as e:
+            print(f"⚠️ DBスキーマ追加エラー: {e}")
+            # エラーがあっても継続（BaseTestのスキーマで十分な場合）
     
     def test_execution_log_creation(self):
         """実行ログ作成テスト"""
@@ -71,8 +80,8 @@ class ExecutionIdIntegrationTest:
         try:
             from execution_log_database import ExecutionLogDatabase, ExecutionType
             
-            # テスト用DBパスを設定
-            db = ExecutionLogDatabase(db_path=str(self.test_execution_db))
+            # テスト用DBパスを設定 (BaseTestのDBを使用)
+            db = ExecutionLogDatabase(db_path=str(self.execution_logs_db))
             
             # 実行ログ作成（ExecutionType.SYMBOL_ADDITIONを使用）
             execution_id = db.create_execution(
@@ -85,7 +94,7 @@ class ExecutionIdIntegrationTest:
             print(f"✅ 実行ID生成: {execution_id}")
             
             # 作成されたログを確認
-            with sqlite3.connect(self.test_execution_db) as conn:
+            with sqlite3.connect(self.execution_logs_db) as conn:
                 cursor = conn.execute(
                     "SELECT execution_id, symbol, status FROM execution_logs WHERE execution_id = ?",
                     (execution_id,)

@@ -8,70 +8,51 @@ import os
 import json
 import tempfile
 import shutil
+import sys
+from pathlib import Path
 
-def setup_test_db():
-    """テスト用データベースを作成"""
-    test_dir = tempfile.mkdtemp(prefix="test_symbols_api_")
-    
-    # テスト用analysis.db作成
-    analysis_dir = os.path.join(test_dir, "large_scale_analysis")
-    os.makedirs(analysis_dir)
-    analysis_db = os.path.join(analysis_dir, "analysis.db")
-    
-    # テスト用execution_logs.db作成
-    exec_db = os.path.join(test_dir, "execution_logs.db")
-    
-    # テストデータで初期化
-    with sqlite3.connect(analysis_db) as conn:
-        conn.execute("""
-            CREATE TABLE analyses (
-                id INTEGER PRIMARY KEY,
-                symbol TEXT,
-                execution_id TEXT,
-                sharpe_ratio REAL
-            )
-        """)
-        # テストデータの挿入
-        test_data = [
-            ('BTC', 'test_exec_1', 1.5),
-            ('ETH', 'test_exec_2', 1.2),
-            ('SOL', 'test_exec_3', 0.8)
-        ]
-        for symbol, exec_id, sharpe in test_data:
-            for i in range(20):  # 20パターンで満たす
-                conn.execute(
-                    "INSERT INTO analyses (symbol, execution_id, sharpe_ratio) VALUES (?, ?, ?)",
-                    (symbol, f"{exec_id}_{i}", sharpe + (i * 0.1))
-                )
-    
-    with sqlite3.connect(exec_db) as conn:
-        conn.execute("""
-            CREATE TABLE execution_logs (
-                execution_id TEXT PRIMARY KEY,
-                status TEXT
-            )
-        """)
-        # テスト実行ログ
-        for symbol in ['BTC', 'ETH', 'SOL']:
-            for i in range(20):
-                conn.execute(
-                    "INSERT INTO execution_logs (execution_id, status) VALUES (?, ?)",
-                    (f"test_exec_{['1','2','3'][['BTC','ETH','SOL'].index(symbol)]}_{i}", 'SUCCESS')
-                )
-    
-    return test_dir, analysis_db, exec_db
+# プロジェクトルートをパスに追加
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from tests_organized.base_test import BaseTest
 
-def test_symbols_api():
-    """符号api模擬テスト - テスト用DB使用"""
-    test_dir = None
-    try:
-        # テスト用DBのセットアップ
-        test_dir, db_path, exec_db_path = setup_test_db()
+class SymbolsAPITest(BaseTest):
+    """symbols APIテストクラス"""
+    
+    def custom_setup(self):
+        """テスト固有のセットアップ"""
+        self.setup_test_data()
+    
+    def setup_test_data(self):
+        """テスト用データベースにデータを作成"""
+        # BaseTestのデータベースを使用してテストデータを初期化
+        with sqlite3.connect(self.analysis_db) as conn:
+            # テストデータの挿入
+            test_data = [
+                ('BTC', 'test_exec_1', 1.5),
+                ('ETH', 'test_exec_2', 1.2),
+                ('SOL', 'test_exec_3', 0.8)
+            ]
+            for symbol, exec_id, sharpe in test_data:
+                for i in range(20):  # 20パターンで満たす
+                    conn.execute(
+                        "INSERT INTO analyses (symbol, execution_id, sharpe_ratio) VALUES (?, ?, ?)",
+                        (symbol, f"{exec_id}_{i}", sharpe + (i * 0.1))
+                    )
         
+        with sqlite3.connect(self.execution_logs_db) as conn:
+            # テスト実行ログ
+            for symbol in ['BTC', 'ETH', 'SOL']:
+                for i in range(20):
+                    conn.execute(
+                        "INSERT INTO execution_logs (execution_id, status) VALUES (?, ?)",
+                        (f"test_exec_{['1','2','3'][['BTC','ETH','SOL'].index(symbol)]}_{i}", 'SUCCESS')
+                    )
+
+    def test_symbols_api(self):
+        """符号api模擬テスト - テスト用DB使用"""
         print(f"🧪 テスト用DB使用 (本番DBへの影響なし)")
-        print(f"  test_dir: {test_dir}")
-        print(f"  db_path: {db_path}")
-        print(f"  exec_db_path: {exec_db_path}")
+        print(f"  analysis_db: {self.analysis_db}")
+        print(f"  execution_logs_db: {self.execution_logs_db}")
         
         filter_mode = 'completed_only'
         
@@ -79,7 +60,7 @@ def test_symbols_api():
         print(f"  filter_mode: {filter_mode}")
         
         # execution_logs.dbの存在確認
-        if os.path.exists(exec_db_path):
+        if os.path.exists(self.execution_logs_db):
             print("✅ execution_logs.db存在")
             # JOINクエリ
             query = """
@@ -106,10 +87,10 @@ def test_symbols_api():
         print(f"📊 実行クエリ:")
         print(f"  {query}")
         
-        with sqlite3.connect(db_path) as conn:
+        with sqlite3.connect(self.analysis_db) as conn:
             # execution_logs.db をアタッチ
-            if os.path.exists(exec_db_path):
-                conn.execute(f"ATTACH DATABASE '{exec_db_path}' AS exec_db")
+            if os.path.exists(self.execution_logs_db):
+                conn.execute(f"ATTACH DATABASE '{self.execution_logs_db}' AS exec_db")
                 print("✅ execution_logs.db アタッチ成功")
             
             cursor = conn.cursor()
@@ -132,17 +113,28 @@ def test_symbols_api():
                 symbols.append(symbol_data)
                 print(f"  {symbol_data}")
             
-            return symbols
-        
-    except Exception as e:
-        print(f"❌ エラー: {e}")
-        return []
-    finally:
-        # テスト用DBのクリーンアップ
-        if test_dir and os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
-            print(f"🧹 テスト用DB削除: {test_dir}")
+            # テスト検証
+            self.assertGreater(len(symbols), 0, "シンボルが取得できませんでした")
+            print(f"\n✅ テスト成功: {len(symbols)}件の銘柄取得")
+
+def run_symbols_api_tests():
+    """symbols APIテスト実行"""
+    import unittest
+    
+    # テストスイート作成
+    suite = unittest.TestSuite()
+    test_class = SymbolsAPITest
+    
+    # テストメソッドを追加
+    suite.addTest(test_class('test_symbols_api'))
+    
+    # テスト実行
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
 
 if __name__ == "__main__":
-    result = test_symbols_api()
-    print(f"\n🎯 最終結果: {len(result)}件の銘柄")
+    import sys
+    success = run_symbols_api_tests()
+    sys.exit(0 if success else 1)

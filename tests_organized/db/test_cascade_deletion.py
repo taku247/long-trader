@@ -11,41 +11,34 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-class CascadeDeletionTest:
+# プロジェクトルートをパスに追加
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from tests_organized.base_test import BaseTest
+
+class CascadeDeletionTest(BaseTest):
     """カスケード削除テストクラス"""
     
-    def __init__(self):
+    def custom_setup(self):
+        """カスケード削除テスト固有のセットアップ"""
         self.test_results = []
-        self.temp_dirs = []
-        
-    def setup_test_environment(self):
-        """テスト環境のセットアップ"""
-        print("🔧 カスケード削除テスト環境セットアップ中...")
-        
-        # テスト用一時ディレクトリ作成
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="cascade_deletion_test_"))
-        self.temp_dirs.append(self.temp_dir)
-        
-        # テスト用DB作成
-        self.test_execution_db = self.temp_dir / "execution_logs.db"
-        
-        # テスト用のサブディレクトリ構造を作成
-        (self.temp_dir / "web_dashboard" / "large_scale_analysis").mkdir(parents=True)
-        self.test_analysis_db = self.temp_dir / "web_dashboard" / "large_scale_analysis" / "analysis.db"
         
         # テスト用ファイルアーティファクト用ディレクトリ
-        (self.temp_dir / "charts").mkdir()
-        (self.temp_dir / "compressed").mkdir()
+        self.charts_dir = Path(self.temp_dir) / "charts"
+        self.compressed_dir = Path(self.temp_dir) / "compressed"
+        self.charts_dir.mkdir(exist_ok=True)
+        self.compressed_dir.mkdir(exist_ok=True)
         
-        # テスト用データベースを作成
-        self._create_test_databases()
+        print(f"✅ カスケード削除テスト環境: {self.temp_dir}")
         
-        print(f"✅ テスト環境: {self.temp_dir}")
+    def setup_test_environment(self):
+        """BaseTestのセットアップを利用"""
+        # BaseTestが既にセットアップを行っているので、追加のセットアップのみ実行
+        self.custom_setup()
         
     def _create_test_databases(self):
         """テスト用データベースとデータを作成"""
-        # execution_logs.db 作成
-        with sqlite3.connect(self.test_execution_db) as conn:
+        # execution_logs.db 作成 (BaseTestのDBを使用)
+        with sqlite3.connect(self.execution_logs_db) as conn:
             conn.execute("""
                 CREATE TABLE execution_logs (
                     execution_id TEXT PRIMARY KEY,
@@ -74,8 +67,8 @@ class CascadeDeletionTest:
                 """, data)
             conn.commit()
         
-        # analysis.db 作成（関連分析結果を含む）
-        with sqlite3.connect(self.test_analysis_db) as conn:
+        # analysis.db 作成（関連分析結果を含む） (BaseTestのDBを使用)
+        with sqlite3.connect(self.analysis_db) as conn:
             conn.execute("""
                 CREATE TABLE analyses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,10 +89,10 @@ class CascadeDeletionTest:
             """)
             
             # テスト用ファイル作成
-            chart1 = self.temp_dir / "charts" / "btc_1h_chart.html"
-            chart2 = self.temp_dir / "charts" / "eth_4h_chart.html"
-            compressed1 = self.temp_dir / "compressed" / "btc_1h_data.gz"
-            compressed2 = self.temp_dir / "compressed" / "eth_4h_data.gz"
+            chart1 = self.charts_dir / "btc_1h_chart.html"
+            chart2 = self.charts_dir / "eth_4h_chart.html"
+            compressed1 = self.compressed_dir / "btc_1h_data.gz"
+            compressed2 = self.compressed_dir / "eth_4h_data.gz"
             
             # テストファイル作成
             chart1.write_text("<html>BTC Chart</html>")
@@ -147,7 +140,7 @@ class CascadeDeletionTest:
             
             # テスト用のシステム作成
             original_cwd = os.getcwd()
-            os.chdir(self.temp_dir)
+            os.chdir(Path(self.temp_dir))
             
             try:
                 cascade_system = CascadeDeletionSystem()
@@ -236,17 +229,17 @@ class CascadeDeletionTest:
                 )
                 
                 # ドライラン後のデータ確認（変更されていないことを確認）
-                with sqlite3.connect(self.test_execution_db) as conn:
+                with sqlite3.connect(self.execution_logs_db) as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM execution_logs")
                     exec_count_after = cursor.fetchone()[0]
                 
-                with sqlite3.connect(self.test_analysis_db) as conn:
+                with sqlite3.connect(self.analysis_db) as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM analyses")
                     analysis_count_after = cursor.fetchone()[0]
                 
                 # ファイルが削除されていないことを確認
-                chart1 = self.temp_dir / "charts" / "btc_1h_chart.html"
-                chart2 = self.temp_dir / "charts" / "eth_4h_chart.html"
+                chart1 = self.charts_dir / "btc_1h_chart.html"
+                chart2 = self.charts_dir / "eth_4h_chart.html"
                 files_exist = chart1.exists() and chart2.exists()
                 
                 print(f"📊 ドライラン結果:")
@@ -301,11 +294,11 @@ class CascadeDeletionTest:
                 cascade_system = CascadeDeletionSystem()
                 
                 # 削除前の状況確認
-                with sqlite3.connect(self.test_execution_db) as conn:
+                with sqlite3.connect(self.execution_logs_db) as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM execution_logs")
                     exec_count_before = cursor.fetchone()[0]
                 
-                with sqlite3.connect(self.test_analysis_db) as conn:
+                with sqlite3.connect(self.analysis_db) as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM analyses")
                     analysis_count_before = cursor.fetchone()[0]
                 
@@ -319,7 +312,7 @@ class CascadeDeletionTest:
                 )
                 
                 # 削除後の状況確認
-                with sqlite3.connect(self.test_execution_db) as conn:
+                with sqlite3.connect(self.execution_logs_db) as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM execution_logs")
                     exec_count_after = cursor.fetchone()[0]
                     
@@ -327,7 +320,7 @@ class CascadeDeletionTest:
                     cursor = conn.execute("SELECT execution_id FROM execution_logs ORDER BY execution_id")
                     remaining_exec_ids = [row[0] for row in cursor.fetchall()]
                 
-                with sqlite3.connect(self.test_analysis_db) as conn:
+                with sqlite3.connect(self.analysis_db) as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM analyses")
                     analysis_count_after = cursor.fetchone()[0]
                     
@@ -336,8 +329,8 @@ class CascadeDeletionTest:
                     remaining_analysis_exec_ids = [row[0] for row in cursor.fetchall()]
                 
                 # ファイル削除の確認
-                chart1 = self.temp_dir / "charts" / "btc_1h_chart.html"
-                chart2 = self.temp_dir / "charts" / "eth_4h_chart.html"
+                chart1 = self.charts_dir / "btc_1h_chart.html"
+                chart2 = self.charts_dir / "eth_4h_chart.html"
                 files_deleted = not chart1.exists() and not chart2.exists()
                 
                 print(f"📊 削除結果:")
@@ -396,7 +389,7 @@ class CascadeDeletionTest:
             from cascade_deletion_system import CascadeDeletionSystem
             
             original_cwd = os.getcwd()
-            os.chdir(self.temp_dir)
+            os.chdir(Path(self.temp_dir))
             
             try:
                 cascade_system = CascadeDeletionSystem()
@@ -466,12 +459,8 @@ class CascadeDeletionTest:
     def cleanup_test_environment(self):
         """テスト環境のクリーンアップ"""
         print("\n🧹 テスト環境クリーンアップ")
-        for temp_dir in self.temp_dirs:
-            try:
-                shutil.rmtree(temp_dir)
-                print(f"✅ 削除: {temp_dir}")
-            except Exception as e:
-                print(f"⚠️ クリーンアップエラー: {e}")
+        # BaseTestが自動的にクリーンアップを行うため、追加処理のみ
+        print("✅ BaseTestによる自動クリーンアップ完了")
     
     def print_test_summary(self):
         """テスト結果サマリー"""
@@ -497,32 +486,42 @@ class CascadeDeletionTest:
         
         return passed == total
 
-def main():
-    """メインテスト実行"""
-    print("🚀 カスケード削除テストスイート")
-    print("=" * 80)
-    
-    test = CascadeDeletionTest()
-    
-    try:
+    def test_cascade_deletion_workflow(self):
+        """カスケード削除ワークフローテスト"""
+        print("🚀 カスケード削除テストスイート")
+        print("=" * 80)
+        
         # テスト環境セットアップ
-        test.setup_test_environment()
+        self.setup_test_environment()
         
         # テスト実行
-        test.test_backup_functionality()
-        impact_analysis = test.test_impact_analysis()
-        test.test_cascade_deletion_dry_run(impact_analysis)
-        test.test_actual_cascade_deletion()
+        self.test_backup_functionality()
+        impact_analysis = self.test_impact_analysis()
+        self.test_cascade_deletion_dry_run(impact_analysis)
+        self.test_actual_cascade_deletion()
         
         # 結果表示
-        success = test.print_test_summary()
-        
-        return success
-        
-    finally:
-        # クリーンアップ
-        test.cleanup_test_environment()
+        success = self.print_test_summary()
+        self.assertTrue(success, "カスケード削除テストが失敗しました")
+
+def run_cascade_deletion_tests():
+    """カスケード削除テスト実行"""
+    import unittest
+    
+    # テストスイート作成
+    suite = unittest.TestSuite()
+    test_class = CascadeDeletionTest
+    
+    # テストメソッドを追加
+    suite.addTest(test_class('test_cascade_deletion_workflow'))
+    
+    # テスト実行
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
 
 if __name__ == "__main__":
-    success = main()
+    import sys
+    success = run_cascade_deletion_tests()
     sys.exit(0 if success else 1)

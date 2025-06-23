@@ -7,7 +7,7 @@ import sys
 import os
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -16,10 +16,16 @@ from flask import Flask, render_template, jsonify, request
 import logging
 
 # Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+parent_dir = str(Path(__file__).parent.parent.absolute())
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 from real_time_system.monitor import RealTimeMonitor
 from real_time_system.utils.colored_log import get_colored_logger
+from scalable_analysis_system import ScalableAnalysisSystem
+
+# Configure correct database path for ScalableAnalysisSystem
+CORRECT_ANALYSIS_DB_DIR = str(Path(__file__).parent.parent / "large_scale_analysis")
 
 
 class WebDashboard:
@@ -63,10 +69,12 @@ class WebDashboard:
         
         # Setup routes
         self._setup_routes()
+        self._setup_strategy_api()
         # Disable SocketIO events for now
         # self._setup_socketio_events()
         
         self.logger.info("Web dashboard initialized")
+    
     
     def _setup_routes(self):
         """Setup Flask routes."""
@@ -75,6 +83,11 @@ class WebDashboard:
         def index():
             """Main dashboard page."""
             return render_template('dashboard.html')
+        
+        @self.app.route('/strategy-management')
+        def strategy_management():
+            """Strategy management page."""
+            return render_template('strategy_management.html')
         
         @self.app.route('/api/status')
         def api_status():
@@ -228,7 +241,7 @@ class WebDashboard:
                             "futures_only": True
                         }
                     },
-                    "last_updated": datetime.now().isoformat(),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
                     "updated_via": "web_dashboard"
                 }
                 
@@ -292,7 +305,7 @@ class WebDashboard:
                 
                 # Filter by days
                 from datetime import datetime, timedelta
-                cutoff_date = datetime.now() - timedelta(days=days)
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
                 alerts = [a for a in alerts if a.timestamp >= cutoff_date]
                 
                 # Filter by strategy if specified
@@ -457,7 +470,7 @@ class WebDashboard:
                             end_dt = datetime.fromisoformat(end_time)
                             elapsed_seconds = (end_dt - start_dt).total_seconds()
                         else:
-                            elapsed_seconds = (datetime.now() - start_dt).total_seconds()
+                            elapsed_seconds = (datetime.now(timezone.utc) - start_dt).total_seconds()
                     except:
                         elapsed_seconds = 0
                     
@@ -544,7 +557,7 @@ class WebDashboard:
                             error_data = [{
                                 "error_type": "ProcessTimeout",
                                 "error_message": "Process terminated after 12+ hours of inactivity",
-                                "timestamp": datetime.now().isoformat()
+                                "timestamp": datetime.now(timezone.utc).isoformat()
                             }]
                             
                             conn.execute('''
@@ -607,7 +620,7 @@ class WebDashboard:
                     error_data = [{
                         "error_type": "ManualReset",
                         "error_message": "Manually reset by user",
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     }]
                     
                     conn.execute('''
@@ -630,7 +643,7 @@ class WebDashboard:
                         killed_processes = []
                         
                         # 関連するPythonプロセスを探して強制終了
-                        for proc in psutil.process_iter(['pid', 'cmdline', 'name', 'environ', 'ppid']):
+                        for proc in psutil.process_iter(['pid', 'cmdline', 'name', 'environ']):
                             try:
                                 cmdline = ' '.join(proc.info['cmdline'] or [])
                                 environ = proc.info.get('environ', {})
@@ -638,8 +651,7 @@ class WebDashboard:
                                 # 実行IDまたは銘柄名が含まれるプロセスを特定
                                 is_target_process = False
                                 
-                                # Pythonプロセスまたはmultiprocessing関連プロセスを対象とする
-                                if proc.info['name'] in ['python', 'python3', 'python.exe'] or 'python' in cmdline:
+                                if proc.info['name'] == 'python':
                                     # 1. コマンドラインでの特定
                                     if (execution_id in cmdline or 
                                         symbol in cmdline or
@@ -672,56 +684,27 @@ class WebDashboard:
                                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                                 pass
                                         
-                                        # 3-3. 孤児プロセス対策（改善版）
-                                        if not is_target_process:
+                                        # 3-3. 孤児プロセス対策（最後の手段）
+                                        # 特定の銘柄に関連する実行中のプロセスがない場合のみ
+                                        if not is_target_process and symbol:
+                                            # 最近10分以内にプロセスが起動し、関連する親プロセスが見つからない場合
                                             try:
-                                                # 孤児プロセスを直接検出（PPID=1）
-                                                if proc.ppid() == 1:
-                                                    self.logger.warning(f"Orphan process detected (PPID=1): {proc.pid}")
-                                                    is_target_process = True
-                                                
-                                                # 親プロセスが存在しない場合
-                                                elif proc.parent() is None:
-                                                    self.logger.warning(f"Orphan process detected (no parent): {proc.pid}")
-                                                    is_target_process = True
-                                                
-                                                # multiprocessingキーワードを含むプロセス全般を検出
-                                                elif 'multiprocessing' in cmdline or 'spawn_main' in cmdline:
-                                                    # execution_idが設定されていれば確認
-                                                    if execution_id:
-                                                        # 現在実行中の他の関連プロセスを探す
-                                                        active_parent_found = False
-                                                        for other_proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                                                            if other_proc.pid != proc.pid:
-                                                                other_cmdline = ' '.join(other_proc.info.get('cmdline', []))
-                                                                if (execution_id in other_cmdline or
-                                                                    'auto_symbol_training' in other_cmdline or
-                                                                    'scalable_analysis_system' in other_cmdline):
-                                                                    if other_proc.is_running():
-                                                                        active_parent_found = True
-                                                                        break
-                                                        
-                                                        if not active_parent_found:
-                                                            self.logger.warning(f"Orphan multiprocessing process detected (no active parent): {proc.pid}")
-                                                            is_target_process = True
+                                                create_time = datetime.fromtimestamp(proc.create_time(), tz=timezone.utc)
+                                                ten_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
+                                                if create_time > ten_minutes_ago:
+                                                    # 他の関連プロセスが存在しない場合は孤児プロセスと判定
+                                                    related_processes = []
+                                                    for other_proc in psutil.process_iter(['name', 'cmdline']):
+                                                        if other_proc.pid != proc.pid and other_proc.info['name'] == 'python':
+                                                            other_cmdline = ' '.join(other_proc.info['cmdline'] or [])
+                                                            if (symbol in other_cmdline or 
+                                                                'scalable_analysis_system' in other_cmdline):
+                                                                related_processes.append(other_proc)
                                                     
-                                                    # 銘柄名での検索（フォールバック）
-                                                    elif symbol:
-                                                        # 同じ銘柄の親プロセスが存在しない場合
-                                                        symbol_parent_found = False
-                                                        for other_proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                                                            if other_proc.pid != proc.pid:
-                                                                other_cmdline = ' '.join(other_proc.info.get('cmdline', []))
-                                                                if symbol in other_cmdline and other_proc.is_running():
-                                                                    symbol_parent_found = True
-                                                                    break
-                                                        
-                                                        if not symbol_parent_found:
-                                                            self.logger.warning(f"Orphan multiprocessing process for {symbol}: {proc.pid}")
-                                                            is_target_process = True
-                                                
-                                            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                                                # プロセス情報へのアクセスに失敗した場合はスキップ
+                                                    if not related_processes:
+                                                        self.logger.warning(f"Orphan multiprocessing process detected for {symbol}: {proc.pid}")
+                                                        is_target_process = True
+                                            except (psutil.NoSuchProcess, psutil.AccessDenied):
                                                 pass
                                 
                                 if is_target_process:
@@ -746,30 +729,8 @@ class WebDashboard:
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 continue
                                 
-                        # 追加の孤児プロセスチェック（より積極的）
-                        if not killed_processes:
-                            self.logger.warning("No processes found via normal detection, checking for orphans...")
-                            orphan_killed = []
-                            
-                            for proc in psutil.process_iter(['pid', 'cmdline', 'name', 'ppid']):
-                                try:
-                                    cmdline = ' '.join(proc.info['cmdline'] or [])
-                                    # すべてのmultiprocessingプロセスをチェック
-                                    if ('multiprocessing' in cmdline or 'spawn_main' in cmdline):
-                                        # PPIDが1（孤児）または親が存在しない
-                                        if proc.info.get('ppid') == 1 or proc.parent() is None:
-                                            self.logger.warning(f"Force terminating orphan multiprocessing process: {proc.pid}")
-                                            proc.terminate()
-                                            orphan_killed.append(proc.pid)
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    continue
-                            
-                            if orphan_killed:
-                                killed_processes.extend(orphan_killed)
-                                self.logger.info(f"Killed orphan processes: {orphan_killed}")
-                        
                         if killed_processes:
-                            self.logger.info(f"Total killed processes: {killed_processes}")
+                            self.logger.info(f"Killed processes: {killed_processes}")
                         else:
                             self.logger.info(f"No running processes found for {symbol}")
                             
@@ -780,10 +741,140 @@ class WebDashboard:
                     
                     self.logger.info(f"Manually reset execution: {symbol} ({execution_id})")
                     
+                    # 積極的クリーンアップ（手動リセット時）
+                    try:
+                        import psutil
+                        import time
+                        
+                        self.logger.info("🧹 Performing aggressive cleanup after manual reset...")
+                        killed_count = 0
+                        scanned_count = 0
+                        resource_trackers = []  # resource_trackerプロセスを後で終了
+                        
+                        # multiprocessingプロセスを強制終了（改善版）
+                        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'ppid']):
+                            try:
+                                proc_info = proc.info
+                                scanned_count += 1
+                                
+                                if not proc_info['cmdline']:
+                                    continue
+                                
+                                cmdline_list = proc_info.get('cmdline', [])
+                                if cmdline_list is None:
+                                    cmdline_list = []
+                                cmdline = ' '.join(str(x) for x in cmdline_list)
+                                
+                                # より包括的なmultiprocessing関連プロセス検出
+                                is_target = False
+                                reason = ""
+                                
+                                if 'python' in proc_info['name'].lower():
+                                    # 1. multiprocessing関連キーワード検出
+                                    mp_keywords = [
+                                        'multiprocessing', 'spawn_main', 'resource_tracker',
+                                        'Pool', 'Process-', 'ProcessPoolExecutor'
+                                    ]
+                                    
+                                    for keyword in mp_keywords:
+                                        if keyword in cmdline:
+                                            is_target = True
+                                            reason = f"keyword:{keyword}"
+                                            break
+                                    
+                                    # 2. 特定のコマンドパターン検出
+                                    if not is_target:
+                                        target_patterns = [
+                                            'from multiprocessing.spawn import spawn_main',
+                                            'from multiprocessing.resource_tracker import main',
+                                            '--multiprocessing-fork'
+                                        ]
+                                        
+                                        for pattern in target_patterns:
+                                            if pattern in cmdline:
+                                                is_target = True
+                                                reason = f"pattern:{pattern[:20]}..."
+                                                break
+                                    
+                                    # 3. 引数による検出（main関数の数字引数）
+                                    if not is_target and 'main(' in cmdline and any(c.isdigit() for c in cmdline):
+                                        is_target = True
+                                        reason = "main_with_args"
+                                
+                                if is_target:
+                                    self.logger.warning(f"🧹 Force killing multiprocessing process: PID {proc_info['pid']} ({reason})")
+                                    self.logger.debug(f"  Command: {cmdline[:100]}...")
+                                    
+                                    # resource_trackerは最後に終了（他のプロセスのクリーンアップを待つ）
+                                    if 'resource_tracker' in cmdline:
+                                        # 一旦リストに保存
+                                        resource_trackers.append({
+                                            'proc': proc,
+                                            'pid': proc_info['pid'],
+                                            'cmdline': cmdline
+                                        })
+                                    else:
+                                        proc.kill()
+                                        killed_count += 1
+                                    
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                continue
+                        
+                        # resource_trackerプロセスを最後に終了（1秒待機後）
+                        if resource_trackers:
+                            self.logger.info(f"🧹 Waiting 1 second before terminating {len(resource_trackers)} resource_tracker processes...")
+                            time.sleep(1)
+                            
+                            for rt in resource_trackers:
+                                try:
+                                    rt['proc'].kill()
+                                    killed_count += 1
+                                    self.logger.warning(f"🧹 Force killed resource_tracker: PID {rt['pid']}")
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        
+                        self.logger.info(f"🧹 Aggressive cleanup completed: scanned {scanned_count} processes, terminated {killed_count} multiprocessing processes")
+                        
+                        if killed_count == 0:
+                            self.logger.info("🧹 No multiprocessing processes found to terminate")
+                        
+                    except Exception as cleanup_error:
+                        self.logger.warning(f"Aggressive cleanup failed after manual reset: {cleanup_error}")
+                    
+                    # 🔧 CRITICAL FIX: 分析結果のクリーンアップ（execution_id紐づけ不足問題の解決）
+                    try:
+                        analysis_db_path = Path(__file__).parent / 'large_scale_analysis' / 'analysis.db'
+                        if analysis_db_path.exists():
+                            with sqlite3.connect(analysis_db_path) as analysis_conn:
+                                # execution_idが一致する分析結果を削除
+                                cursor = analysis_conn.execute('''
+                                    DELETE FROM analyses WHERE execution_id = ?
+                                ''', (execution_id,))
+                                deleted_count = cursor.rowcount
+                                
+                                # 古い方式の銘柄名のみでの削除もカバー（既存の孤立データ対策）
+                                if deleted_count == 0:
+                                    cursor = analysis_conn.execute('''
+                                        DELETE FROM analyses 
+                                        WHERE symbol = ? AND execution_id IS NULL
+                                        AND generated_at > datetime('now', '-1 hour')
+                                    ''', (symbol,))
+                                    deleted_count = cursor.rowcount
+                                
+                                analysis_conn.commit()
+                                
+                                if deleted_count > 0:
+                                    self.logger.info(f"🧹 Cleaned up {deleted_count} analysis results for {symbol} ({execution_id})")
+                                else:
+                                    self.logger.info(f"🧹 No analysis results found to clean up for {symbol} ({execution_id})")
+                    
+                    except Exception as analysis_cleanup_error:
+                        self.logger.error(f"Failed to clean up analysis results: {analysis_cleanup_error}")
+                    
                     return jsonify({
                         'success': True,
                         'symbol': symbol,
-                        'message': f'{symbol}の実行を停止しました（プロセスも強制終了）'
+                        'message': f'{symbol}の実行を停止しました（プロセス・分析結果も削除）'
                     })
                     
             except Exception as e:
@@ -828,7 +919,7 @@ class WebDashboard:
                     json.dump(current_config, f, ensure_ascii=False, indent=2)
                 
                 self.logger.info("Settings saved successfully")
-                return jsonify({'status': 'saved', 'timestamp': datetime.now().isoformat()})
+                return jsonify({'status': 'saved', 'timestamp': datetime.now(timezone.utc).isoformat()})
                 
             except Exception as e:
                 self.logger.error(f"Error saving settings: {e}")
@@ -985,8 +1076,7 @@ class WebDashboard:
         def api_strategy_results_symbols():
             """Get symbols that have completed analysis."""
             try:
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Get filter mode from query parameter (default: completed_only)
                 filter_mode = request.args.get('filter', 'completed_only')
@@ -1038,7 +1128,7 @@ class WebDashboard:
                 from execution_log_database import ExecutionLogDatabase
                 from datetime import datetime
                 
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 exec_db = ExecutionLogDatabase()
                 
                 # 指定銘柄の分析結果を取得
@@ -1099,7 +1189,7 @@ class WebDashboard:
                         'started_at': latest_execution.get('started_at') if latest_execution else None
                     },
                     'recent_executions': symbol_executions[:5],
-                    'last_updated': datetime.now().isoformat()
+                    'last_updated': datetime.now(timezone.utc).isoformat()
                 }
                 
                 return jsonify(progress_data)
@@ -1115,7 +1205,7 @@ class WebDashboard:
                 from scalable_analysis_system import ScalableAnalysisSystem
                 from execution_log_database import ExecutionLogDatabase
                 from datetime import datetime, timedelta
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 exec_db = ExecutionLogDatabase()
                 
                 # Get all symbols with their progress (18 = 3 strategies × 6 timeframes)
@@ -1188,19 +1278,18 @@ class WebDashboard:
         def api_strategy_results_detail(symbol):
             """Get detailed strategy results for a symbol."""
             try:
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Query all analyses for the symbol
                 filters = {'symbol': symbol}
                 results_df = system.query_analyses(filters=filters, limit=50)
                 
-                if results_df.empty:
+                if not results_df:
                     return jsonify({'results': []})
                 
                 # Convert to list of dictionaries
                 results = []
-                for _, row in results_df.iterrows():
+                for row in results_df:
                     results.append({
                         'symbol': row['symbol'],
                         'timeframe': row['timeframe'],
@@ -1228,8 +1317,7 @@ class WebDashboard:
         def api_strategy_trade_details(symbol, timeframe, config):
             """Get detailed trade data for specific strategy."""
             try:
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Load compressed trade data
                 trades_df = system.load_compressed_trades(symbol, timeframe, config)
@@ -1306,17 +1394,17 @@ class WebDashboard:
                 from scalable_analysis_system import ScalableAnalysisSystem
                 import numpy as np
                 
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Get all analysis results for the symbol
                 results_df = system.query_analyses(filters={'symbol': symbol})
                 
-                if results_df.empty:
+                if not results_df:
                     return jsonify({'error': f'No data found for symbol {symbol}'}), 404
                 
                 # Collect all trades from all timeframes and configs
                 all_trades = []
-                for _, row in results_df.iterrows():
+                for row in results_df:
                     trades_df = system.load_compressed_trades(row['symbol'], row['timeframe'], row['config'])
                     if trades_df is not None and not (hasattr(trades_df, 'empty') and trades_df.empty):
                         if hasattr(trades_df, 'to_dict'):
@@ -1516,13 +1604,13 @@ class WebDashboard:
                 import io
                 from flask import make_response
                 
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Get results
                 filters = {'symbol': symbol}
                 results_df = system.query_analyses(filters=filters, limit=50)
                 
-                if results_df.empty:
+                if not results_df:
                     return jsonify({'error': 'No data to export'}), 404
                 
                 # Create CSV
@@ -1587,6 +1675,11 @@ class WebDashboard:
                 if not symbol:
                     return jsonify({'error': 'Invalid symbol'}), 400
                 
+                # 選択的実行パラメータの取得
+                selected_strategies = data.get('selected_strategies')
+                selected_timeframes = data.get('selected_timeframes') 
+                strategy_configs = data.get('strategy_configs')  # カスタム戦略設定
+                
                 # Optional validation - warn but don't block
                 import asyncio
                 from hyperliquid_validator import HyperliquidValidator, ValidationContext
@@ -1624,6 +1717,45 @@ class WebDashboard:
                         'symbol': symbol,
                         'suggestion': '銘柄名は2-10文字の英数字で入力してください'
                     }), 400
+
+                # Early Fail検証システム使用
+                try:
+                    self.logger.info(f"🔍 Early Fail検証開始: {symbol}")
+                    
+                    from symbol_early_fail_validator import SymbolEarlyFailValidator
+                    validator = SymbolEarlyFailValidator()
+                    
+                    # 非同期検証実行
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        validation_result = loop.run_until_complete(validator.validate_symbol(symbol))
+                    finally:
+                        loop.close()
+                    
+                    if not validation_result.passed:
+                        self.logger.warning(f"❌ {symbol}: Early Fail検証失敗 - {validation_result.fail_reason.value}")
+                        return jsonify({
+                            'error': validation_result.error_message,
+                            'validation_status': validation_result.fail_reason.value,
+                            'symbol': symbol,
+                            'suggestion': validation_result.suggestion,
+                            'metadata': validation_result.metadata
+                        }), 400
+                    
+                    self.logger.success(f"✅ {symbol}: Early Fail検証合格")
+
+                except Exception as check_error:
+                    # Early Fail検証で予期しないエラーが出た場合も拒否
+                    error_msg = str(check_error)
+                    self.logger.error(f"❌ {symbol}: Early Fail検証失敗 - {error_msg}")
+                    
+                    return jsonify({
+                        'error': f'{symbol}の事前検証に失敗しました: {error_msg}',
+                        'validation_status': 'early_fail_error',
+                        'symbol': symbol,
+                        'suggestion': '銘柄名を確認するか、しばらく時間をおいて再度お試しください'
+                    }), 400
                 
                 # Generate execution ID first, then start training
                 from auto_symbol_training import AutoSymbolTrainer
@@ -1631,7 +1763,7 @@ class WebDashboard:
                 import uuid
                 
                 # Create execution ID that will be used
-                execution_id = f"symbol_addition_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                execution_id = f"symbol_addition_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
                 
                 trainer = AutoSymbolTrainer()
                 
@@ -1646,7 +1778,13 @@ class WebDashboard:
                         ExecutionType.SYMBOL_ADDITION,
                         symbol=symbol,
                         triggered_by="USER:WEB_UI",
-                        metadata={"auto_training": True, "source": "web_dashboard"}
+                        metadata={
+                            "auto_training": True, 
+                            "source": "web_dashboard",
+                            "selected_strategies": selected_strategies or "all",
+                            "selected_timeframes": selected_timeframes or "all",
+                            "custom_strategy_configs": len(strategy_configs) if strategy_configs else 0
+                        }
                     )
                     
                     self.logger.info(f"📝 DB record created synchronously: {execution_id}")
@@ -1667,7 +1805,13 @@ class WebDashboard:
                     try:
                         # DB記録は既に存在するため、既存のIDを使用
                         result_execution_id = loop.run_until_complete(
-                            trainer.add_symbol_with_training(symbol, execution_id=execution_id)
+                            trainer.add_symbol_with_training(
+                                symbol, 
+                                execution_id=execution_id,
+                                selected_strategies=selected_strategies,
+                                selected_timeframes=selected_timeframes,
+                                strategy_configs=strategy_configs
+                            )
                         )
                         self.logger.info(f"Symbol {symbol} training started with ID: {result_execution_id}")
                     except Exception as e:
@@ -1726,8 +1870,7 @@ class WebDashboard:
                     return jsonify({'error': 'Symbol is required'}), 400
                 
                 # Get incomplete patterns for this symbol
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 completed_results = system.query_analyses(filters={'symbol': symbol})
                 
                 # Determine missing patterns
@@ -1735,7 +1878,7 @@ class WebDashboard:
                 all_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
                 
                 completed_combinations = set()
-                for _, row in completed_results.iterrows():
+                for row in completed_results:
                     completed_combinations.add((row['config'], row['timeframe']))
                 
                 missing_configs = []
@@ -1760,7 +1903,7 @@ class WebDashboard:
                 import uuid
                 
                 exec_db = ExecutionLogDatabase()
-                retry_execution_id = f"retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                retry_execution_id = f"retry_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
                 
                 exec_db.create_execution_with_id(
                     retry_execution_id,
@@ -2258,7 +2401,7 @@ class WebDashboard:
                     else:
                         last_time = datetime.fromisoformat(latest_completion)
                     
-                    time_since_last = datetime.now() - last_time
+                    time_since_last = datetime.now(timezone.utc) - last_time
                     
                     # Consider stalled if no progress for 2+ hours and still running
                     if (time_since_last > timedelta(hours=2) and 
@@ -2403,9 +2546,9 @@ class WebDashboard:
                             (execution_id, execution_type, symbol, status, timestamp_start, triggered_by, metadata)
                             VALUES (?, 'DATA_DELETION', ?, 'SUCCESS', ?, 'web_dashboard', ?)
                         """, (
-                            f"delete_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            f"delete_{symbol}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
                             symbol,
-                            datetime.now().isoformat(),
+                            datetime.now(timezone.utc).isoformat(),
                             json.dumps(results)
                         ))
                         conn.commit()
@@ -2578,7 +2721,7 @@ class WebDashboard:
         try:
             from scalable_analysis_system import ScalableAnalysisSystem
             
-            analysis_system = ScalableAnalysisSystem()
+            analysis_system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
             
             # Query best performing strategy
             results = analysis_system.query_analyses(
@@ -2587,8 +2730,8 @@ class WebDashboard:
                 limit=1
             )
             
-            if not results.empty:
-                best = results.iloc[0]
+            if results:
+                best = results[0]
                 return {
                     'sharpe_ratio': best.get('sharpe_ratio', 0),
                     'recommended_leverage': best.get('avg_leverage', 0),
@@ -2605,6 +2748,13 @@ class WebDashboard:
             'max_return': 0,
             'strategy_name': 'Unknown'
         }
+    
+    def _setup_strategy_api(self):
+        """Setup strategy management API routes."""
+        from strategy_config_api import StrategyConfigAPI
+        
+        # Initialize strategy config API with the app
+        strategy_api = StrategyConfigAPI(self.app)
 
 
 def main():

@@ -5,12 +5,15 @@ base_test.pyを使用した安全なDBテストの例
 """
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
 
-from base_test import DatabaseTest
+# プロジェクトルートをパスに追加
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
+from tests_organized.base_test import BaseTest
 import sqlite3
 
-class TestDatabaseOperations(DatabaseTest):
+class TestDatabaseOperations(BaseTest):
     """データベース操作のテスト"""
     
     def test_foreign_key_constraints_enforcement(self):
@@ -125,7 +128,7 @@ class TestDatabaseOperations(DatabaseTest):
                 """)
 
 
-class TestDatabasePerformance(DatabaseTest):
+class TestDatabasePerformance(BaseTest):
     """データベースパフォーマンステスト"""
     
     def test_large_dataset_query_performance(self):

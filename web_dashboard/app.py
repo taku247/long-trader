@@ -2452,7 +2452,7 @@ class WebDashboard:
         
         try:
             # 1. analysis.db から削除（CASCADE）
-            analysis_db_path = 'large_scale_analysis/analysis.db'
+            analysis_db_path = '../large_scale_analysis/analysis.db'  # ルートディレクトリのDBを参照
             if os.path.exists(analysis_db_path):
                 with sqlite3.connect(analysis_db_path) as conn:
                     cursor = conn.cursor()
@@ -2479,7 +2479,7 @@ class WebDashboard:
                     conn.commit()
             
             # 2. alert_history.db から削除
-            alert_db_path = 'alert_history_system/data/alert_history.db'
+            alert_db_path = '../alert_history_system/data/alert_history.db'  # ルートディレクトリのDBを参照
             if os.path.exists(alert_db_path):
                 with sqlite3.connect(alert_db_path) as conn:
                     cursor = conn.cursor()
@@ -2496,7 +2496,7 @@ class WebDashboard:
                     conn.commit()
             
             # 3. execution_logs.db のステータス更新
-            exec_db_path = 'execution_logs.db'
+            exec_db_path = '../execution_logs.db'  # ルートディレクトリのDBを参照
             if os.path.exists(exec_db_path):
                 with sqlite3.connect(exec_db_path) as conn:
                     cursor = conn.cursor()

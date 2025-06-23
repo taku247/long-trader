@@ -12,37 +12,38 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import json
 
-class DbUnificationTest:
+# プロジェクトルートをパスに追加
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from tests_organized.base_test import BaseTest
+
+class DbUnificationTest(BaseTest):
     """DB統一テストクラス"""
     
-    def __init__(self):
+    def custom_setup(self):
+        """DB統一テスト固有のセットアップ"""
         self.test_results = []
-        self.temp_dirs = []
         
-    def setup_test_environment(self):
-        """テスト環境のセットアップ"""
-        print("🔧 DB統一テスト環境セットアップ中...")
+        # テスト用のweb_dashboardディレクトリ構造を作成
+        self.web_dashboard_dir = Path(self.temp_dir) / "web_dashboard"
+        self.web_dashboard_dir.mkdir(exist_ok=True)
         
-        # テスト用一時ディレクトリ作成
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="db_unification_test_"))
-        self.temp_dirs.append(self.temp_dir)
+        # テスト用の重複DB作成
+        self.test_web_db = self.web_dashboard_dir / "execution_logs.db"
         
-        # テスト用DB作成
-        self.test_root_db = self.temp_dir / "execution_logs.db"
-        self.test_web_db = self.temp_dir / "web_dashboard" / "execution_logs.db"
-        
-        # web_dashboardディレクトリ作成
-        (self.temp_dir / "web_dashboard").mkdir()
-        
-        # 実際のDBスキーマをコピー
+        # 実際のDBスキーマをテスト用DBに適用
         self._create_test_databases()
         
-        print(f"✅ テスト環境: {self.temp_dir}")
+        print(f"✅ DB統一テスト環境: {self.temp_dir}")
+        
+    def setup_test_environment(self):
+        """BaseTestのセットアップを利用"""
+        # BaseTestが既にセットアップを行っているので、追加のセットアップのみ実行
+        self.custom_setup()
         
     def _create_test_databases(self):
         """テスト用データベースを作成"""
-        # ルートDBの作成（実際のスキーマに合わせる）
-        with sqlite3.connect(self.test_root_db) as conn:
+        # ルートDBの作成（実際のスキーマに合わせる） - BaseTestのDBを使用
+        with sqlite3.connect(self.execution_logs_db) as conn:
             conn.execute("""
                 CREATE TABLE execution_logs (
                     execution_id TEXT PRIMARY KEY,
@@ -441,12 +442,8 @@ class DbUnificationTest:
     def cleanup_test_environment(self):
         """テスト環境のクリーンアップ"""
         print("\n🧹 テスト環境クリーンアップ")
-        for temp_dir in self.temp_dirs:
-            try:
-                shutil.rmtree(temp_dir)
-                print(f"✅ 削除: {temp_dir}")
-            except Exception as e:
-                print(f"⚠️ クリーンアップエラー: {e}")
+        # BaseTestが自動的にクリーンアップを行うため、追加処理のみ
+        print("✅ BaseTestによる自動クリーンアップ完了")
     
     def print_test_summary(self):
         """テスト結果サマリー"""
@@ -472,33 +469,45 @@ class DbUnificationTest:
         
         return passed == total
 
-def main():
-    """メインテスト実行"""
-    print("🚀 DB統一テストスイート")
-    print("=" * 80)
-    
-    test = DbUnificationTest()
-    
-    try:
+    def test_db_unification_workflow(self):
+        """DB統一ワークフローテスト"""
+        print("🚀 DB統一テストスイート")
+        print("=" * 80)
+        
         # テスト環境セットアップ
-        test.setup_test_environment()
+        self.setup_test_environment()
         
         # テスト実行
-        test.test_current_db_references()
-        test.test_migration_script_functionality()
-        test.test_unified_db_access()
-        test.test_deletion_function_fix()
-        test.test_data_consistency_after_unification()
+        self.test_current_db_references()
+        self.test_migration_script_functionality()
+        self.test_unified_db_access()
+        self.test_deletion_function_fix()
+        self.test_data_consistency_after_unification()
         
         # 結果表示
-        success = test.print_test_summary()
+        success = self.print_test_summary()
         
-        return success
-        
-    finally:
-        # クリーンアップ
-        test.cleanup_test_environment()
+        # テスト検証
+        self.assertTrue(success, "DB統一テストが失敗しました")
+
+def run_db_unification_tests():
+    """DB統一テスト実行"""
+    import unittest
+    
+    # テストスイート作成
+    suite = unittest.TestSuite()
+    test_class = DbUnificationTest
+    
+    # テストメソッドを追加
+    suite.addTest(test_class('test_db_unification_workflow'))
+    
+    # テスト実行
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
 
 if __name__ == "__main__":
-    success = main()
+    import sys
+    success = run_db_unification_tests()
     sys.exit(0 if success else 1)

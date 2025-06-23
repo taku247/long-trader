@@ -12,34 +12,31 @@ from pathlib import Path
 from datetime import datetime
 import json
 
-class ForeignKeyConstraintTest:
+# プロジェクトルートをパスに追加
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from tests_organized.base_test import BaseTest
+
+class ForeignKeyConstraintTest(BaseTest):
     """外部キー制約テストクラス"""
     
-    def __init__(self):
+    def custom_setup(self):
+        """外部キー制約テスト固有のセットアップ"""
         self.test_results = []
-        self.temp_dirs = []
         
-    def setup_test_environment(self):
-        """テスト環境のセットアップ"""
-        print("🔧 外部キー制約テスト環境セットアップ中...")
-        
-        # テスト用一時ディレクトリ作成
-        self.temp_dir = Path(tempfile.mkdtemp(prefix="foreign_key_test_"))
-        self.temp_dirs.append(self.temp_dir)
-        
-        # テスト用DB作成
-        self.test_execution_db = self.temp_dir / "execution_logs.db"
-        self.test_analysis_db = self.temp_dir / "analysis.db"
-        
-        # 実際のDBスキーマをコピーして作成
+        # 実際のDBスキーマをテスト用DBに適用
         self._create_test_databases()
         
-        print(f"✅ テスト環境: {self.temp_dir}")
+        print(f"✅ 外部キー制約テスト環境: {self.temp_dir}")
+        
+    def setup_test_environment(self):
+        """BaseTestのセットアップを利用"""
+        # BaseTestが既にセットアップを行っているので、追加のセットアップのみ実行
+        self.custom_setup()
         
     def _create_test_databases(self):
         """テスト用データベースを作成"""
-        # execution_logs.db 作成（実際のスキーマ）
-        with sqlite3.connect(self.test_execution_db) as conn:
+        # execution_logs.db 作成（実際のスキーマ） - BaseTestのDBを使用
+        with sqlite3.connect(self.execution_logs_db) as conn:
             conn.execute("""
                 CREATE TABLE execution_logs (
                     execution_id TEXT PRIMARY KEY,
@@ -84,8 +81,8 @@ class ForeignKeyConstraintTest:
                 """, data)
             conn.commit()
         
-        # analysis.db 作成（実際のスキーマ）
-        with sqlite3.connect(self.test_analysis_db) as conn:
+        # analysis.db 作成（実際のスキーマ） - BaseTestのDBを使用
+        with sqlite3.connect(self.analysis_db) as conn:
             conn.execute("""
                 CREATE TABLE analyses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,13 +127,13 @@ class ForeignKeyConstraintTest:
         
         try:
             # execution_logs.db の外部キー設定確認
-            with sqlite3.connect(self.test_execution_db) as conn:
+            with sqlite3.connect(self.execution_logs_db) as conn:
                 cursor = conn.execute("PRAGMA foreign_keys")
                 fk_enabled = cursor.fetchone()[0]
                 print(f"execution_logs.db 外部キー有効: {'Yes' if fk_enabled else 'No'}")
             
             # analysis.db の制約確認
-            with sqlite3.connect(self.test_analysis_db) as conn:
+            with sqlite3.connect(self.analysis_db) as conn:
                 cursor = conn.execute("PRAGMA foreign_key_list(analyses)")
                 constraints = cursor.fetchall()
                 
@@ -163,8 +160,8 @@ class ForeignKeyConstraintTest:
         
         try:
             # 孤立したanalysesレコードを検出
-            with sqlite3.connect(self.test_analysis_db) as analysis_conn:
-                analysis_conn.execute(f"ATTACH DATABASE '{self.test_execution_db}' AS exec_db")
+            with sqlite3.connect(self.analysis_db) as analysis_conn:
+                analysis_conn.execute(f"ATTACH DATABASE '{self.execution_logs_db}' AS exec_db")
                 
                 # 無効なexecution_idを持つレコードを検索
                 cursor = analysis_conn.execute("""
@@ -209,7 +206,7 @@ class ForeignKeyConstraintTest:
         
         try:
             # テスト用の制約追加スクリプトをシミュレーション
-            with sqlite3.connect(self.test_analysis_db) as conn:
+            with sqlite3.connect(self.analysis_db) as conn:
                 # 外部キーを有効化
                 conn.execute("PRAGMA foreign_keys = ON")
                 
@@ -239,7 +236,7 @@ class ForeignKeyConstraintTest:
                     print("✅ 制約付きテーブル作成成功")
                     
                     # 外部データベースをアタッチ
-                    conn.execute(f"ATTACH DATABASE '{self.test_execution_db}' AS exec_db")
+                    conn.execute(f"ATTACH DATABASE '{self.execution_logs_db}' AS exec_db")
                     
                     # 有効なレコードのみの移行テスト
                     cursor = conn.execute("""
@@ -287,7 +284,7 @@ class ForeignKeyConstraintTest:
         print("-" * 40)
         
         try:
-            with sqlite3.connect(self.test_analysis_db) as conn:
+            with sqlite3.connect(self.analysis_db) as conn:
                 # 現在のレコード数確認
                 cursor = conn.execute("SELECT COUNT(*) FROM analyses")
                 total_before = cursor.fetchone()[0]
@@ -343,7 +340,7 @@ class ForeignKeyConstraintTest:
             import time
             
             # 制約なしでの挿入性能測定
-            with sqlite3.connect(self.test_analysis_db) as conn:
+            with sqlite3.connect(self.analysis_db) as conn:
                 start_time = time.time()
                 for i in range(100):
                     conn.execute("""
@@ -359,9 +356,9 @@ class ForeignKeyConstraintTest:
                 conn.commit()
             
             # 制約ありでの挿入性能測定（シミュレーション）
-            with sqlite3.connect(self.test_analysis_db) as conn:
+            with sqlite3.connect(self.analysis_db) as conn:
                 conn.execute("PRAGMA foreign_keys = ON")
-                conn.execute(f"ATTACH DATABASE '{self.test_execution_db}' AS exec_db")
+                conn.execute(f"ATTACH DATABASE '{self.execution_logs_db}' AS exec_db")
                 
                 start_time = time.time()
                 for i in range(100):
@@ -400,12 +397,8 @@ class ForeignKeyConstraintTest:
     def cleanup_test_environment(self):
         """テスト環境のクリーンアップ"""
         print("\n🧹 テスト環境クリーンアップ")
-        for temp_dir in self.temp_dirs:
-            try:
-                shutil.rmtree(temp_dir)
-                print(f"✅ 削除: {temp_dir}")
-            except Exception as e:
-                print(f"⚠️ クリーンアップエラー: {e}")
+        # BaseTestが自動的にクリーンアップを行うため、追加処理のみ
+        print("✅ BaseTestによる自動クリーンアップ完了")
     
     def print_test_summary(self):
         """テスト結果サマリー"""
@@ -431,26 +424,23 @@ class ForeignKeyConstraintTest:
         
         return passed == total
 
-def main():
-    """メインテスト実行"""
-    print("🚀 外部キー制約テストスイート")
-    print("=" * 80)
-    
-    test = ForeignKeyConstraintTest()
-    
-    try:
+    def test_foreign_key_constraint_workflow(self):
+        """外部キー制約ワークフローテスト"""
+        print("🚀 外部キー制約テストスイート")
+        print("=" * 80)
+        
         # テスト環境セットアップ
-        test.setup_test_environment()
+        self.setup_test_environment()
         
         # テスト実行
-        test.test_current_constraint_status()
-        integrity_result = test.test_data_integrity_before_constraint()
-        test.test_constraint_addition_dry_run()
-        cleanup_result = test.test_data_cleanup_strategy()
-        test.test_constraint_performance_impact()
+        self.test_current_constraint_status()
+        integrity_result = self.test_data_integrity_before_constraint()
+        self.test_constraint_addition_dry_run()
+        cleanup_result = self.test_data_cleanup_strategy()
+        self.test_constraint_performance_impact()
         
         # 結果表示
-        success = test.print_test_summary()
+        success = self.print_test_summary()
         
         # 次のステップの提案
         print("\n" + "=" * 60)
@@ -466,12 +456,27 @@ def main():
             print("2. データクリーンアップの実行")
             print("3. テストの再実行")
         
-        return success
-        
-    finally:
-        # クリーンアップ
-        test.cleanup_test_environment()
+        # テスト検証
+        self.assertTrue(success, "外部キー制約テストが失敗しました")
+
+def run_foreign_key_constraint_tests():
+    """外部キー制約テスト実行"""
+    import unittest
+    
+    # テストスイート作成
+    suite = unittest.TestSuite()
+    test_class = ForeignKeyConstraintTest
+    
+    # テストメソッドを追加
+    suite.addTest(test_class('test_foreign_key_constraint_workflow'))
+    
+    # テスト実行
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
 
 if __name__ == "__main__":
-    success = main()
+    import sys
+    success = run_foreign_key_constraint_tests()
     sys.exit(0 if success else 1)

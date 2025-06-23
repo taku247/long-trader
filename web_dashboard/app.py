@@ -69,6 +69,7 @@ class WebDashboard:
         
         # Setup routes
         self._setup_routes()
+        self._setup_strategy_api()
         # Disable SocketIO events for now
         # self._setup_socketio_events()
         
@@ -82,6 +83,11 @@ class WebDashboard:
         def index():
             """Main dashboard page."""
             return render_template('dashboard.html')
+        
+        @self.app.route('/strategy-management')
+        def strategy_management():
+            """Strategy management page."""
+            return render_template('strategy_management.html')
         
         @self.app.route('/api/status')
         def api_status():
@@ -1669,6 +1675,11 @@ class WebDashboard:
                 if not symbol:
                     return jsonify({'error': 'Invalid symbol'}), 400
                 
+                # 選択的実行パラメータの取得
+                selected_strategies = data.get('selected_strategies')
+                selected_timeframes = data.get('selected_timeframes') 
+                strategy_configs = data.get('strategy_configs')  # カスタム戦略設定
+                
                 # Optional validation - warn but don't block
                 import asyncio
                 from hyperliquid_validator import HyperliquidValidator, ValidationContext
@@ -1767,7 +1778,13 @@ class WebDashboard:
                         ExecutionType.SYMBOL_ADDITION,
                         symbol=symbol,
                         triggered_by="USER:WEB_UI",
-                        metadata={"auto_training": True, "source": "web_dashboard"}
+                        metadata={
+                            "auto_training": True, 
+                            "source": "web_dashboard",
+                            "selected_strategies": selected_strategies or "all",
+                            "selected_timeframes": selected_timeframes or "all",
+                            "custom_strategy_configs": len(strategy_configs) if strategy_configs else 0
+                        }
                     )
                     
                     self.logger.info(f"📝 DB record created synchronously: {execution_id}")
@@ -1788,7 +1805,13 @@ class WebDashboard:
                     try:
                         # DB記録は既に存在するため、既存のIDを使用
                         result_execution_id = loop.run_until_complete(
-                            trainer.add_symbol_with_training(symbol, execution_id=execution_id)
+                            trainer.add_symbol_with_training(
+                                symbol, 
+                                execution_id=execution_id,
+                                selected_strategies=selected_strategies,
+                                selected_timeframes=selected_timeframes,
+                                strategy_configs=strategy_configs
+                            )
                         )
                         self.logger.info(f"Symbol {symbol} training started with ID: {result_execution_id}")
                     except Exception as e:
@@ -2725,6 +2748,13 @@ class WebDashboard:
             'max_return': 0,
             'strategy_name': 'Unknown'
         }
+    
+    def _setup_strategy_api(self):
+        """Setup strategy management API routes."""
+        from strategy_config_api import StrategyConfigAPI
+        
+        # Initialize strategy config API with the app
+        strategy_api = StrategyConfigAPI(self.app)
 
 
 def main():

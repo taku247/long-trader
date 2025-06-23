@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>戦略管理 - High Leverage Bot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .strategy-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+        .strategy-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+        .strategy-card.inactive {
+            opacity: 0.6;
+            background-color: #f8f9fa;
+        }
+        .parameter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .parameter-item {
+            background: #f8f9fa;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+        .parameter-label {
+            font-weight: 600;
+            color: #6c757d;
+        }
+        .strategy-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .stats-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .stats-badge.sharpe-positive {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .stats-badge.sharpe-negative {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .modal-parameter-input {
+            margin-bottom: 15px;
+        }
+        .filter-section {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .base-strategy-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            margin-right: 10px;
+        }
+        .strategy-Conservative_ML { background-color: #28a745; }
+        .strategy-Aggressive_ML { background-color: #dc3545; }
+        .strategy-Balanced { background-color: #ffc107; }
+        .strategy-Traditional { background-color: #17a2b8; }
+        .strategy-Full_ML { background-color: #6f42c1; }
+        .strategy-Custom_ML { background-color: #fd7e14; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-lightning-charge-fill"></i> High Leverage Bot
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">ダッシュボード</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/strategy-management">戦略管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/analysis-results">分析結果</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/execution-logs">実行ログ</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h2><i class="bi bi-sliders"></i> 戦略管理</h2>
+                <p class="text-muted">カスタム戦略の作成・編集・管理</p>
+            </div>
+        </div>
+
+        <!-- フィルターセクション -->
+        <div class="filter-section">
+            <div class="row">
+                <div class="col-md-3">
+                    <label class="form-label">ベース戦略</label>
+                    <select id="filterBaseStrategy" class="form-select">
+                        <option value="">すべて</option>
+                        <option value="Conservative_ML">Conservative ML</option>
+                        <option value="Aggressive_ML">Aggressive ML</option>
+                        <option value="Balanced">Balanced</option>
+                        <option value="Traditional">Traditional</option>
+                        <option value="Full_ML">Full ML</option>
+                        <option value="Custom_ML">Custom ML</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">時間足</label>
+                    <select id="filterTimeframe" class="form-select">
+                        <option value="">すべて</option>
+                        <option value="1m">1分</option>
+                        <option value="3m">3分</option>
+                        <option value="5m">5分</option>
+                        <option value="15m">15分</option>
+                        <option value="30m">30分</option>
+                        <option value="1h">1時間</option>
+                        <option value="2h">2時間</option>
+                        <option value="4h">4時間</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">ステータス</label>
+                    <select id="filterStatus" class="form-select">
+                        <option value="">すべて</option>
+                        <option value="active">アクティブ</option>
+                        <option value="inactive">非アクティブ</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">検索</label>
+                    <input type="text" id="searchInput" class="form-control" placeholder="戦略名で検索...">
+                </div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-12">
+                    <button class="btn btn-primary" onclick="applyFilters()">
+                        <i class="bi bi-funnel"></i> フィルター適用
+                    </button>
+                    <button class="btn btn-secondary" onclick="resetFilters()">
+                        <i class="bi bi-x-circle"></i> リセット
+                    </button>
+                    <button class="btn btn-success float-end" onclick="showCreateStrategyModal()">
+                        <i class="bi bi-plus-circle"></i> 新規戦略作成
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 統計情報 -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">総戦略数</h5>
+                        <h2 id="totalStrategies">0</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">アクティブ</h5>
+                        <h2 id="activeStrategies">0</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">総分析回数</h5>
+                        <h2 id="totalAnalyses">0</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">平均Sharpe比</h5>
+                        <h2 id="avgSharpe">0.00</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 戦略リスト -->
+        <div id="strategyList" class="row">
+            <div class="col-12 text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">読み込み中...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 戦略作成/編集モーダル -->
+    <div class="modal fade" id="strategyModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="strategyModalTitle">新規戦略作成</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="strategyForm">
+                        <input type="hidden" id="strategyId">
+                        
+                        <div class="mb-3">
+                            <label class="form-label">戦略名 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="strategyName" required>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">ベース戦略 <span class="text-danger">*</span></label>
+                                <select class="form-select" id="baseStrategy" required>
+                                    <option value="">選択してください</option>
+                                    <option value="Conservative_ML">Conservative ML</option>
+                                    <option value="Aggressive_ML">Aggressive ML</option>
+                                    <option value="Balanced">Balanced</option>
+                                    <option value="Traditional">Traditional</option>
+                                    <option value="Full_ML">Full ML</option>
+                                    <option value="Custom_ML">Custom ML</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">時間足 <span class="text-danger">*</span></label>
+                                <select class="form-select" id="timeframe" required>
+                                    <option value="">選択してください</option>
+                                    <option value="1m">1分</option>
+                                    <option value="3m">3分</option>
+                                    <option value="5m">5分</option>
+                                    <option value="15m">15分</option>
+                                    <option value="30m">30分</option>
+                                    <option value="1h">1時間</option>
+                                    <option value="2h">2時間</option>
+                                    <option value="4h">4時間</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">説明</label>
+                            <textarea class="form-control" id="description" rows="2"></textarea>
+                        </div>
+                        
+                        <hr>
+                        <h6>パラメータ設定</h6>
+                        
+                        <div class="row">
+                            <div class="col-md-6 modal-parameter-input">
+                                <label class="form-label">リスク乗数 <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="riskMultiplier" 
+                                       min="0.1" max="5.0" step="0.1" value="1.0" required>
+                                <small class="text-muted">推奨: 0.1 - 5.0</small>
+                            </div>
+                            <div class="col-md-6 modal-parameter-input">
+                                <label class="form-label">最大レバレッジ <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="leverageCap" 
+                                       min="1" max="500" step="1" value="50" required>
+                                <small class="text-muted">推奨: 1 - 500</small>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 modal-parameter-input">
+                                <label class="form-label">最小リスクリワード比 <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="minRiskReward" 
+                                       min="0.5" max="10.0" step="0.1" value="1.2" required>
+                                <small class="text-muted">推奨: 0.5 - 10.0</small>
+                            </div>
+                            <div class="col-md-6 modal-parameter-input">
+                                <label class="form-label">信頼度調整値</label>
+                                <input type="number" class="form-control" id="confidenceBoost" 
+                                       min="-0.2" max="0.2" step="0.01" value="0">
+                                <small class="text-muted">推奨: -0.2 - 0.2</small>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 modal-parameter-input">
+                                <label class="form-label">ストップロス (%)</label>
+                                <input type="number" class="form-control" id="stopLossPercent" 
+                                       min="0.5" max="20.0" step="0.5" value="">
+                                <small class="text-muted">推奨: 0.5 - 20.0</small>
+                            </div>
+                            <div class="col-md-6 modal-parameter-input">
+                                <label class="form-label">テイクプロフィット (%)</label>
+                                <input type="number" class="form-control" id="takeProfitPercent" 
+                                       min="1.0" max="50.0" step="0.5" value="">
+                                <small class="text-muted">推奨: 1.0 - 50.0</small>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info mt-3" role="alert">
+                            <i class="bi bi-info-circle"></i> パラメータはバックテスト時に適用されます。
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary" onclick="saveStrategy()">
+                        <i class="bi bi-save"></i> 保存
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script>
+        let allStrategies = [];
+        let filteredStrategies = [];
+
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStrategies();
+            loadStatistics();
+        });
+
+        // 戦略一覧の読み込み
+        async function loadStrategies() {
+            try {
+                const response = await axios.get('/api/strategy-configs?include_stats=true');
+                if (response.data.success) {
+                    allStrategies = response.data.data;
+                    applyFilters();
+                }
+            } catch (error) {
+                console.error('戦略読み込みエラー:', error);
+                showAlert('戦略の読み込みに失敗しました', 'danger');
+            }
+        }
+
+        // 統計情報の読み込み
+        async function loadStatistics() {
+            try {
+                const response = await axios.get('/api/strategy-configs/stats');
+                if (response.data.success) {
+                    const stats = response.data.data;
+                    document.getElementById('totalStrategies').textContent = stats.total_strategies;
+                    
+                    // アクティブ戦略数を計算
+                    let activeCount = 0;
+                    let totalAnalysisCount = 0;
+                    let totalSharpe = 0;
+                    let sharpeCount = 0;
+                    
+                    allStrategies.forEach(strategy => {
+                        if (strategy.is_active) activeCount++;
+                        if (strategy.usage_stats) {
+                            totalAnalysisCount += strategy.usage_stats.analysis_count;
+                            if (strategy.usage_stats.avg_sharpe_ratio) {
+                                totalSharpe += strategy.usage_stats.avg_sharpe_ratio;
+                                sharpeCount++;
+                            }
+                        }
+                    });
+                    
+                    document.getElementById('activeStrategies').textContent = activeCount;
+                    document.getElementById('totalAnalyses').textContent = totalAnalysisCount;
+                    document.getElementById('avgSharpe').textContent = 
+                        sharpeCount > 0 ? (totalSharpe / sharpeCount).toFixed(2) : '0.00';
+                }
+            } catch (error) {
+                console.error('統計情報読み込みエラー:', error);
+            }
+        }
+
+        // フィルター適用
+        function applyFilters() {
+            const baseStrategy = document.getElementById('filterBaseStrategy').value;
+            const timeframe = document.getElementById('filterTimeframe').value;
+            const status = document.getElementById('filterStatus').value;
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            
+            filteredStrategies = allStrategies.filter(strategy => {
+                let match = true;
+                
+                if (baseStrategy && strategy.base_strategy !== baseStrategy) match = false;
+                if (timeframe && strategy.timeframe !== timeframe) match = false;
+                if (status === 'active' && !strategy.is_active) match = false;
+                if (status === 'inactive' && strategy.is_active) match = false;
+                if (searchTerm && !strategy.name.toLowerCase().includes(searchTerm)) match = false;
+                
+                return match;
+            });
+            
+            renderStrategies();
+        }
+
+        // フィルターリセット
+        function resetFilters() {
+            document.getElementById('filterBaseStrategy').value = '';
+            document.getElementById('filterTimeframe').value = '';
+            document.getElementById('filterStatus').value = '';
+            document.getElementById('searchInput').value = '';
+            applyFilters();
+        }
+
+        // 戦略一覧の描画
+        function renderStrategies() {
+            const container = document.getElementById('strategyList');
+            
+            if (filteredStrategies.length === 0) {
+                container.innerHTML = `
+                    <div class="col-12 text-center py-5">
+                        <i class="bi bi-inbox" style="font-size: 3rem; color: #6c757d;"></i>
+                        <p class="text-muted mt-2">戦略が見つかりません</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = filteredStrategies.map(strategy => {
+                const stats = strategy.usage_stats || {};
+                const isActive = strategy.is_active;
+                
+                return `
+                    <div class="col-12">
+                        <div class="strategy-card ${!isActive ? 'inactive' : ''}">
+                            <div class="d-flex align-items-start">
+                                <div class="base-strategy-icon strategy-${strategy.base_strategy}">
+                                    ${strategy.base_strategy.charAt(0)}
+                                </div>
+                                <div class="flex-grow-1">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <h5 class="mb-1">
+                                                ${strategy.name}
+                                                ${strategy.is_default ? '<span class="badge bg-primary ms-2">デフォルト</span>' : ''}
+                                                ${!isActive ? '<span class="badge bg-secondary ms-2">非アクティブ</span>' : ''}
+                                            </h5>
+                                            <p class="text-muted mb-2">
+                                                ${strategy.base_strategy} - ${strategy.timeframe} | 
+                                                作成者: ${strategy.created_by} | 
+                                                作成日: ${new Date(strategy.created_at).toLocaleDateString('ja-JP')}
+                                            </p>
+                                            ${strategy.description ? `<p class="mb-2">${strategy.description}</p>` : ''}
+                                        </div>
+                                        <div class="text-end">
+                                            ${stats.analysis_count ? `
+                                                <span class="stats-badge ${stats.avg_sharpe_ratio > 0 ? 'sharpe-positive' : 'sharpe-negative'}">
+                                                    Sharpe: ${stats.avg_sharpe_ratio.toFixed(2)}
+                                                </span>
+                                                <small class="text-muted d-block">
+                                                    ${stats.analysis_count}回使用
+                                                </small>
+                                            ` : '<small class="text-muted">未使用</small>'}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="parameter-grid">
+                                        ${Object.entries(strategy.parameters).map(([key, value]) => `
+                                            <div class="parameter-item">
+                                                <span class="parameter-label">${formatParameterName(key)}:</span> ${value}
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                    
+                                    <div class="strategy-actions">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="editStrategy(${strategy.id})">
+                                            <i class="bi bi-pencil"></i> 編集
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-info" onclick="duplicateStrategy(${strategy.id})">
+                                            <i class="bi bi-copy"></i> 複製
+                                        </button>
+                                        ${isActive ? `
+                                            <button class="btn btn-sm btn-outline-warning" onclick="toggleStrategyStatus(${strategy.id}, false)">
+                                                <i class="bi bi-pause"></i> 非アクティブ化
+                                            </button>
+                                        ` : `
+                                            <button class="btn btn-sm btn-outline-success" onclick="toggleStrategyStatus(${strategy.id}, true)">
+                                                <i class="bi bi-play"></i> アクティブ化
+                                            </button>
+                                        `}
+                                        ${!strategy.is_default ? `
+                                            <button class="btn btn-sm btn-outline-danger" onclick="deleteStrategy(${strategy.id})">
+                                                <i class="bi bi-trash"></i> 削除
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // パラメータ名のフォーマット
+        function formatParameterName(key) {
+            const nameMap = {
+                'risk_multiplier': 'リスク乗数',
+                'leverage_cap': '最大レバレッジ',
+                'min_risk_reward': '最小RR比',
+                'confidence_boost': '信頼度調整',
+                'stop_loss_percent': 'ストップロス',
+                'take_profit_percent': 'テイクプロフィット',
+                'custom_sltp_calculator': 'SL/TP計算機'
+            };
+            return nameMap[key] || key;
+        }
+
+        // 新規戦略作成モーダル表示
+        function showCreateStrategyModal() {
+            document.getElementById('strategyModalTitle').textContent = '新規戦略作成';
+            document.getElementById('strategyForm').reset();
+            document.getElementById('strategyId').value = '';
+            
+            const modal = new bootstrap.Modal(document.getElementById('strategyModal'));
+            modal.show();
+        }
+
+        // 戦略編集
+        async function editStrategy(strategyId) {
+            try {
+                const response = await axios.get(`/api/strategy-configs/${strategyId}`);
+                if (response.data.success) {
+                    const strategy = response.data.data;
+                    
+                    document.getElementById('strategyModalTitle').textContent = '戦略編集';
+                    document.getElementById('strategyId').value = strategy.id;
+                    document.getElementById('strategyName').value = strategy.name;
+                    document.getElementById('baseStrategy').value = strategy.base_strategy;
+                    document.getElementById('timeframe').value = strategy.timeframe;
+                    document.getElementById('description').value = strategy.description || '';
+                    
+                    // パラメータ設定
+                    const params = strategy.parameters;
+                    document.getElementById('riskMultiplier').value = params.risk_multiplier || 1.0;
+                    document.getElementById('leverageCap').value = params.leverage_cap || 50;
+                    document.getElementById('minRiskReward').value = params.min_risk_reward || 1.2;
+                    document.getElementById('confidenceBoost').value = params.confidence_boost || 0;
+                    document.getElementById('stopLossPercent').value = params.stop_loss_percent || '';
+                    document.getElementById('takeProfitPercent').value = params.take_profit_percent || '';
+                    
+                    // 編集モードではベース戦略と時間足を変更不可に
+                    document.getElementById('baseStrategy').disabled = true;
+                    document.getElementById('timeframe').disabled = true;
+                    
+                    const modal = new bootstrap.Modal(document.getElementById('strategyModal'));
+                    modal.show();
+                }
+            } catch (error) {
+                console.error('戦略読み込みエラー:', error);
+                showAlert('戦略の読み込みに失敗しました', 'danger');
+            }
+        }
+
+        // 戦略保存
+        async function saveStrategy() {
+            const strategyId = document.getElementById('strategyId').value;
+            const isEdit = !!strategyId;
+            
+            const parameters = {
+                risk_multiplier: parseFloat(document.getElementById('riskMultiplier').value),
+                leverage_cap: parseInt(document.getElementById('leverageCap').value),
+                min_risk_reward: parseFloat(document.getElementById('minRiskReward').value)
+            };
+            
+            // オプションパラメータ
+            const confidenceBoost = parseFloat(document.getElementById('confidenceBoost').value);
+            if (confidenceBoost !== 0) parameters.confidence_boost = confidenceBoost;
+            
+            const stopLoss = document.getElementById('stopLossPercent').value;
+            if (stopLoss) parameters.stop_loss_percent = parseFloat(stopLoss);
+            
+            const takeProfit = document.getElementById('takeProfitPercent').value;
+            if (takeProfit) parameters.take_profit_percent = parseFloat(takeProfit);
+            
+            const data = {
+                name: document.getElementById('strategyName').value,
+                parameters: parameters,
+                description: document.getElementById('description').value
+            };
+            
+            if (!isEdit) {
+                data.base_strategy = document.getElementById('baseStrategy').value;
+                data.timeframe = document.getElementById('timeframe').value;
+                data.created_by = 'web_user';
+            }
+            
+            try {
+                let response;
+                if (isEdit) {
+                    response = await axios.put(`/api/strategy-configs/${strategyId}`, data);
+                } else {
+                    response = await axios.post('/api/strategy-configs', data);
+                }
+                
+                if (response.data.success) {
+                    showAlert(response.data.message, 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('strategyModal')).hide();
+                    
+                    // ベース戦略と時間足を有効化
+                    document.getElementById('baseStrategy').disabled = false;
+                    document.getElementById('timeframe').disabled = false;
+                    
+                    loadStrategies();
+                    loadStatistics();
+                }
+            } catch (error) {
+                console.error('保存エラー:', error);
+                const errorMsg = error.response?.data?.error || '戦略の保存に失敗しました';
+                showAlert(errorMsg, 'danger');
+            }
+        }
+
+        // 戦略複製
+        async function duplicateStrategy(strategyId) {
+            const strategy = allStrategies.find(s => s.id === strategyId);
+            if (!strategy) return;
+            
+            const newName = prompt(`新しい戦略名を入力してください\n(元: ${strategy.name})`, `${strategy.name}_Copy`);
+            if (!newName) return;
+            
+            try {
+                const response = await axios.post(`/api/strategy-configs/${strategyId}/duplicate`, {
+                    name: newName,
+                    created_by: 'web_user'
+                });
+                
+                if (response.data.success) {
+                    showAlert(response.data.message, 'success');
+                    loadStrategies();
+                    loadStatistics();
+                }
+            } catch (error) {
+                console.error('複製エラー:', error);
+                showAlert('戦略の複製に失敗しました', 'danger');
+            }
+        }
+
+        // 戦略のアクティブ/非アクティブ切り替え
+        async function toggleStrategyStatus(strategyId, activate) {
+            try {
+                const response = await axios.put(`/api/strategy-configs/${strategyId}`, {
+                    is_active: activate
+                });
+                
+                if (response.data.success) {
+                    showAlert(`戦略を${activate ? 'アクティブ化' : '非アクティブ化'}しました`, 'success');
+                    loadStrategies();
+                    loadStatistics();
+                }
+            } catch (error) {
+                console.error('ステータス変更エラー:', error);
+                showAlert('ステータスの変更に失敗しました', 'danger');
+            }
+        }
+
+        // 戦略削除
+        async function deleteStrategy(strategyId) {
+            const strategy = allStrategies.find(s => s.id === strategyId);
+            if (!strategy) return;
+            
+            if (!confirm(`戦略「${strategy.name}」を削除しますか？\nこの操作は取り消せません。`)) {
+                return;
+            }
+            
+            try {
+                const response = await axios.delete(`/api/strategy-configs/${strategyId}`);
+                
+                if (response.data.success) {
+                    showAlert(response.data.message, 'success');
+                    loadStrategies();
+                    loadStatistics();
+                }
+            } catch (error) {
+                console.error('削除エラー:', error);
+                const errorMsg = error.response?.data?.error || '戦略の削除に失敗しました';
+                showAlert(errorMsg, 'danger');
+            }
+        }
+
+        // アラート表示
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+            alertDiv.style.zIndex = '9999';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

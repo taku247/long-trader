@@ -66,6 +66,16 @@
 - **base_test.py**: 統一テスト基底クラス（本番DB保護）
 - **run_unified_tests.py**: 統一テストランナー
 
+### テストコード品質管理 (重要)
+**⚠️ テストコード調整時は必ず以下を実行すること:**
+```bash
+./scripts/test-isolation-check.sh
+```
+- **目的**: 本番DB使用テストの検出・防止
+- **チェック内容**: BaseTest使用確認、テストデータ汚染チェック、隔離テスト実行
+- **修正ガイド**: 問題検出時は `test_isolation_guide.md` を参照
+- **テンプレート**: `test_basetest_template.py` を使用してBaseTest移行
+
 ### 実装完了時の記録要件
 実装完了後、要件定義ディレクトリ `_docs/` に実装ログを残すこと。
 - ファイル形式: `yyyy-mm-dd_機能名.md`

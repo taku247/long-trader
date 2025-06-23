@@ -31,13 +31,16 @@ class AutoSymbolTrainer:
         self.execution_db = ExecutionLogDatabase()
         # 実行ログの一時保存は廃止（データベースを使用）
         
-    async def add_symbol_with_training(self, symbol: str, execution_id: str = None) -> str:
+    async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None) -> str:
         """
-        銘柄を追加して全時間足・全戦略で自動学習・バックテストを実行
+        銘柄を追加して指定戦略・時間足で自動学習・バックテストを実行
         
         Args:
             symbol: 銘柄名 (例: "HYPE")
             execution_id: 事前定義された実行ID（Noneの場合は自動生成）
+            selected_strategies: 選択された戦略リスト（Noneの場合はデフォルト）
+            selected_timeframes: 選択された時間足リスト（Noneの場合はデフォルト）
+            strategy_configs: カスタム戦略設定リスト（strategy_configurationsテーブルのレコード）
             
         Returns:
             execution_id: 実行ID（進捗追跡用）
@@ -75,7 +78,12 @@ class AutoSymbolTrainer:
                         ExecutionType.SYMBOL_ADDITION,
                         symbol=symbol,
                         triggered_by="USER",
-                        metadata={"auto_training": True, "all_strategies": True, "all_timeframes": True}
+                        metadata={
+                            "auto_training": True, 
+                            "selected_strategies": selected_strategies or "all",
+                            "selected_timeframes": selected_timeframes or "all",
+                            "custom_strategy_configs": len(strategy_configs) if strategy_configs else 0
+                        }
                     )
                     self.logger.info(f"📝 Created new execution record: {execution_id}")
                 else:
@@ -99,9 +107,9 @@ class AutoSymbolTrainer:
             await self._execute_step(execution_id, 'data_fetch', 
                                    self._fetch_and_validate_data, symbol)
             
-            # Step 2: 全戦略・全時間足でバックテスト実行
+            # Step 2: 選択された戦略・時間足でバックテスト実行
             await self._execute_step(execution_id, 'backtest', 
-                                   self._run_comprehensive_backtest, symbol)
+                                   self._run_comprehensive_backtest, symbol, selected_strategies, selected_timeframes, strategy_configs)
             
             # Step 3: ML学習実行
             await self._execute_step(execution_id, 'ml_training', 
@@ -389,24 +397,39 @@ class AutoSymbolTrainer:
             
             raise
     
-    async def _run_comprehensive_backtest(self, symbol: str) -> Dict:
-        """全戦略・全時間足でバックテスト実行"""
+    async def _run_comprehensive_backtest(self, symbol: str, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None) -> Dict:
+        """全戦略・全時間足でバックテスト実行（選択的実行対応）"""
         
         try:
             self.logger.info(f"Running comprehensive backtest for {symbol}")
             
-            # 設定生成
-            timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
-            strategies = ['Conservative_ML', 'Aggressive_Traditional', 'Full_ML']
-            
-            configs = []
-            for timeframe in timeframes:
-                for strategy in strategies:
+            # カスタム戦略設定がある場合はそれを使用
+            if strategy_configs:
+                configs = []
+                for config in strategy_configs:
                     configs.append({
                         'symbol': symbol,
-                        'timeframe': timeframe,
-                        'strategy': strategy
+                        'timeframe': config['timeframe'],
+                        'strategy': config['base_strategy'],
+                        'strategy_config_id': config.get('id'),
+                        'strategy_name': config.get('name'),
+                        'custom_parameters': config.get('parameters', {})
                     })
+                self.logger.info(f"Using {len(configs)} custom strategy configurations")
+            else:
+                # デフォルト設定生成
+                timeframes = selected_timeframes or ['1m', '3m', '5m', '15m', '30m', '1h']
+                strategies = selected_strategies or ['Conservative_ML', 'Aggressive_Traditional', 'Full_ML']
+                
+                configs = []
+                for timeframe in timeframes:
+                    for strategy in strategies:
+                        configs.append({
+                            'symbol': symbol,
+                            'timeframe': timeframe,
+                            'strategy': strategy
+                        })
+                self.logger.info(f"Using default strategy combinations: {len(strategies)} strategies × {len(timeframes)} timeframes = {len(configs)} configs")
             
             self.logger.info(f"Generated {len(configs)} backtest configurations")
             

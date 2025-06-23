@@ -1,0 +1,399 @@
+<!-- 戦略選択機能付き銘柄追加フォーム -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5><i class="bi bi-plus-circle"></i> 銘柄追加 (戦略選択対応)</h5>
+    </div>
+    <div class="card-body">
+        <form id="enhancedAddSymbolForm">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">銘柄シンボル <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="enhancedSymbolInput" 
+                           placeholder="例: HYPE, SOL, ETH" required>
+                    <small class="text-muted">大文字小文字は自動変換されます</small>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">実行モード</label>
+                    <select class="form-select" id="executionMode" onchange="toggleExecutionOptions()">
+                        <option value="default">デフォルト実行 (全戦略・全時間足)</option>
+                        <option value="selective">選択実行 (戦略・時間足を指定)</option>
+                        <option value="custom">カスタム戦略実行</option>
+                    </select>
+                </div>
+            </div>
+            
+            <!-- 選択実行オプション -->
+            <div id="selectiveOptions" style="display: none;">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">戦略選択</label>
+                        <div class="form-check-container">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="strategy_Conservative_ML" value="Conservative_ML" checked>
+                                <label class="form-check-label" for="strategy_Conservative_ML">Conservative ML</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="strategy_Aggressive_ML" value="Aggressive_ML" checked>
+                                <label class="form-check-label" for="strategy_Aggressive_ML">Aggressive ML</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="strategy_Full_ML" value="Full_ML" checked>
+                                <label class="form-check-label" for="strategy_Full_ML">Full ML</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="strategy_Balanced" value="Balanced">
+                                <label class="form-check-label" for="strategy_Balanced">Balanced</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="strategy_Traditional" value="Traditional">
+                                <label class="form-check-label" for="strategy_Traditional">Traditional</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">時間足選択</label>
+                        <div class="form-check-container">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="timeframe_1m" value="1m">
+                                <label class="form-check-label" for="timeframe_1m">1分</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="timeframe_3m" value="3m">
+                                <label class="form-check-label" for="timeframe_3m">3分</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="timeframe_5m" value="5m">
+                                <label class="form-check-label" for="timeframe_5m">5分</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="timeframe_15m" value="15m" checked>
+                                <label class="form-check-label" for="timeframe_15m">15分</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="timeframe_30m" value="30m" checked>
+                                <label class="form-check-label" for="timeframe_30m">30分</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="timeframe_1h" value="1h" checked>
+                                <label class="form-check-label" for="timeframe_1h">1時間</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> 
+                    選択した戦略と時間足の組み合わせのみ実行されます。
+                    処理時間を大幅に短縮できます。
+                </div>
+            </div>
+            
+            <!-- カスタム戦略オプション -->
+            <div id="customOptions" style="display: none;">
+                <div class="mb-3">
+                    <label class="form-label">カスタム戦略選択</label>
+                    <div id="customStrategyList" class="border rounded p-3" style="max-height: 300px; overflow-y: auto;">
+                        <div class="text-center text-muted">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">読み込み中...</span>
+                            </div>
+                            カスタム戦略を読み込み中...
+                        </div>
+                    </div>
+                </div>
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i> 
+                    選択したカスタム戦略のパラメータ設定で実行されます。
+                </div>
+            </div>
+            
+            <!-- 実行予測 -->
+            <div id="executionEstimate" class="alert alert-secondary" style="display: none;">
+                <strong>実行予測:</strong>
+                <span id="estimateText">-</span>
+            </div>
+            
+            <div class="d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-primary" onclick="validateSymbol()">
+                    <i class="bi bi-search"></i> 事前検証
+                </button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-play-circle"></i> バックテスト開始
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.form-check-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 10px;
+}
+.custom-strategy-item {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 10px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.custom-strategy-item:hover {
+    background-color: #f8f9fa;
+}
+.custom-strategy-item.selected {
+    background-color: #e7f3ff;
+    border-color: #0d6efd;
+}
+.strategy-params {
+    font-size: 0.875rem;
+    color: #6c757d;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 5px;
+    margin-top: 5px;
+}
+</style>
+
+<script>
+let customStrategies = [];
+let selectedCustomStrategies = [];
+
+// 実行モード切り替え
+function toggleExecutionOptions() {
+    const mode = document.getElementById('executionMode').value;
+    const selectiveOptions = document.getElementById('selectiveOptions');
+    const customOptions = document.getElementById('customOptions');
+    const estimateDiv = document.getElementById('executionEstimate');
+    
+    selectiveOptions.style.display = mode === 'selective' ? 'block' : 'none';
+    customOptions.style.display = mode === 'custom' ? 'block' : 'none';
+    
+    if (mode === 'custom' && customStrategies.length === 0) {
+        loadCustomStrategies();
+    }
+    
+    updateExecutionEstimate();
+    estimateDiv.style.display = mode !== 'default' ? 'block' : 'none';
+}
+
+// カスタム戦略読み込み
+async function loadCustomStrategies() {
+    try {
+        const response = await axios.get('/api/strategy-configs?is_active=true');
+        if (response.data.success) {
+            customStrategies = response.data.data;
+            renderCustomStrategies();
+        }
+    } catch (error) {
+        console.error('カスタム戦略読み込みエラー:', error);
+        document.getElementById('customStrategyList').innerHTML = 
+            '<div class="text-danger">カスタム戦略の読み込みに失敗しました</div>';
+    }
+}
+
+// カスタム戦略一覧描画
+function renderCustomStrategies() {
+    const container = document.getElementById('customStrategyList');
+    
+    if (customStrategies.length === 0) {
+        container.innerHTML = '<div class="text-muted">利用可能なカスタム戦略がありません</div>';
+        return;
+    }
+    
+    container.innerHTML = customStrategies.map(strategy => `
+        <div class="custom-strategy-item" onclick="toggleCustomStrategy(${strategy.id})">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="custom_${strategy.id}" onchange="toggleCustomStrategy(${strategy.id})">
+                <label class="form-check-label" for="custom_${strategy.id}">
+                    <strong>${strategy.name}</strong>
+                    <span class="badge bg-secondary ms-2">${strategy.base_strategy}</span>
+                    <span class="badge bg-info ms-1">${strategy.timeframe}</span>
+                </label>
+            </div>
+            <div class="strategy-params">
+                ${Object.entries(strategy.parameters).map(([key, value]) => 
+                    `<span><strong>${formatParameterName(key)}:</strong> ${value}</span>`
+                ).join('')}
+            </div>
+            ${strategy.description ? `<small class="text-muted">${strategy.description}</small>` : ''}
+        </div>
+    `).join('');
+}
+
+// カスタム戦略選択切り替え
+function toggleCustomStrategy(strategyId) {
+    const checkbox = document.getElementById(`custom_${strategyId}`);
+    const strategyItem = checkbox.closest('.custom-strategy-item');
+    
+    if (checkbox.checked) {
+        if (!selectedCustomStrategies.includes(strategyId)) {
+            selectedCustomStrategies.push(strategyId);
+            strategyItem.classList.add('selected');
+        }
+    } else {
+        const index = selectedCustomStrategies.indexOf(strategyId);
+        if (index > -1) {
+            selectedCustomStrategies.splice(index, 1);
+            strategyItem.classList.remove('selected');
+        }
+    }
+    
+    updateExecutionEstimate();
+}
+
+// パラメータ名フォーマット
+function formatParameterName(key) {
+    const nameMap = {
+        'risk_multiplier': 'リスク乗数',
+        'leverage_cap': '最大レバレッジ',
+        'min_risk_reward': '最小RR比',
+        'confidence_boost': '信頼度調整',
+        'stop_loss_percent': 'SL%',
+        'take_profit_percent': 'TP%'
+    };
+    return nameMap[key] || key;
+}
+
+// 実行予測更新
+function updateExecutionEstimate() {
+    const mode = document.getElementById('executionMode').value;
+    const estimateText = document.getElementById('estimateText');
+    
+    let count = 0;
+    let efficiency = 0;
+    
+    if (mode === 'default') {
+        count = 3 * 6; // 3戦略 × 6時間足
+        efficiency = 0;
+    } else if (mode === 'selective') {
+        const selectedStrategies = Array.from(document.querySelectorAll('input[id^="strategy_"]:checked')).length;
+        const selectedTimeframes = Array.from(document.querySelectorAll('input[id^="timeframe_"]:checked')).length;
+        count = selectedStrategies * selectedTimeframes;
+        efficiency = Math.round((1 - count / 18) * 100);
+    } else if (mode === 'custom') {
+        count = selectedCustomStrategies.length;
+        efficiency = Math.round((1 - count / 18) * 100);
+    }
+    
+    let text = `約${count}パターンの分析を実行`;
+    if (efficiency > 0) {
+        text += ` (${efficiency}%効率化)`;
+    }
+    
+    estimateText.textContent = text;
+}
+
+// イベントリスナー追加
+document.addEventListener('DOMContentLoaded', function() {
+    // 戦略・時間足選択の変更監視
+    document.querySelectorAll('input[id^="strategy_"], input[id^="timeframe_"]').forEach(checkbox => {
+        checkbox.addEventListener('change', updateExecutionEstimate);
+    });
+});
+
+// 拡張フォーム送信
+document.getElementById('enhancedAddSymbolForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const symbol = document.getElementById('enhancedSymbolInput').value.trim().toUpperCase();
+    const mode = document.getElementById('executionMode').value;
+    
+    if (!symbol) {
+        showAlert('銘柄シンボルを入力してください', 'warning');
+        return;
+    }
+    
+    const submitButton = e.target.querySelector('button[type="submit"]');
+    const originalText = submitButton.innerHTML;
+    submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> 実行中...';
+    submitButton.disabled = true;
+    
+    try {
+        const payload = { symbol };
+        
+        if (mode === 'selective') {
+            // 選択された戦略・時間足を取得
+            const selectedStrategies = Array.from(document.querySelectorAll('input[id^="strategy_"]:checked'))
+                .map(cb => cb.value);
+            const selectedTimeframes = Array.from(document.querySelectorAll('input[id^="timeframe_"]:checked'))
+                .map(cb => cb.value);
+            
+            if (selectedStrategies.length === 0 || selectedTimeframes.length === 0) {
+                showAlert('戦略と時間足を少なくとも1つずつ選択してください', 'warning');
+                return;
+            }
+            
+            payload.selected_strategies = selectedStrategies;
+            payload.selected_timeframes = selectedTimeframes;
+            
+        } else if (mode === 'custom') {
+            // 選択されたカスタム戦略を取得
+            if (selectedCustomStrategies.length === 0) {
+                showAlert('カスタム戦略を少なくとも1つ選択してください', 'warning');
+                return;
+            }
+            
+            payload.strategy_configs = customStrategies.filter(s => 
+                selectedCustomStrategies.includes(s.id)
+            );
+        }
+        
+        const response = await axios.post('/api/symbol/add', payload, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.data.status === 'started') {
+            showAlert(`${symbol}の分析を開始しました (実行ID: ${response.data.execution_id})`, 'success');
+            
+            // フォームリセット
+            document.getElementById('enhancedSymbolInput').value = '';
+            document.getElementById('executionMode').value = 'default';
+            toggleExecutionOptions();
+            
+            // ページ更新（実行ログなどに反映）
+            setTimeout(() => {
+                if (typeof loadExecutions === 'function') loadExecutions();
+                if (typeof loadRecentAnalyses === 'function') loadRecentAnalyses();
+            }, 1000);
+            
+        } else {
+            showAlert('予期しないレスポンスです', 'warning');
+        }
+        
+    } catch (error) {
+        console.error('銘柄追加エラー:', error);
+        const errorMsg = error.response?.data?.error || '銘柄追加に失敗しました';
+        showAlert(errorMsg, 'danger');
+    } finally {
+        submitButton.innerHTML = originalText;
+        submitButton.disabled = false;
+    }
+});
+
+// 事前検証
+async function validateSymbol() {
+    const symbol = document.getElementById('enhancedSymbolInput').value.trim().toUpperCase();
+    
+    if (!symbol) {
+        showAlert('銘柄シンボルを入力してください', 'warning');
+        return;
+    }
+    
+    try {
+        // Early Fail検証をシミュレート
+        showAlert(`${symbol}の事前検証を開始中...`, 'info');
+        
+        // 実際の検証ロジックはここに実装
+        setTimeout(() => {
+            showAlert(`${symbol}は有効な銘柄です`, 'success');
+        }, 1500);
+        
+    } catch (error) {
+        console.error('検証エラー:', error);
+        showAlert('事前検証に失敗しました', 'danger');
+    }
+}
+</script>

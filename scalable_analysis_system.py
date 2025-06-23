@@ -76,7 +76,7 @@ class ScalableAnalysisSystem:
                     max_drawdown REAL,
                     avg_leverage REAL,
                     chart_path TEXT,
-                    data_compressed_path TEXT,
+                    compressed_path TEXT,
                     status TEXT DEFAULT 'pending'
                 )
             ''')
@@ -1026,7 +1026,7 @@ class ScalableAnalysisSystem:
             cursor.execute('''
                 INSERT INTO analyses 
                 (symbol, timeframe, config, total_trades, win_rate, total_return, 
-                 sharpe_ratio, max_drawdown, avg_leverage, chart_path, data_compressed_path, status, execution_id)
+                 sharpe_ratio, max_drawdown, avg_leverage, chart_path, compressed_path, status, execution_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)
             ''', (
                 symbol, timeframe, config,
@@ -1075,7 +1075,16 @@ class ScalableAnalysisSystem:
             query += f" ORDER BY {order_by} DESC LIMIT ?"
             params.append(limit)
             
-            return pd.read_sql_query(query, conn, params=params)
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            columns = [description[0] for description in cursor.description]
+            rows = cursor.fetchall()
+            
+            # Create a list of dictionaries instead of pandas DataFrame
+            result = []
+            for row in rows:
+                result.append(dict(zip(columns, row)))
+            return result
     
     def get_statistics(self):
         """システム統計を取得"""
@@ -1119,7 +1128,7 @@ class ScalableAnalysisSystem:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT data_compressed_path FROM analyses WHERE symbol=? AND timeframe=? AND config=?",
+                "SELECT compressed_path FROM analyses WHERE symbol=? AND timeframe=? AND config=?",
                 (symbol, timeframe, config)
             )
             result = cursor.fetchone()
@@ -1201,7 +1210,7 @@ class ScalableAnalysisSystem:
             
             # 削除対象を取得
             cursor.execute(
-                "SELECT chart_path, data_compressed_path FROM analyses WHERE sharpe_ratio < ?",
+                "SELECT chart_path, compressed_path FROM analyses WHERE sharpe_ratio < ?",
                 (min_sharpe,)
             )
             to_delete = cursor.fetchall()

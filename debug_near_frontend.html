@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NEAR Debug</title>
+</head>
+<body>
+    <h1>NEARフロントエンドデバッグ</h1>
+    <button onclick="checkNear()">NEARの状態をチェック</button>
+    <pre id="result"></pre>
+
+    <script>
+    async function checkNear() {
+        const resultEl = document.getElementById('result');
+        
+        try {
+            // APIから最新データを取得
+            const response = await fetch('/api/symbols/status');
+            const data = await response.json();
+            
+            // 全カテゴリをチェック
+            const allSymbols = [
+                ...data.running,
+                ...data.completed,
+                ...data.pending,
+                ...data.failed
+            ];
+            
+            // NEARを検索
+            const nearSymbols = allSymbols.filter(s => s.symbol === 'NEAR');
+            
+            resultEl.textContent = `APIレスポンス:
+全銘柄数: ${allSymbols.length}
+NEAR検出数: ${nearSymbols.length}
+
+`;
+            
+            if (nearSymbols.length > 0) {
+                resultEl.textContent += 'NEARの詳細:\n';
+                nearSymbols.forEach((s, i) => {
+                    resultEl.textContent += `\n[${i+1}]\n`;
+                    resultEl.textContent += JSON.stringify(s, null, 2);
+                });
+            } else {
+                resultEl.textContent += '✅ NEARは見つかりませんでした（追加可能）';
+            }
+            
+            // LocalStorageもチェック
+            resultEl.textContent += '\n\n=== LocalStorage ===\n';
+            for (let key in localStorage) {
+                if (key.toLowerCase().includes('near') || key.toLowerCase().includes('symbol')) {
+                    resultEl.textContent += `${key}: ${localStorage[key]}\n`;
+                }
+            }
+            
+        } catch (error) {
+            resultEl.textContent = 'エラー: ' + error.message;
+        }
+    }
+    </script>
+</body>
+</html>

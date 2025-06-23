@@ -16,10 +16,16 @@ from flask import Flask, render_template, jsonify, request
 import logging
 
 # Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+parent_dir = str(Path(__file__).parent.parent.absolute())
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 from real_time_system.monitor import RealTimeMonitor
 from real_time_system.utils.colored_log import get_colored_logger
+from scalable_analysis_system import ScalableAnalysisSystem
+
+# Configure correct database path for ScalableAnalysisSystem
+CORRECT_ANALYSIS_DB_DIR = str(Path(__file__).parent.parent / "large_scale_analysis")
 
 
 class WebDashboard:
@@ -1064,8 +1070,7 @@ class WebDashboard:
         def api_strategy_results_symbols():
             """Get symbols that have completed analysis."""
             try:
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Get filter mode from query parameter (default: completed_only)
                 filter_mode = request.args.get('filter', 'completed_only')
@@ -1117,7 +1122,7 @@ class WebDashboard:
                 from execution_log_database import ExecutionLogDatabase
                 from datetime import datetime
                 
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 exec_db = ExecutionLogDatabase()
                 
                 # 指定銘柄の分析結果を取得
@@ -1194,7 +1199,7 @@ class WebDashboard:
                 from scalable_analysis_system import ScalableAnalysisSystem
                 from execution_log_database import ExecutionLogDatabase
                 from datetime import datetime, timedelta
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 exec_db = ExecutionLogDatabase()
                 
                 # Get all symbols with their progress (18 = 3 strategies × 6 timeframes)
@@ -1267,19 +1272,18 @@ class WebDashboard:
         def api_strategy_results_detail(symbol):
             """Get detailed strategy results for a symbol."""
             try:
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Query all analyses for the symbol
                 filters = {'symbol': symbol}
                 results_df = system.query_analyses(filters=filters, limit=50)
                 
-                if results_df.empty:
+                if not results_df:
                     return jsonify({'results': []})
                 
                 # Convert to list of dictionaries
                 results = []
-                for _, row in results_df.iterrows():
+                for row in results_df:
                     results.append({
                         'symbol': row['symbol'],
                         'timeframe': row['timeframe'],
@@ -1307,8 +1311,7 @@ class WebDashboard:
         def api_strategy_trade_details(symbol, timeframe, config):
             """Get detailed trade data for specific strategy."""
             try:
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Load compressed trade data
                 trades_df = system.load_compressed_trades(symbol, timeframe, config)
@@ -1385,17 +1388,17 @@ class WebDashboard:
                 from scalable_analysis_system import ScalableAnalysisSystem
                 import numpy as np
                 
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Get all analysis results for the symbol
                 results_df = system.query_analyses(filters={'symbol': symbol})
                 
-                if results_df.empty:
+                if not results_df:
                     return jsonify({'error': f'No data found for symbol {symbol}'}), 404
                 
                 # Collect all trades from all timeframes and configs
                 all_trades = []
-                for _, row in results_df.iterrows():
+                for row in results_df:
                     trades_df = system.load_compressed_trades(row['symbol'], row['timeframe'], row['config'])
                     if trades_df is not None and not (hasattr(trades_df, 'empty') and trades_df.empty):
                         if hasattr(trades_df, 'to_dict'):
@@ -1595,13 +1598,13 @@ class WebDashboard:
                 import io
                 from flask import make_response
                 
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 
                 # Get results
                 filters = {'symbol': symbol}
                 results_df = system.query_analyses(filters=filters, limit=50)
                 
-                if results_df.empty:
+                if not results_df:
                     return jsonify({'error': 'No data to export'}), 404
                 
                 # Create CSV
@@ -1844,8 +1847,7 @@ class WebDashboard:
                     return jsonify({'error': 'Symbol is required'}), 400
                 
                 # Get incomplete patterns for this symbol
-                from scalable_analysis_system import ScalableAnalysisSystem
-                system = ScalableAnalysisSystem()
+                system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
                 completed_results = system.query_analyses(filters={'symbol': symbol})
                 
                 # Determine missing patterns
@@ -1853,7 +1855,7 @@ class WebDashboard:
                 all_timeframes = ['1m', '3m', '5m', '15m', '30m', '1h']
                 
                 completed_combinations = set()
-                for _, row in completed_results.iterrows():
+                for row in completed_results:
                     completed_combinations.add((row['config'], row['timeframe']))
                 
                 missing_configs = []
@@ -2696,7 +2698,7 @@ class WebDashboard:
         try:
             from scalable_analysis_system import ScalableAnalysisSystem
             
-            analysis_system = ScalableAnalysisSystem()
+            analysis_system = ScalableAnalysisSystem(CORRECT_ANALYSIS_DB_DIR)
             
             # Query best performing strategy
             results = analysis_system.query_analyses(
@@ -2705,8 +2707,8 @@ class WebDashboard:
                 limit=1
             )
             
-            if not results.empty:
-                best = results.iloc[0]
+            if results:
+                best = results[0]
                 return {
                     'sharpe_ratio': best.get('sharpe_ratio', 0),
                     'recommended_leverage': best.get('avg_leverage', 0),

@@ -9,8 +9,10 @@
 import asyncio
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -31,6 +33,7 @@ class FailReason(Enum):
     INSUFFICIENT_LIQUIDITY = "insufficient_liquidity"
     INSUFFICIENT_DATA_QUALITY = "insufficient_data_quality"
     INSUFFICIENT_RESOURCES = "insufficient_resources"
+    DATABASE_CONNECTION_FAILED = "database_connection_failed"
 
 
 @dataclass
@@ -138,18 +141,23 @@ class SymbolEarlyFailValidator:
             if not result.passed:
                 return result
             
-            # 6. 厳格データ品質（重め、30秒タイムアウト）
+            # 6. データベース接続性（軽量）
+            result = await self._check_database_connectivity(symbol)
+            if not result.passed:
+                return result
+            
+            # 7. 厳格データ品質（重め、30秒タイムアウト）
             result = await self._check_strict_data_quality(symbol)
             if not result.passed:
                 return result
             
-            # 7. 既存のOHLCV履歴データチェック（90日分）
+            # 8. 既存のOHLCV履歴データチェック（90日分）
             if self.config.get("enable_ohlcv_check", True):
                 result = await self._check_historical_data_availability(symbol)
                 if not result.passed:
                     return result
             
-            # 8. カスタム検証ルール実行
+            # 9. カスタム検証ルール実行
             for custom_validator in self.custom_validators:
                 try:
                     result = custom_validator(symbol)
@@ -541,6 +549,98 @@ class SymbolEarlyFailValidator:
                 metadata={"warning": f"リソースチェック失敗: {str(e)}"}
             )
     
+    async def _check_database_connectivity(self, symbol: str) -> EarlyFailResult:
+        """データベース接続性チェック"""
+        try:
+            # データベースファイルパスを設定
+            db_candidates = {
+                'execution_logs': [
+                    'execution_logs.db',
+                    '../execution_logs.db',
+                    Path(__file__).parent / 'execution_logs.db',
+                    Path(__file__).parent.parent / 'execution_logs.db'
+                ],
+                'analysis': [
+                    'large_scale_analysis/analysis.db',
+                    '../large_scale_analysis/analysis.db',
+                    Path(__file__).parent / 'large_scale_analysis' / 'analysis.db',
+                    Path(__file__).parent.parent / 'large_scale_analysis' / 'analysis.db'
+                ]
+            }
+            
+            # 各データベースの接続確認
+            db_status = {}
+            
+            for db_name, paths in db_candidates.items():
+                connected = False
+                db_path = None
+                record_count = 0
+                
+                for path in paths:
+                    try:
+                        path_str = str(path)
+                        if os.path.exists(path_str):
+                            # データベース接続テスト
+                            with sqlite3.connect(path_str) as conn:
+                                cursor = conn.cursor()
+                                
+                                if db_name == 'execution_logs':
+                                    cursor.execute("SELECT COUNT(*) FROM execution_logs")
+                                    record_count = cursor.fetchone()[0]
+                                elif db_name == 'analysis':
+                                    cursor.execute("SELECT COUNT(*) FROM analyses")
+                                    record_count = cursor.fetchone()[0]
+                                
+                                connected = True
+                                db_path = path_str
+                                break
+                    except Exception as e:
+                        # このパスでは接続失敗、次のパスを試行
+                        continue
+                
+                db_status[db_name] = {
+                    'connected': connected,
+                    'path': db_path,
+                    'record_count': record_count
+                }
+            
+            # 接続結果の評価
+            failed_databases = [db for db, status in db_status.items() if not status['connected']]
+            
+            if failed_databases:
+                error_message = f"データベース接続失敗: {', '.join(failed_databases)}"
+                suggestion = "データベースファイルの存在とアクセス権限を確認してください"
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.DATABASE_CONNECTION_FAILED,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={
+                        "failed_databases": failed_databases,
+                        "db_status": db_status
+                    }
+                )
+            
+            # すべてのデータベースに接続成功
+            return EarlyFailResult(
+                symbol=symbol, passed=True,
+                metadata={
+                    "db_status": db_status,
+                    "total_execution_logs": db_status['execution_logs']['record_count'],
+                    "total_analyses": db_status['analysis']['record_count']
+                }
+            )
+            
+        except Exception as e:
+            return EarlyFailResult(
+                symbol=symbol, passed=False,
+                fail_reason=FailReason.DATABASE_CONNECTION_FAILED,
+                error_message=f"データベース接続チェック中にエラー: {str(e)}",
+                suggestion="システム管理者に連絡してください",
+                metadata={"error_details": str(e)}
+            )
+    
     def _log_validation_success(self, symbol: str):
         """Early Fail検証成功時の目立つサーバーログ出力"""
         # ログ設定取得
@@ -564,16 +664,17 @@ class SymbolEarlyFailValidator:
                 f"🚀 EARLY FAIL VALIDATION SUCCESS - {symbol} 🚀",
                 border,
                 f"⏰ 検証完了時刻: {validation_time}",
-                f"🔍 検証項目: 8項目すべて合格",
+                f"🔍 検証項目: 9項目すべて合格",
                 f"📊 実行内容:",
                 f"   ✅ 1. シンボル存在チェック",
                 f"   ✅ 2. 取引所サポートチェック", 
                 f"   ✅ 3. API接続タイムアウト（10秒以内）",
                 f"   ✅ 4. 取引所アクティブ状態（取引可能）",
                 f"   ✅ 5. システムリソース（CPU/メモリ/ディスク正常）",
-                f"   ✅ 6. データ品質（95%以上完全性）",
-                f"   ✅ 7. 履歴データ可用性（90日分）",
-                f"   ✅ 8. カスタム検証ルール",
+                f"   ✅ 6. データベース接続性（execution_logs・analysis DB）",
+                f"   ✅ 7. データ品質（95%以上完全性）",
+                f"   ✅ 8. 履歴データ可用性（90日分）",
+                f"   ✅ 9. カスタム検証ルール",
                 "",
                 f"🎯 {symbol} は全ての品質基準を満たしており、分析処理の実行が承認されました",
                 f"🔥 マルチプロセス分析を安全に開始できます",
@@ -588,15 +689,15 @@ class SymbolEarlyFailValidator:
             success_messages = [
                 "",
                 f"🚀 EARLY FAIL SUCCESS - {symbol} 🚀",
-                f"⏰ {validation_time} | 🔍 8項目合格 | 🎯 分析承認済み",
-                f"✅ API接続・取引状態・リソース・データ品質 すべて正常",
+                f"⏰ {validation_time} | 🔍 9項目合格 | 🎯 分析承認済み",
+                f"✅ API接続・取引状態・リソース・DB接続・データ品質 すべて正常",
                 ""
             ]
         
         else:
             # ミニマルスタイル
             success_messages = [
-                f"🚀 {symbol}: Early Fail検証完了 - 8項目すべて合格 🎯"
+                f"🚀 {symbol}: Early Fail検証完了 - 9項目すべて合格 🎯"
             ]
         
         # ログレベル取得
@@ -627,7 +728,7 @@ class SymbolEarlyFailValidator:
             # システムログファイルにも記録
             import logging
             system_logger = logging.getLogger('system')
-            system_logger.info(f"EARLY_FAIL_SUCCESS: {symbol} passed all 8 validation checks at {validation_time}")
+            system_logger.info(f"EARLY_FAIL_SUCCESS: {symbol} passed all 9 validation checks at {validation_time}")
 
 
 # カスタム検証ルールの例

@@ -37,11 +37,15 @@ def api_symbol_add():
             async with HyperliquidValidator(strict_mode=False) as validator:  # 非厳格モード
                 return await validator.validate_symbol(symbol, ValidationContext.NEW_ADDITION)
         
-        # Run validation but don't fail on errors
+        # Run validation but don't fail on errors (with timeout)
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            validation_result = loop.run_until_complete(validate_symbol_async())
+            
+            # 10秒タイムアウトを設定
+            validation_result = loop.run_until_complete(
+                asyncio.wait_for(validate_symbol_async(), timeout=10.0)
+            )
             loop.close()
             
             if not validation_result.valid:
@@ -51,6 +55,10 @@ def api_symbol_add():
             else:
                 print(f"✅ Symbol {symbol} validated successfully")
                 
+        except asyncio.TimeoutError:
+            # タイムアウトエラー
+            print(f"⚠️ Symbol validation timeout for {symbol} (exceeded 10 seconds)")
+            validation_warnings.append("Validation timeout: exceeded 10 seconds")
         except Exception as validation_error:
             # バリデーションエラーでも処理を継続
             print(f"⚠️ Symbol validation error for {symbol}: {str(validation_error)}")

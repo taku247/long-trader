@@ -2,10 +2,75 @@
 
 ## 開発方針
 
+### データベース設計の必須確認 (2025-06-23)
+**⚠️ 重要**: データベース関連の実装・変更時は以下を必ず実行すること
+
+#### 📊 ER図確認・更新手順
+1. **実装前の確認**: データベース関連の実装・調整前に必ずER図を確認
+   - ファイル: `database_er_diagram.md`
+   - 現在のテーブル構造とリレーションシップを把握
+   - 変更予定箇所が他のテーブルに与える影響を事前確認
+
+2. **テーブル変更時の更新**: CREATE TABLE、ALTER TABLE等でスキーマ変更した場合は必ずER図を更新
+   - 新しい列の追加・削除
+   - 外部キー関係の変更
+   - インデックスの追加・削除
+   - 新テーブルの追加
+
+3. **ER図更新内容**:
+   - Mermaid図式の更新
+   - テーブル詳細説明の更新
+   - リレーションシップの追加・修正
+   - 追加インデックス情報の記載
+
+#### 🧪 データベーステスト必須実行
+- DB関連変更後は必ず関連テストを実行
+- `python run_unified_tests.py --categories db`
+
+### テスト駆動開発の必須化 (2025-06-23)
+**⚠️ 重要**: 新機能実装・既存機能変更時は以下の手順を必ず実行すること
+
+#### 🔄 実装時のテスト実行手順
+1. **関連テスト実行**: 実装対象機能の関連テストを先に実行
+   ```bash
+   # 例: API機能変更時
+   python run_unified_tests.py --categories api
+   
+   # 例: DB関連変更時  
+   python run_unified_tests.py --categories db
+   
+   # 例: 個別機能テスト
+   python tests_organized/api/test_symbols_api.py
+   ```
+
+2. **実装調整**: テスト結果を見ながら実装を調整・改善
+
+3. **段階的テスト**: 実装進行中も定期的に関連テストを実行
+
+4. **全テスト実行**: 実装完了後は必ず全テストを実行
+   ```bash
+   # 全テスト実行（本番DB保護確認付き）
+   python run_unified_tests.py
+   
+   # 高速モード（時間短縮時）
+   python run_unified_tests.py --quick
+   ```
+
+5. **テスト失敗対応**: 
+   - 失敗したテストがある場合は必ず修正
+   - 成功率100%になるまで実装を調整
+   - 新機能の場合は対応するテストも追加
+
+#### 🧪 テストファイル構成
+- **tests_organized/**: カテゴリ別整理済み（137個のテスト）
+- **base_test.py**: 統一テスト基底クラス（本番DB保護）
+- **run_unified_tests.py**: 統一テストランナー
+
 ### 実装完了時の記録要件
 実装完了後、要件定義ディレクトリ `_docs/` に実装ログを残すこと。
 - ファイル形式: `yyyy-mm-dd_機能名.md`
 - 起動時にも読み込んで過去の実装内容を把握すること
+- **テスト結果も含めて記録**すること
 
 ### 実装ログ読み込みシステム
 **ファイル**: `implementation_log_reader.py`
@@ -31,9 +96,32 @@
 - **auto_symbol_training.py**: 自動学習システム
 
 ## 既知の問題
-- DBファイル分離問題: execution_logs.dbが2箇所に存在
+- DBファイル分離問題: execution_logs.dbが2箇所に存在 → **解決済み (2025-06-23)**
 - 手動リセット機能とフロントエンド同期問題: 完全解決済み (2025-06-19)
+- データ範囲ミスマッチエラー: 時間優先設計の構造的欠陥 → **ドキュメント化済み (2025-06-23)**
 
 ## 取引所設定
 現在の設定: Gate.io (exchange_config.json)
 - Hyperliquid ⇄ Gate.io のワンクリック切り替え可能
+
+## テスト環境 (2025-06-23)
+### 統一テスト基盤
+- **137個**のテストファイルをカテゴリ別に整理
+- **本番DB保護**: 全テストが`tempfile`使用で安全実行
+- **統一基底クラス**: `BaseTest`, `DatabaseTest`, `APITest`
+- **統一ランナー**: `run_unified_tests.py` で本番DB保護確認付き実行
+
+### テスト実行コマンド
+```bash
+# 全テスト実行（推奨）
+python run_unified_tests.py
+
+# カテゴリ別実行
+python run_unified_tests.py --categories api db symbol_addition
+
+# 高速モード
+python run_unified_tests.py --quick
+
+# 個別テスト
+python tests_organized/api/test_symbols_api.py
+```

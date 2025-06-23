@@ -99,6 +99,7 @@ erDiagram
     %% Large Scale Analysis Database
     ANALYSES {
         integer id PK
+        text execution_id FK
         text symbol
         text timeframe
         text config
@@ -110,7 +111,7 @@ erDiagram
         real max_drawdown
         real avg_leverage
         text chart_path
-        text data_compressed_path
+        text compressed_path
         text status
     }
 
@@ -145,6 +146,7 @@ erDiagram
 
     %% Relationships
     EXECUTION_LOGS ||--o{ EXECUTION_STEPS : "has execution steps"
+    EXECUTION_LOGS ||--o{ ANALYSES : "tracks analysis execution"
     ALERTS ||--o{ PRICE_TRACKING : "tracks prices"
     ALERTS ||--o{ PERFORMANCE_SUMMARY : "evaluates performance"
     ANALYSES ||--o{ BACKTEST_SUMMARY : "has metrics"
@@ -225,10 +227,11 @@ erDiagram
 ##### `analyses`
 - **Purpose**: Store strategy backtest results
 - **Key Fields**:
+  - `execution_id` (FK): References execution_logs table
   - `symbol`, `timeframe`, `config`: Strategy parameters
   - `sharpe_ratio`, `win_rate`, `total_return`: Performance metrics
-  - `chart_path`, `data_compressed_path`: File references
-- **Indexes**: symbol_timeframe, config, sharpe_ratio
+  - `chart_path`, `compressed_path`: File references
+- **Indexes**: symbol_timeframe, config, sharpe_ratio, execution_id
 
 ##### `backtest_summary`
 - **Purpose**: Store additional metrics for each analysis
@@ -250,8 +253,9 @@ erDiagram
 ## Key Relationships
 
 1. **Execution Tracking**: `execution_logs` → `execution_steps` (1:N)
-2. **Alert Performance**: `alerts` → `price_tracking` (1:N) and `alerts` → `performance_summary` (1:1)
-3. **Analysis Details**: `analyses` → `backtest_summary` (1:N) and `analyses` → `leverage_calculation_details` (1:N)
+2. **Execution to Analysis**: `execution_logs` → `analyses` (1:N)
+3. **Alert Performance**: `alerts` → `price_tracking` (1:N) and `alerts` → `performance_summary` (1:1)
+4. **Analysis Details**: `analyses` → `backtest_summary` (1:N) and `analyses` → `leverage_calculation_details` (1:N)
 
 ## Data Flow
 
@@ -267,3 +271,27 @@ erDiagram
 ├── alert_history_system/data/alert_history.db  # Alert performance tracking
 └── large_scale_analysis/analysis.db            # Strategy analysis results
 ```
+
+---
+
+## Additional Database Indexes
+
+**Performance Optimization Indexes (not shown in ER diagram above):**
+
+### execution_logs.db
+- `idx_execution_logs_symbol` on execution_logs(symbol)
+- `idx_execution_logs_status` on execution_logs(status)
+- `idx_execution_logs_type` on execution_logs(execution_type)
+- `idx_execution_logs_timestamp` on execution_logs(timestamp_start)
+
+### analysis.db
+- `idx_analyses_execution_id` on analyses(execution_id)
+- `idx_analyses_symbol` on analyses(symbol)
+- `idx_analyses_generated_at` on analyses(generated_at)
+- `idx_analyses_config` on analyses(config)
+- `idx_analyses_sharpe_ratio` on analyses(sharpe_ratio)
+- `idx_leverage_analysis` on leverage_calculation_details(analysis_id)
+- `idx_leverage_trade` on leverage_calculation_details(analysis_id, trade_number)
+
+### alert_history.db
+- SQLAlchemy automatically manages indexes for primary keys and unique constraints

@@ -1,0 +1,27 @@
+# テスト環境用の依存関係
+# 基本的なテストフレームワーク
+unittest2
+
+# Web関連テスト
+flask>=3.0.0
+
+# データ分析・科学計算
+numpy>=1.22.0
+pandas>=1.5.0
+scipy>=1.9.0
+
+# 可視化・プロット
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# 外部API通信テスト（オプション）
+requests>=2.28.0
+aiohttp>=3.8.0
+
+# モック・テストユーティリティ
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# コード品質
+pylint>=2.15.0
+black>=22.0.0

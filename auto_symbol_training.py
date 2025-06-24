@@ -468,7 +468,14 @@ class AutoSymbolTrainer:
                     warning_msg = f"⚠️ {symbol}: 現在の市場状況では有効な支持線・抵抗線が検出されませんでした。シグナルなしとして記録します。"
                     self.logger.warning(warning_msg)
                     print(warning_msg)
-                    # 例外を投げず、処理を継続
+                    
+                    # 🔧 修正: シグナルなしの場合も"成功"として扱う
+                    # analysesテーブルにシグナルなしのレコードを作成
+                    for config in configs:
+                        self._create_no_signal_record(symbol, config, current_execution_id)
+                    
+                    # processed_countを設定数に変更（シグナルなしでも処理完了として扱う）
+                    processed_count = len(configs)
                     
             except Exception as e:
                 if "支持線" in str(e) or "抵抗線" in str(e) or "CriticalAnalysis" in str(e):
@@ -476,7 +483,12 @@ class AutoSymbolTrainer:
                     warning_msg = f"⚠️ {symbol}: 支持線・抵抗線検出エラー - {str(e)[:100]}。シグナルなしとして継続します。"
                     self.logger.warning(warning_msg)
                     print(warning_msg)
-                    processed_count = 0  # 処理済み数を0として継続
+                    
+                    # 🔧 修正: エラーの場合もシグナルなしレコードを作成
+                    for config in configs:
+                        self._create_no_signal_record(symbol, config, getattr(self, '_current_execution_id', None), str(e)[:100])
+                    
+                    processed_count = len(configs)  # エラーでも処理完了として扱う
                 else:
                     # その他のエラーは従来通り例外として処理
                     raise
@@ -520,11 +532,15 @@ class AutoSymbolTrainer:
             
             successful_tests = len(configs) - failed_tests
             
-            # 🔧 重要: 成功したテストが0件の場合は失敗として扱う
+            # 🔧 修正: シグナルなし（no_signal）の場合も成功として扱う
+            # processed_count > 0 なら分析が実行されたと判定
             if successful_tests == 0 and processed_count == 0:
                 error_msg = f"全戦略の分析が失敗しました。{failed_tests}件のテストが失敗。"
                 self.logger.error(f"❌ {symbol}: {error_msg}")
                 raise ValueError(error_msg)
+            elif processed_count > 0 and successful_tests == 0:
+                # 分析は実行されたが、通常の成功結果がない場合（シグナルなしの場合）
+                self.logger.info(f"📊 {symbol}: 分析完了（シグナルなし） - {processed_count}戦略実行, {failed_tests}件は結果取得失敗")
             
             self.logger.success(f"Backtest completed: {len(configs)} configurations tested")
             
@@ -641,6 +657,51 @@ class AutoSymbolTrainer:
             self.logger.error(f"Result saving failed for {symbol}: {e}")
             raise
     
+    def _create_no_signal_record(self, symbol: str, config: Dict, execution_id: str, error_message: str = None):
+        """シグナルなしの分析レコードを作成"""
+        try:
+            import sqlite3
+            from pathlib import Path
+            from datetime import datetime, timezone
+            
+            analysis_db_path = Path(__file__).parent / "large_scale_analysis" / "analysis.db"
+            
+            with sqlite3.connect(analysis_db_path) as conn:
+                # シグナルなしの分析結果を記録
+                conn.execute("""
+                    INSERT INTO analyses (
+                        symbol, timeframe, config, strategy_config_id, strategy_name,
+                        execution_id, task_status, task_created_at, task_completed_at,
+                        total_return, sharpe_ratio, max_drawdown, win_rate, total_trades,
+                        status, error_message, generated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    symbol,
+                    config['timeframe'],
+                    config['strategy'],
+                    config.get('strategy_config_id'),
+                    config.get('strategy_name', f"{config['strategy']}-{config['timeframe']}"),
+                    execution_id,
+                    'completed',  # シグナルなしでも完了扱い
+                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
+                    0.0,  # シグナルなしのため0リターン
+                    0.0,  # シグナルなしのため0シャープレシオ
+                    0.0,  # シグナルなしのため0ドローダウン
+                    0.0,  # シグナルなしのため0勝率
+                    0,    # シグナルなしのため0取引
+                    'no_signal',  # ステータス: シグナルなし
+                    error_message or 'No trading signals detected',
+                    datetime.now().isoformat()
+                ))
+                
+                conn.commit()
+                
+            self.logger.info(f"📝 シグナルなしレコード作成: {symbol} - {config['strategy']} ({config['timeframe']})")
+            
+        except Exception as e:
+            self.logger.error(f"シグナルなしレコード作成エラー: {e}")
+
     def get_execution_status(self, execution_id: str) -> Optional[Dict]:
         """実行状況の取得"""
         return self.execution_db.get_execution(execution_id)

@@ -591,9 +591,9 @@ class ScalableAnalysisSystem:
                    signals_generated < max_signals):
                 total_evaluations += 1
                 try:
-                    # 出力抑制で市場条件の評価
+                    # 出力抑制で市場条件の評価（バックテストフラグ付き）
                     with suppress_all_output():
-                        result = bot.analyze_symbol(symbol, timeframe, config)
+                        result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time)
                     
                     if not result or 'current_price' not in result:
                         current_time += evaluation_interval

@@ -100,7 +100,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             print(f"❌ プラグイン初期化エラー: {e}")
             print("🔄 基本的なフォールバックシステムを使用します")
     
-    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h") -> LeverageRecommendation:
+    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h", is_backtest: bool = False, target_timestamp: datetime = None) -> LeverageRecommendation:
         """
         ハイレバレッジ機会を総合分析
         
@@ -175,8 +175,12 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             
             # === STEP 5: 市場コンテキスト分析 ===
             print("\n📈 市場コンテキスト分析中...")
-            # リアルタイム分析として実行（現在価格を使用）
-            market_context = self._analyze_market_context(market_data, is_realtime=True)
+            # バックテスト時は各時点の価格、リアルタイム時は現在価格を使用
+            market_context = self._analyze_market_context(
+                market_data, 
+                is_realtime=not is_backtest,
+                target_timestamp=target_timestamp
+            )
             
             print(f"🎪 市場状況: {market_context.trend_direction} / {market_context.market_phase}")
             
@@ -429,7 +433,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
     
     # _generate_sample_data method removed - no fallback data allowed
     
-    def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML") -> Dict:
+    def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML", is_backtest: bool = False, target_timestamp: datetime = None) -> Dict:
         """
         シンボル分析（リアルタイム監視システム用）
         
@@ -442,7 +446,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             Dict: 分析結果辞書
         """
         
-        recommendation = self.analyze_leverage_opportunity(symbol, timeframe)
+        recommendation = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp)
         
         return {
             'symbol': symbol,

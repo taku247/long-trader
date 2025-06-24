@@ -183,8 +183,8 @@ class ImprovedScalableAnalysisSystem:
         while current_time <= end_time:
             total_evaluations += 1
             try:
-                # 市場条件の評価
-                result = bot.analyze_symbol(symbol, timeframe, config)
+                # 市場条件の評価（バックテストフラグ付き）
+                result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time)
                 if not result or 'current_price' not in result:
                     current_time += evaluation_interval
                     continue

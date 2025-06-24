@@ -2,6 +2,53 @@
 
 ## 開発方針
 
+### 🚨 is_realtime/is_backtest フラグ管理の必須確認 (2025-06-25)
+**⚠️ 重大**: リアルタイム処理とバックテスト処理が混在する問題の防止
+
+#### 🔄 フラグ使用時の必須チェック項目
+1. **価格取得時の確認**:
+   - `current_price = data['close'].iloc[-1]` → ❌ 常に最新価格
+   - `current_price = data.loc[target_idx, 'open']` → ✅ 各時点価格
+   
+2. **時刻コンテキストの確認**:
+   - `datetime.now()` → ❌ バックテストでも現在時刻
+   - `target_timestamp` → ✅ バックテスト時の対象時刻
+
+3. **メソッド呼び出し時のフラグ渡し**:
+   ```python
+   # ❌ フラグ未指定（デフォルトでis_realtime=True）
+   result = analyze_market_context(data)
+   
+   # ✅ 明示的なフラグ指定
+   result = analyze_market_context(data, is_realtime=False)
+   ```
+
+#### 🎯 特に注意すべきファイル
+- `engines/high_leverage_bot_orchestrator.py`: `_analyze_market_context`呼び出し
+- `engines/leverage_decision_engine.py`: リスクリワード比計算
+- `scalable_analysis_system.py`: バックテスト分析実行
+- `auto_symbol_training.py`: 自動学習でのバックテスト
+
+#### ⚠️ 作業中の一時的なフラグ変更について
+**絶対に忘れてはいけない復元作業**:
+1. **デバッグ目的**でis_realtime=Trueに一時変更した場合
+2. **テスト目的**でフラグを強制的に固定した場合  
+3. **検証目的**で条件分岐を無効化した場合
+
+**復元忘れチェック項目**:
+- [ ] コミット前に全ファイルでフラグ設定を確認
+- [ ] テスト実行時に意図しない動作がないか確認
+- [ ] 本番デプロイ前にリアルタイム/バックテスト動作の確認
+
+#### 🛡️ 防止策
+```bash
+# フラグ関連の変更をコミット前にチェック
+git diff | grep -E "(is_realtime|is_backtest)" 
+
+# 一時的な変更がないかファイル全体をチェック  
+grep -r "is_realtime.*True.*#.*TODO\|#.*TEMP\|#.*DEBUG" .
+```
+
 ### データベース設計の必須確認 (2025-06-23)
 **⚠️ 重要**: データベース関連の実装・変更時は以下を必ず実行すること
 

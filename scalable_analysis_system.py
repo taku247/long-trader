@@ -255,7 +255,9 @@ class ScalableAnalysisSystem:
         
         if progress_logger:
             progress_logger.log_phase_complete("バックテスト")
-            progress_logger.log_final_summary(total_processed > 0)
+            # 成功判定: 分析が実行された場合（シグナルなしでも成功）
+            analysis_attempted = len(batch_configs) > 0
+            progress_logger.log_final_summary(analysis_attempted)
         else:
             logger.info(f"バッチ分析完了: {total_processed}パターン処理完了")
         

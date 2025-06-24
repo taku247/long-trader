@@ -172,7 +172,7 @@ class NewSymbolAdditionSystem:
         with sqlite3.connect(self.analysis_db) as conn:
             placeholders = ','.join('?' for _ in strategy_ids)
             cursor = conn.execute(f"""
-                SELECT id, name, base_strategy, timeframe, parameters, description
+                SELECT id, name, base_strategy, timeframe, parameters, description, is_default, is_active
                 FROM strategy_configurations 
                 WHERE id IN ({placeholders}) AND is_active=1
             """, strategy_ids)
@@ -185,7 +185,9 @@ class NewSymbolAdditionSystem:
                     'base_strategy': row[2],
                     'timeframe': row[3],
                     'parameters': json.loads(row[4]),
-                    'description': row[5]
+                    'description': row[5],
+                    'is_default': bool(row[6]),
+                    'is_active': bool(row[7])
                 })
             
             return configs
@@ -408,7 +410,9 @@ class NewSymbolAdditionSystem:
                         base_strategy=config['base_strategy'],
                         timeframe=config['timeframe'],
                         parameters=config['parameters'],
-                        description=config['description']
+                        description=config['description'],
+                        is_default=config.get('is_default', False),
+                        is_active=config.get('is_active', True)
                     ))
                 pre_tasks = self.create_pre_tasks(symbol, execution_id, strategy_objects)
                 self.logger.info(f"🎯 Pre-task作成完了: {len(pre_tasks)}タスク")

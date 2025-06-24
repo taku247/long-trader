@@ -332,7 +332,7 @@ class TestStrategySelectionFixSimple(BaseTest):
         self.assertEqual(len(strategy_configs), 2, "選択した2つの戦略設定が含まれるべき")
         
         # 各strategy_configの必須フィールド確認
-        required_fields = ['id', 'name', 'base_strategy', 'timeframe', 'parameters', 'description']
+        required_fields = ['id', 'name', 'base_strategy', 'timeframe', 'parameters', 'description', 'is_default', 'is_active']
         for config in strategy_configs:
             for field in required_fields:
                 self.assertIn(field, config, f"strategy_configに{field}フィールドが含まれるべき")

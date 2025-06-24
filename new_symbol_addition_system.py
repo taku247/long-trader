@@ -420,13 +420,14 @@ class NewSymbolAdditionSystem:
                 # デフォルト・選択モードでは既存システムがpre-task作成を処理
                 self.logger.info("🎯 既存システムがpre-task作成を実行")
             
-            # 既存のauto_symbol_trainingを呼び出し
+            # 既存のauto_symbol_trainingを呼び出し（Pre-task作成はスキップ）
             result_execution_id = await self.auto_trainer.add_symbol_with_training(
                 symbol=symbol,
                 execution_id=execution_id,
                 selected_strategies=selected_strategies,
                 selected_timeframes=selected_timeframes,
-                strategy_configs=strategy_configs
+                strategy_configs=strategy_configs,
+                skip_pretask_creation=True
             )
             
             self.logger.success(f"✅ {symbol} 分析完了: {result_execution_id}")

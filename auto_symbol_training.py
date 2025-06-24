@@ -32,7 +32,7 @@ class AutoSymbolTrainer:
         self.execution_db = ExecutionLogDatabase()
         # 実行ログの一時保存は廃止（データベースを使用）
         
-    async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None) -> str:
+    async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False) -> str:
         """
         銘柄を追加して指定戦略・時間足で自動学習・バックテストを実行
         
@@ -42,6 +42,7 @@ class AutoSymbolTrainer:
             selected_strategies: 選択された戦略リスト（Noneの場合はデフォルト）
             selected_timeframes: 選択された時間足リスト（Noneの場合はデフォルト）
             strategy_configs: カスタム戦略設定リスト（strategy_configurationsテーブルのレコード）
+            skip_pretask_creation: Pre-task作成をスキップするかどうか（既に作成済みの場合）
             
         Returns:
             execution_id: 実行ID（進捗追跡用）
@@ -112,7 +113,7 @@ class AutoSymbolTrainer:
             
             # Step 2: 選択された戦略・時間足でバックテスト実行
             await self._execute_step(execution_id, 'backtest', 
-                                   self._run_comprehensive_backtest, symbol, selected_strategies, selected_timeframes, strategy_configs)
+                                   self._run_comprehensive_backtest, symbol, selected_strategies, selected_timeframes, strategy_configs, skip_pretask_creation)
             
             # Step 3: ML学習実行
             await self._execute_step(execution_id, 'ml_training', 
@@ -415,7 +416,7 @@ class AutoSymbolTrainer:
             
             raise
     
-    async def _run_comprehensive_backtest(self, symbol: str, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None) -> Dict:
+    async def _run_comprehensive_backtest(self, symbol: str, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False) -> Dict:
         """全戦略・全時間足でバックテスト実行（選択的実行対応）"""
         
         try:
@@ -425,6 +426,10 @@ class AutoSymbolTrainer:
             if strategy_configs:
                 configs = []
                 for config in strategy_configs:
+                    # 設定バリデーション強化
+                    if not config.get('base_strategy'):
+                        self.logger.warning(f"Skipping config without base_strategy: {config}")
+                        continue
                     configs.append({
                         'symbol': symbol,
                         'timeframe': config['timeframe'],
@@ -460,7 +465,8 @@ class AutoSymbolTrainer:
                 processed_count = self.analysis_system.generate_batch_analysis(
                     configs, 
                     symbol=symbol, 
-                    execution_id=current_execution_id
+                    execution_id=current_execution_id,
+                    skip_pretask_creation=skip_pretask_creation
                 )
                 
                 if processed_count == 0:
@@ -469,7 +475,7 @@ class AutoSymbolTrainer:
                     self.logger.warning(warning_msg)
                     print(warning_msg)
                     
-                    # 🔧 修正: シグナルなしの場合も"成功"として扱う
+                    # シグナルなしの場合も"成功"として扱う
                     # analysesテーブルにシグナルなしのレコードを作成
                     for config in configs:
                         self._create_no_signal_record(symbol, config, current_execution_id)
@@ -484,7 +490,7 @@ class AutoSymbolTrainer:
                     self.logger.warning(warning_msg)
                     print(warning_msg)
                     
-                    # 🔧 修正: エラーの場合もシグナルなしレコードを作成
+                    # エラーの場合もシグナルなしレコードを作成
                     for config in configs:
                         self._create_no_signal_record(symbol, config, getattr(self, '_current_execution_id', None), str(e)[:100])
                     
@@ -532,7 +538,7 @@ class AutoSymbolTrainer:
             
             successful_tests = len(configs) - failed_tests
             
-            # 🔧 修正: シグナルなし（no_signal）の場合も成功として扱う
+            # シグナルなし（no_signal）の場合も成功として扱う
             # processed_count > 0 なら分析が実行されたと判定
             if successful_tests == 0 and processed_count == 0:
                 error_msg = f"全戦略の分析が失敗しました。{failed_tests}件のテストが失敗。"
@@ -663,36 +669,41 @@ class AutoSymbolTrainer:
             import sqlite3
             from pathlib import Path
             from datetime import datetime, timezone
+            import json
             
             analysis_db_path = Path(__file__).parent / "large_scale_analysis" / "analysis.db"
             
             with sqlite3.connect(analysis_db_path) as conn:
-                # シグナルなしの分析結果を記録
+                # バックテスト詳細情報（シグナルなし）
+                backtest_details = {
+                    "status": "no_signal",
+                    "reason": error_message or "No trading signals detected",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                
+                # 既存のpendingレコードを更新（INSERTではなくUPDATE）
                 conn.execute("""
-                    INSERT INTO analyses (
-                        symbol, timeframe, config, strategy_config_id, strategy_name,
-                        execution_id, task_status, task_created_at, task_completed_at,
-                        total_return, sharpe_ratio, max_drawdown, win_rate, total_trades,
-                        status, error_message, generated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    UPDATE analyses SET
+                        strategy_config_id = ?, strategy_name = ?,
+                        task_status = 'completed', task_completed_at = ?,
+                        total_return = ?, sharpe_ratio = ?, max_drawdown = ?, win_rate = ?, total_trades = ?,
+                        status = 'no_signal', error_message = ?, generated_at = ?
+                    WHERE symbol = ? AND timeframe = ? AND config = ? AND execution_id = ? AND task_status = 'pending'
                 """, (
-                    symbol,
-                    config['timeframe'],
-                    config['strategy'],
                     config.get('strategy_config_id'),
                     config.get('strategy_name', f"{config['strategy']}-{config['timeframe']}"),
-                    execution_id,
-                    'completed',  # シグナルなしでも完了扱い
-                    datetime.now(timezone.utc).isoformat(),
                     datetime.now(timezone.utc).isoformat(),
                     0.0,  # シグナルなしのため0リターン
                     0.0,  # シグナルなしのため0シャープレシオ
                     0.0,  # シグナルなしのため0ドローダウン
                     0.0,  # シグナルなしのため0勝率
                     0,    # シグナルなしのため0取引
-                    'no_signal',  # ステータス: シグナルなし
                     error_message or 'No trading signals detected',
-                    datetime.now().isoformat()
+                    datetime.now().isoformat(),
+                    symbol,
+                    config['timeframe'],
+                    config['strategy'],
+                    execution_id
                 ))
                 
                 conn.commit()

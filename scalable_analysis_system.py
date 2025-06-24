@@ -188,7 +188,7 @@ class ScalableAnalysisSystem:
             logger.warning(f"Failed to check cancellation status: {e}")
             return False
     
-    def generate_batch_analysis(self, batch_configs, max_workers=None, symbol=None, execution_id=None):
+    def generate_batch_analysis(self, batch_configs, max_workers=None, symbol=None, execution_id=None, skip_pretask_creation=False):
         """
         バッチで大量の分析を並列生成
         
@@ -197,6 +197,7 @@ class ScalableAnalysisSystem:
             max_workers: 並列数（デフォルト: CPU数）
             symbol: 銘柄名（進捗表示用）
             execution_id: 実行ID（進捗表示用）
+            skip_pretask_creation: Pre-task作成をスキップするかどうか
         """
         if max_workers is None:
             max_workers = min(cpu_count(), 4)  # Rate Limit対策で最大4並列
@@ -205,7 +206,7 @@ class ScalableAnalysisSystem:
         self.current_execution_id = execution_id
         
         # 🔥 重要: Pre-task作成（リアルタイム進捗追跡のため）
-        if execution_id:
+        if execution_id and not skip_pretask_creation:
             self._create_pre_tasks(batch_configs, execution_id)
         
         # 進捗ロガーの初期化
@@ -282,10 +283,11 @@ class ScalableAnalysisSystem:
                     config_name = 'Default'
                 
                 try:
-                    # 既存レコード確認（重複防止）
+                    # 既存のpendingタスク確認（実行中のタスクがある場合は重複作成を防ぐ）
                     cursor.execute('''
                         SELECT COUNT(*) FROM analyses 
-                        WHERE symbol=? AND timeframe=? AND config=? AND execution_id=?
+                        WHERE symbol=? AND timeframe=? AND config=? AND execution_id=? 
+                        AND task_status IN ('pending', 'running')
                     ''', (symbol, timeframe, config_name, execution_id))
                     
                     if cursor.fetchone()[0] == 0:
@@ -345,6 +347,11 @@ class ScalableAnalysisSystem:
                     strategy = config['config']
                 else:
                     strategy = 'Default'
+                
+                # 戦略キー検証強化
+                if not strategy or strategy == 'Default':
+                    logger.warning(f"Invalid or missing strategy in config: {config}")
+                    continue
                 
                 # 必要なキーの存在確認
                 if 'symbol' not in config or 'timeframe' not in config:

@@ -443,7 +443,34 @@ class NewSymbolAdditionSystem:
             self.update_execution_logs_status(execution_id, ExecutionStatus.FAILED, 
                                             f"分析失敗: {str(e)[:50]}")
             
+            # analysesテーブルのpendingタスクもfailedに更新
+            self.update_pending_tasks_to_failed(execution_id, symbol, str(e))
+            
             return False
+    
+    def update_pending_tasks_to_failed(self, execution_id: str, symbol: str, error_message: str):
+        """pendingタスクをfailedに更新"""
+        try:
+            with sqlite3.connect(self.analysis_db) as conn:
+                # pendingタスクをfailedに更新
+                cursor = conn.execute("""
+                    UPDATE analyses 
+                    SET task_status = 'failed',
+                        error_message = ?,
+                        task_completed_at = datetime('now')
+                    WHERE execution_id = ? 
+                    AND symbol = ?
+                    AND task_status = 'pending'
+                """, (error_message[:500], execution_id, symbol))
+                
+                updated_count = cursor.rowcount
+                conn.commit()
+                
+                if updated_count > 0:
+                    self.logger.info(f"📝 {updated_count}件のpendingタスクをfailedに更新: {symbol}")
+                    
+        except Exception as e:
+            self.logger.error(f"タスクステータス更新エラー: {e}")
     
     async def sync_analysis_results_to_new_system(self, symbol: str, execution_id: str, 
                                                 selected_strategy_ids: List[int] = None):

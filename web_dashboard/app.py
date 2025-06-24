@@ -24,8 +24,9 @@ from real_time_system.monitor import RealTimeMonitor
 from real_time_system.utils.colored_log import get_colored_logger
 from scalable_analysis_system import ScalableAnalysisSystem
 
-# Configure correct database path for ScalableAnalysisSystem
-CORRECT_ANALYSIS_DB_DIR = str(Path(__file__).parent.parent / "large_scale_analysis")
+# Force ScalableAnalysisSystem to use root directory database only
+# This prevents creation of duplicate web_dashboard/large_scale_analysis/analysis.db
+CORRECT_ANALYSIS_DB_DIR = "large_scale_analysis"  # Relative to project root
 
 
 class WebDashboard:
@@ -621,7 +622,7 @@ class WebDashboard:
                     if status != 'RUNNING':
                         return jsonify({'error': f'実行は既に{status}状態です'}), 400
                     
-                    # Update to CANCELLED
+                    # Update to FAILED with ManualReset error type
                     error_data = [{
                         "error_type": "ManualReset",
                         "error_message": "Manually reset by user",
@@ -630,7 +631,8 @@ class WebDashboard:
                     
                     conn.execute('''
                         UPDATE execution_logs 
-                        SET status = 'CANCELLED', 
+                        SET status = 'FAILED', 
+                            current_operation = '手動停止',
                             timestamp_end = datetime('now'),
                             errors = ?
                         WHERE execution_id = ?
@@ -848,21 +850,46 @@ class WebDashboard:
                     
                     # 🔧 CRITICAL FIX: 分析結果のクリーンアップ（execution_id紐づけ不足問題の解決）
                     try:
-                        analysis_db_path = Path(__file__).parent / 'large_scale_analysis' / 'analysis.db'
+                        analysis_db_path = Path(__file__).parent.parent / 'large_scale_analysis' / 'analysis.db'
                         if analysis_db_path.exists():
                             with sqlite3.connect(analysis_db_path) as analysis_conn:
-                                # execution_idが一致する分析結果を削除
-                                cursor = analysis_conn.execute('''
-                                    DELETE FROM analyses WHERE execution_id = ?
-                                ''', (execution_id,))
-                                deleted_count = cursor.rowcount
+                                deleted_count = 0
                                 
-                                # 古い方式の銘柄名のみでの削除もカバー（既存の孤立データ対策）
-                                if deleted_count == 0:
+                                # execution_idカラムが存在するかチェック
+                                try:
+                                    cursor = analysis_conn.execute("PRAGMA table_info(analyses)")
+                                    columns = [row[1] for row in cursor.fetchall()]
+                                    has_execution_id = 'execution_id' in columns
+                                    
+                                    if has_execution_id:
+                                        # execution_idが一致する分析結果を削除
+                                        cursor = analysis_conn.execute('''
+                                            DELETE FROM analyses WHERE execution_id = ?
+                                        ''', (execution_id,))
+                                        deleted_count = cursor.rowcount
+                                        
+                                        # 古い方式の銘柄名のみでの削除もカバー（既存の孤立データ対策）
+                                        if deleted_count == 0:
+                                            cursor = analysis_conn.execute('''
+                                                DELETE FROM analyses 
+                                                WHERE symbol = ? AND execution_id IS NULL
+                                                AND generated_at > datetime('now', '-1 hour')
+                                            ''', (symbol,))
+                                            deleted_count = cursor.rowcount
+                                    else:
+                                        # 古いテーブル構造：銘柄名のみで削除
+                                        cursor = analysis_conn.execute('''
+                                            DELETE FROM analyses 
+                                            WHERE symbol = ? AND generated_at > datetime('now', '-1 hour')
+                                        ''', (symbol,))
+                                        deleted_count = cursor.rowcount
+                                        
+                                except sqlite3.OperationalError as col_error:
+                                    # テーブル構造チェック失敗時は銘柄名のみで削除
+                                    self.logger.warning(f"Table structure check failed, using symbol-only cleanup: {col_error}")
                                     cursor = analysis_conn.execute('''
                                         DELETE FROM analyses 
-                                        WHERE symbol = ? AND execution_id IS NULL
-                                        AND generated_at > datetime('now', '-1 hour')
+                                        WHERE symbol = ? AND generated_at > datetime('now', '-1 hour')
                                     ''', (symbol,))
                                     deleted_count = cursor.rowcount
                                 
@@ -1680,7 +1707,11 @@ class WebDashboard:
                 if not symbol:
                     return jsonify({'error': 'Invalid symbol'}), 400
                 
-                # 選択的実行パラメータの取得
+                # 新しい戦略選択システム対応
+                selected_strategy_ids = data.get('selected_strategy_ids', [])  # strategy_configurations.id
+                execution_mode = data.get('execution_mode', 'default')  # default/selective/custom
+                
+                # 後方互換性のため旧パラメータも取得
                 selected_strategies = data.get('selected_strategies')
                 selected_timeframes = data.get('selected_timeframes') 
                 strategy_configs = data.get('strategy_configs')  # カスタム戦略設定
@@ -1762,6 +1793,32 @@ class WebDashboard:
                         'suggestion': '銘柄名を確認するか、しばらく時間をおいて再度お試しください'
                     }), 400
                 
+                # 戦略設定処理（新システム）
+                if execution_mode == 'default':
+                    # デフォルト戦略ID取得
+                    from pathlib import Path
+                    import sqlite3
+                    analysis_db_path = Path(__file__).parent.parent / "large_scale_analysis" / "analysis.db"
+                    with sqlite3.connect(analysis_db_path) as conn:
+                        cursor = conn.execute("SELECT id FROM strategy_configurations WHERE is_default=1 AND is_active=1")
+                        selected_strategy_ids = [row[0] for row in cursor.fetchall()]
+                    self.logger.info(f"デフォルト戦略選択: {len(selected_strategy_ids)}個")
+                
+                elif execution_mode == 'selective' and selected_strategy_ids:
+                    # 選択された戦略ID使用
+                    self.logger.info(f"選択戦略: {len(selected_strategy_ids)}個 - {selected_strategy_ids}")
+                
+                else:
+                    # フォールバック：全デフォルト戦略
+                    self.logger.warning("戦略選択の問題、デフォルト戦略にフォールバック")
+                    execution_mode = 'default'
+                    from pathlib import Path
+                    import sqlite3
+                    analysis_db_path = Path(__file__).parent.parent / "large_scale_analysis" / "analysis.db"
+                    with sqlite3.connect(analysis_db_path) as conn:
+                        cursor = conn.execute("SELECT id FROM strategy_configurations WHERE is_default=1 AND is_active=1")
+                        selected_strategy_ids = [row[0] for row in cursor.fetchall()]
+                
                 # Generate execution ID first, then start training
                 from auto_symbol_training import AutoSymbolTrainer
                 from datetime import datetime
@@ -1777,7 +1834,7 @@ class WebDashboard:
                     from execution_log_database import ExecutionLogDatabase, ExecutionType
                     db = ExecutionLogDatabase()
                     
-                    # DB記録を先に作成（同期的）
+                    # DB記録を先に作成（同期的）- 新システム対応
                     db_execution_id = db.create_execution_with_id(
                         execution_id,
                         ExecutionType.SYMBOL_ADDITION,
@@ -1786,10 +1843,18 @@ class WebDashboard:
                         metadata={
                             "auto_training": True, 
                             "source": "web_dashboard",
+                            "execution_mode": execution_mode,
+                            "selected_strategy_ids": selected_strategy_ids,
+                            "estimated_patterns": len(selected_strategy_ids),
+                            # 後方互換性
                             "selected_strategies": selected_strategies or "all",
                             "selected_timeframes": selected_timeframes or "all",
                             "custom_strategy_configs": len(strategy_configs) if strategy_configs else 0
-                        }
+                        },
+                        # 新システム用拡張データ
+                        selected_strategy_ids=json.dumps(selected_strategy_ids),
+                        execution_mode=execution_mode,
+                        estimated_patterns=len(selected_strategy_ids)
                     )
                     
                     self.logger.info(f"📝 DB record created synchronously: {execution_id}")
@@ -1808,17 +1873,27 @@ class WebDashboard:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     try:
-                        # DB記録は既に存在するため、既存のIDを使用
-                        result_execution_id = loop.run_until_complete(
-                            trainer.add_symbol_with_training(
-                                symbol, 
+                        # 新システム使用
+                        from new_symbol_addition_system import NewSymbolAdditionSystem, ExecutionMode
+                        
+                        # 実行モード変換
+                        exec_mode_map = {
+                            'default': ExecutionMode.DEFAULT,
+                            'selective': ExecutionMode.SELECTIVE,
+                            'custom': ExecutionMode.CUSTOM
+                        }
+                        exec_mode = exec_mode_map.get(execution_mode, ExecutionMode.DEFAULT)
+                        
+                        system = NewSymbolAdditionSystem()
+                        result = loop.run_until_complete(
+                            system.execute_symbol_addition(
+                                symbol=symbol,
                                 execution_id=execution_id,
-                                selected_strategies=selected_strategies,
-                                selected_timeframes=selected_timeframes,
-                                strategy_configs=strategy_configs
+                                execution_mode=exec_mode,
+                                selected_strategy_ids=selected_strategy_ids
                             )
                         )
-                        self.logger.info(f"Symbol {symbol} training started with ID: {result_execution_id}")
+                        self.logger.info(f"Symbol {symbol} addition completed: {result}")
                     except Exception as e:
                         self.logger.error(f"Training failed for {symbol}: {e}")
                         # DB記録は存在するため、ステータス更新
@@ -2760,6 +2835,64 @@ class WebDashboard:
         
         # Initialize strategy config API with the app
         strategy_api = StrategyConfigAPI(self.app)
+        
+        # 新銘柄追加システム用APIエンドポイント
+        @self.app.route('/api/strategy-configurations')
+        def api_strategy_configurations():
+            """戦略設定一覧取得"""
+            try:
+                import sqlite3
+                from pathlib import Path
+                import json
+                
+                analysis_db_path = Path(__file__).parent.parent / "large_scale_analysis" / "analysis.db"
+                
+                with sqlite3.connect(analysis_db_path) as conn:
+                    cursor = conn.execute("""
+                        SELECT id, name, base_strategy, timeframe, parameters, description, 
+                               is_default, is_active, created_by
+                        FROM strategy_configurations 
+                        WHERE is_active=1 
+                        ORDER BY is_default DESC, base_strategy, timeframe
+                    """)
+                    
+                    strategies = []
+                    for row in cursor.fetchall():
+                        strategies.append({
+                            'id': row[0],
+                            'name': row[1],
+                            'base_strategy': row[2],
+                            'timeframe': row[3],
+                            'parameters': json.loads(row[4]),
+                            'description': row[5],
+                            'is_default': bool(row[6]),
+                            'is_active': bool(row[7]),
+                            'created_by': row[8]
+                        })
+                
+                return jsonify({
+                    'strategies': strategies,
+                    'total': len(strategies)
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error getting strategy configurations: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/execution/<execution_id>/progress')
+        def api_execution_progress(execution_id):
+            """実行進捗詳細取得"""
+            try:
+                from new_symbol_addition_system import NewSymbolAdditionSystem
+                
+                system = NewSymbolAdditionSystem()
+                progress = system.get_execution_progress(execution_id)
+                
+                return jsonify(progress)
+                
+            except Exception as e:
+                self.logger.error(f"Error getting execution progress: {e}")
+                return jsonify({'error': str(e)}), 500
 
 
 def main():

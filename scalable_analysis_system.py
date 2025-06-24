@@ -31,7 +31,25 @@ logger = logging.getLogger(__name__)
 
 class ScalableAnalysisSystem:
     def __init__(self, base_dir="large_scale_analysis"):
-        self.base_dir = Path(base_dir)
+        import os
+        import inspect
+        
+        # 🔧 強制的にrootディレクトリのDBを使用（完全DB統一強化版）
+        script_dir = Path(__file__).parent.absolute()  # scalable_analysis_system.pyの絶対パス
+        
+        # 常にプロジェクトルートの正規DBを使用（相対パス禁止）
+        if os.path.isabs(base_dir):
+            # 絶対パス指定の場合はそのまま使用
+            self.base_dir = Path(base_dir)
+        else:
+            # 相対パス指定は必ずスクリプトディレクトリ基準に統一
+            self.base_dir = script_dir / base_dir
+        
+        # web_dashboardディレクトリ内のDB作成を完全に防止
+        if 'web_dashboard' in str(self.base_dir):
+            logger.warning(f"⚠️ web_dashboard内DB作成を阻止: {self.base_dir}")
+            self.base_dir = script_dir / base_dir
+            
         self.base_dir.mkdir(exist_ok=True)
         
         # ディレクトリ構造
@@ -39,6 +57,17 @@ class ScalableAnalysisSystem:
         self.charts_dir = self.base_dir / "charts"
         self.data_dir = self.base_dir / "data"
         self.compressed_dir = self.base_dir / "compressed"
+        
+        # DB使用ログ機能追加
+        caller_frame = inspect.currentframe().f_back
+        caller_file = caller_frame.f_code.co_filename if caller_frame else "unknown"
+        caller_function = caller_frame.f_code.co_name if caller_frame else "unknown"
+        
+        logger.info(f"🔍 ScalableAnalysisSystem初期化:")
+        logger.info(f"  📁 base_dir: {self.base_dir.absolute()}")
+        logger.info(f"  🗃️ DB path: {self.db_path.absolute()}")
+        logger.info(f"  📍 呼び出し元: {os.path.basename(caller_file)}:{caller_function}")
+        logger.info(f"  🕐 現在ディレクトリ: {os.getcwd()}")
         
         for dir_path in [self.charts_dir, self.data_dir, self.compressed_dir]:
             dir_path.mkdir(exist_ok=True)
@@ -58,8 +87,41 @@ class ScalableAnalysisSystem:
     
     def init_database(self):
         """SQLiteデータベースを初期化"""
+        logger.info(f"🗃️ データベース初期化: {self.db_path.absolute()}")
+        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            
+            # 既存テーブル確認
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            existing_tables = [row[0] for row in cursor.fetchall()]
+            logger.info(f"  📋 既存テーブル: {existing_tables}")
+            
+            # analysesテーブルが存在する場合、カラム構造を確認
+            if 'analyses' in existing_tables:
+                cursor.execute("PRAGMA table_info(analyses);")
+                columns = [row[1] for row in cursor.fetchall()]
+                logger.info(f"  📊 analysesテーブルカラム: {columns}")
+                
+                # execution_idカラムの存在確認
+                if 'execution_id' in columns:
+                    logger.info("  ✅ execution_idカラム: 存在")
+                else:
+                    logger.warning("  ⚠️ execution_idカラム: 不在")
+                    # execution_idカラムを追加
+                    cursor.execute('ALTER TABLE analyses ADD COLUMN execution_id TEXT')
+                    logger.info("  ✅ execution_idカラムを追加しました")
+                
+                if 'task_status' in columns:
+                    logger.info("  ✅ task_statusカラム: 存在")
+                else:
+                    logger.warning("  ⚠️ task_statusカラム: 不在")
+                    # 不足カラムを追加
+                    cursor.execute('ALTER TABLE analyses ADD COLUMN task_status TEXT DEFAULT "pending"')
+                    cursor.execute('ALTER TABLE analyses ADD COLUMN task_started_at TIMESTAMP')
+                    cursor.execute('ALTER TABLE analyses ADD COLUMN task_completed_at TIMESTAMP')
+                    cursor.execute('ALTER TABLE analyses ADD COLUMN error_message TEXT')
+                    logger.info("  ✅ task_statusカラム等を追加しました")
             
             # 分析メタデータテーブル
             cursor.execute('''
@@ -77,7 +139,12 @@ class ScalableAnalysisSystem:
                     avg_leverage REAL,
                     chart_path TEXT,
                     compressed_path TEXT,
-                    status TEXT DEFAULT 'pending'
+                    status TEXT DEFAULT 'pending',
+                    execution_id TEXT,
+                    task_status TEXT DEFAULT 'pending',
+                    task_started_at TIMESTAMP,
+                    task_completed_at TIMESTAMP,
+                    error_message TEXT
                 )
             ''')
             
@@ -137,6 +204,10 @@ class ScalableAnalysisSystem:
         # 実行IDを設定
         self.current_execution_id = execution_id
         
+        # 🔥 重要: Pre-task作成（リアルタイム進捗追跡のため）
+        if execution_id:
+            self._create_pre_tasks(batch_configs, execution_id)
+        
         # 進捗ロガーの初期化
         progress_logger = None
         if symbol and execution_id:
@@ -188,6 +259,51 @@ class ScalableAnalysisSystem:
             logger.info(f"バッチ分析完了: {total_processed}パターン処理完了")
         
         return total_processed
+    
+    def _create_pre_tasks(self, batch_configs, execution_id):
+        """Pre-task作成（分析実行前にpendingレコード作成）"""
+        logger.info(f"🎯 Pre-task作成開始: {len(batch_configs)}タスク, execution_id={execution_id}")
+        logger.info(f"  🗃️ 作成先DB: {self.db_path.absolute()}")
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            created_count = 0
+            for config in batch_configs:
+                symbol = config['symbol']
+                timeframe = config['timeframe']
+                
+                # config辞書から適切なキーを取得（_process_chunkと同じロジック）
+                if 'strategy' in config:
+                    config_name = config['strategy']
+                elif 'config' in config:
+                    config_name = config['config']
+                else:
+                    config_name = 'Default'
+                
+                try:
+                    # 既存レコード確認（重複防止）
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM analyses 
+                        WHERE symbol=? AND timeframe=? AND config=? AND execution_id=?
+                    ''', (symbol, timeframe, config_name, execution_id))
+                    
+                    if cursor.fetchone()[0] == 0:
+                        # Pendingタスク作成
+                        cursor.execute('''
+                            INSERT INTO analyses 
+                            (symbol, timeframe, config, task_status, execution_id, status)
+                            VALUES (?, ?, ?, 'pending', ?, 'running')
+                        ''', (symbol, timeframe, config_name, execution_id))
+                        created_count += 1
+                
+                except Exception as e:
+                    logger.error(f"Pre-task作成エラー {symbol} {timeframe} {config_name}: {e}")
+            
+            conn.commit()
+            logger.info(f"✅ Pre-task作成完了: {created_count}タスク作成")
+            
+        return created_count
     
     def _process_chunk(self, configs_chunk, chunk_id, execution_id=None):
         """チャンクを処理（プロセス内で実行）"""
@@ -264,13 +380,59 @@ class ScalableAnalysisSystem:
         
         return processed
     
+    def _update_task_status(self, symbol, timeframe, config, status, error_message=None):
+        """task_statusをリアルタイム更新"""
+        execution_id = os.environ.get('CURRENT_EXECUTION_ID')
+        logger.info(f"🔄 task_status更新: {symbol} {timeframe} {config} → {status}")
+        logger.info(f"  🗃️ 更新先DB: {self.db_path.absolute()}")
+        logger.info(f"  🔑 execution_id: {execution_id}")
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            try:
+                if status == 'running':
+                    cursor.execute('''
+                        UPDATE analyses 
+                        SET task_status = ?, task_started_at = ?
+                        WHERE symbol = ? AND timeframe = ? AND config = ? AND execution_id = ?
+                    ''', (status, datetime.now(timezone.utc).isoformat(), symbol, timeframe, config, execution_id))
+                elif status == 'failed':
+                    cursor.execute('''
+                        UPDATE analyses 
+                        SET task_status = ?, error_message = ?
+                        WHERE symbol = ? AND timeframe = ? AND config = ? AND execution_id = ?
+                    ''', (status, error_message, symbol, timeframe, config, execution_id))
+                elif status == 'completed':
+                    cursor.execute('''
+                        UPDATE analyses 
+                        SET task_status = ?, task_completed_at = ?
+                        WHERE symbol = ? AND timeframe = ? AND config = ? AND execution_id = ?
+                    ''', (status, datetime.now(timezone.utc).isoformat(), symbol, timeframe, config, execution_id))
+                
+                updated_rows = cursor.rowcount
+                conn.commit()
+                logger.info(f"✅ task_status更新成功: {updated_rows}行更新")
+                
+            except Exception as e:
+                logger.error(f"❌ task_status更新エラー: {symbol} {timeframe} {config}")
+                logger.error(f"  🗃️ DB path: {self.db_path.absolute()}")
+                logger.error(f"  📝 エラー詳細: {str(e)}")
+                raise
+    
     def _generate_single_analysis(self, symbol, timeframe, config):
-        """単一の分析を生成（ハイレバレッジボット使用版）"""
+        """単一の分析を生成（ハイレバレッジボット使用版 + task_status更新）"""
         analysis_id = f"{symbol}_{timeframe}_{config}"
         
         # 既存チェック
         if self._analysis_exists(analysis_id):
             return False, None
+        
+        # task_statusを'running'に更新
+        try:
+            self._update_task_status(symbol, timeframe, config, 'running')
+        except Exception as e:
+            logger.warning(f"Failed to update task_status to running: {e}")
         
         # ハイレバレッジボットを使用した分析を試行
         try:
@@ -278,6 +440,13 @@ class ScalableAnalysisSystem:
         except Exception as e:
             logger.error(f"Real analysis failed for {symbol} {timeframe} {config}: {e}")
             logger.error(f"Analysis terminated - no fallback to sample data")
+            
+            # task_statusを'failed'に更新
+            try:
+                self._update_task_status(symbol, timeframe, config, 'failed', str(e))
+            except Exception as update_error:
+                logger.warning(f"Failed to update task_status to failed: {update_error}")
+            
             return False, None
         
         # メトリクス計算
@@ -291,7 +460,7 @@ class ScalableAnalysisSystem:
         if self._should_generate_chart(metrics):
             chart_path = self._generate_lightweight_chart(analysis_id, trades_data, metrics)
         
-        # データベース保存（execution_id付き）
+        # データベース保存（execution_id付き + task_status更新含む）
         execution_id = os.environ.get('CURRENT_EXECUTION_ID')
         self._save_to_database(symbol, timeframe, config, metrics, chart_path, compressed_path, execution_id)
         
@@ -1015,7 +1184,11 @@ class ScalableAnalysisSystem:
         return str(chart_path)
     
     def _save_to_database(self, symbol, timeframe, config, metrics, chart_path, compressed_path, execution_id=None):
-        """データベースに保存（execution_id対応）"""
+        """データベースに保存（execution_id対応 + task_status更新）"""
+        logger.info(f"💾 DB保存開始: {symbol} {timeframe} {config}")
+        logger.info(f"  🗃️ 保存先DB: {self.db_path.absolute()}")
+        logger.info(f"  🔑 execution_id: {execution_id or os.environ.get('CURRENT_EXECUTION_ID', 'None')}")
+        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -1023,19 +1196,50 @@ class ScalableAnalysisSystem:
             if not execution_id:
                 execution_id = os.environ.get('CURRENT_EXECUTION_ID')
             
-            cursor.execute('''
-                INSERT INTO analyses 
-                (symbol, timeframe, config, total_trades, win_rate, total_return, 
-                 sharpe_ratio, max_drawdown, avg_leverage, chart_path, compressed_path, status, execution_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)
-            ''', (
-                symbol, timeframe, config,
-                metrics['total_trades'], metrics['win_rate'], metrics['total_return'],
-                metrics['sharpe_ratio'], metrics['max_drawdown'], metrics['avg_leverage'],
-                chart_path, compressed_path, execution_id
-            ))
-            
-            conn.commit()
+            try:
+                # 🔥 重要: INSERTからUPDATEに変更（pre-taskレコード更新）
+                cursor.execute('''
+                    UPDATE analyses SET
+                        total_trades=?, win_rate=?, total_return=?, 
+                        sharpe_ratio=?, max_drawdown=?, avg_leverage=?, 
+                        chart_path=?, compressed_path=?, 
+                        status='completed', task_status='completed', task_completed_at=?
+                    WHERE symbol=? AND timeframe=? AND config=? AND execution_id=?
+                ''', (
+                    metrics['total_trades'], metrics['win_rate'], metrics['total_return'],
+                    metrics['sharpe_ratio'], metrics['max_drawdown'], metrics['avg_leverage'],
+                    chart_path, compressed_path, 
+                    datetime.now(timezone.utc).isoformat(),
+                    symbol, timeframe, config, execution_id
+                ))
+                
+                updated_rows = cursor.rowcount
+                if updated_rows == 0:
+                    # Pre-taskが存在しない場合は従来通りINSERT
+                    logger.warning(f"⚠️ Pre-taskレコードなし - INSERT実行: {symbol} {timeframe} {config}")
+                    cursor.execute('''
+                        INSERT INTO analyses 
+                        (symbol, timeframe, config, total_trades, win_rate, total_return, 
+                         sharpe_ratio, max_drawdown, avg_leverage, chart_path, compressed_path, status, 
+                         task_status, task_completed_at, execution_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'completed', ?, ?)
+                    ''', (
+                        symbol, timeframe, config,
+                        metrics['total_trades'], metrics['win_rate'], metrics['total_return'],
+                        metrics['sharpe_ratio'], metrics['max_drawdown'], metrics['avg_leverage'],
+                        chart_path, compressed_path, 
+                        datetime.now(timezone.utc).isoformat(),
+                        execution_id
+                    ))
+                
+                conn.commit()
+                logger.info(f"✅ DB保存成功: {symbol} {timeframe} {config} ({'UPDATE' if updated_rows > 0 else 'INSERT'})")
+                
+            except Exception as e:
+                logger.error(f"❌ DB保存エラー: {symbol} {timeframe} {config}")
+                logger.error(f"  🗃️ DB path: {self.db_path.absolute()}")
+                logger.error(f"  📝 エラー詳細: {str(e)}")
+                raise
     
     def query_analyses(self, filters=None, order_by='sharpe_ratio', limit=100):
         """分析結果をクエリ"""

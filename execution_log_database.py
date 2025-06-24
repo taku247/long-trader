@@ -23,7 +23,6 @@ class ExecutionStatus(Enum):
     SUCCESS = "SUCCESS"       # 成功
     PARTIAL_SUCCESS = "PARTIAL_SUCCESS"  # 部分成功
     FAILED = "FAILED"         # 失敗
-    CANCELLED = "CANCELLED"   # キャンセル
 
 
 class ExecutionType(Enum):
@@ -213,7 +212,11 @@ class ExecutionLogDatabase:
                                 symbol: Optional[str] = None,
                                 symbols: Optional[List[str]] = None,
                                 triggered_by: str = "SYSTEM",
-                                metadata: Optional[Dict] = None) -> str:
+                                metadata: Optional[Dict] = None,
+                                # 新システム用拡張パラメータ
+                                selected_strategy_ids: Optional[str] = None,
+                                execution_mode: Optional[str] = None,
+                                estimated_patterns: Optional[int] = None) -> str:
         """事前定義されたIDで実行記録を作成"""
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -221,8 +224,9 @@ class ExecutionLogDatabase:
                     INSERT INTO execution_logs (
                         execution_id, execution_type, symbol, symbols,
                         timestamp_start, status, triggered_by, metadata,
-                        completed_tasks, errors
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        completed_tasks, errors, selected_strategy_ids, 
+                        execution_mode, estimated_patterns
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     execution_id,
                     execution_type.value,
@@ -233,7 +237,10 @@ class ExecutionLogDatabase:
                     triggered_by,
                     json.dumps(metadata) if metadata else None,
                     json.dumps([]),
-                    json.dumps([])
+                    json.dumps([]),
+                    selected_strategy_ids,
+                    execution_mode,
+                    estimated_patterns
                 ))
                 conn.commit()
             
@@ -262,7 +269,7 @@ class ExecutionLogDatabase:
                 values.append(progress_percentage)
             
             # 完了時の処理
-            if status in [ExecutionStatus.SUCCESS, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]:
+            if status in [ExecutionStatus.SUCCESS, ExecutionStatus.FAILED]:
                 updates.append("timestamp_end = ?")
                 values.append(datetime.now().isoformat())
                 

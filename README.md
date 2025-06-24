@@ -245,19 +245,40 @@ execution_steps:
 #### analysis.db（戦略分析結果）
 
 ```sql
--- メインテーブル：分析結果
+-- メインテーブル：分析結果（23カラム）
 analyses:
-├── id: 1, 2, 3...                                           -- 分析ID
-├── symbol: "SNX", "BTC", "ETH"                              -- 銘柄名
-├── timeframe: "1h", "30m", "15m", "5m", "3m"                -- 時間足
-├── config: "Conservative_ML", "Aggressive_ML", "Full_ML"     -- 戦略設定
+-- 🔑 基本情報
+├── id: 1, 2, 3...                                           -- 分析ID（主キー）
+├── symbol: "SNX", "BTC", "ETH"                              -- 銘柄名（必須）
+├── timeframe: "1h", "30m", "15m", "5m", "3m"                -- 時間足（必須）
+├── config: "Conservative_ML", "Aggressive_ML", "Full_ML"     -- 戦略設定（必須）
+├── generated_at: TIMESTAMP                                  -- 生成日時
+
+-- 📊 パフォーマンス指標
 ├── total_trades: 49                                         -- 総取引数
 ├── win_rate: 0.469                                          -- 勝率（46.9%）
+├── total_return: 0.15                                       -- 総リターン率
 ├── sharpe_ratio: 0.294                                      -- シャープレシオ
 ├── max_drawdown: -0.15                                      -- 最大ドローダウン
 ├── avg_leverage: 12.5                                       -- 平均レバレッジ
-├── data_compressed_path: "SNX_15m_Aggressive_Traditional.pkl.gz"
-└── status: "completed"                                       -- 分析ステータス
+
+-- 📁 ファイル管理
+├── chart_path: "charts/SNX_1h_Conservative_ML.html"         -- チャート画像パス
+├── compressed_path: "SNX_15m_Aggressive_Traditional.pkl.gz" -- 圧縮データパス
+
+-- 🔄 ステータス管理
+├── status: "pending"                                        -- 旧システムステータス（固定値）
+├── task_status: "completed"                                 -- 新システムタスク状態⭐
+
+-- 🆕 新システム管理
+├── execution_id: "symbol_addition_20250623_..."             -- 実行ID（外部キー）
+├── strategy_config_id: 1                                    -- 戦略設定ID（外部キー）
+├── strategy_name: "Conservative ML - 1h"                    -- 戦略名
+├── task_created_at: TIMESTAMP                               -- タスク作成日時
+├── task_started_at: TIMESTAMP                               -- タスク開始日時
+├── task_completed_at: TIMESTAMP                             -- タスク完了日時
+├── error_message: TEXT                                      -- エラーメッセージ
+└── retry_count: 0                                           -- リトライ回数
 
 -- 詳細メトリクス
 backtest_summary:
@@ -338,7 +359,7 @@ ALTER TABLE execution_logs ADD COLUMN estimated_patterns INTEGER; -- 予想実�
 #### 3. analyses（事前タスク作成 + 結果管理）
 ```sql
 ALTER TABLE analyses ADD COLUMN task_status TEXT DEFAULT 'pending'; 
--- 'pending' → 'running' → 'completed' | 'failed' | 'cancelled'
+-- 'pending' → 'running' → 'completed' | 'failed' | 'skipped'
 
 ALTER TABLE analyses ADD COLUMN task_created_at TIMESTAMP;  -- タスク作成時刻
 ALTER TABLE analyses ADD COLUMN task_started_at TIMESTAMP;  -- 実行開始時刻
@@ -346,6 +367,33 @@ ALTER TABLE analyses ADD COLUMN task_completed_at TIMESTAMP; -- 完了時刻
 ALTER TABLE analyses ADD COLUMN error_message TEXT;         -- エラー詳細
 ALTER TABLE analyses ADD COLUMN retry_count INTEGER DEFAULT 0; -- リトライ回数
 ```
+
+#### 📊 task_statusカラム詳細
+
+**データ型**: TEXT（NULL可）、デフォルト値: `'pending'`
+
+**状態遷移フロー**:
+```
+pending → running → completed
+             ↓
+           failed
+             ↓
+        (retry) → running
+```
+
+**各状態の意味**:
+- **pending**: 待機中 - タスク作成済み、実行待ち（`task_created_at`設定）
+- **running**: 実行中 - バックテスト・分析実行中（`task_started_at`設定）
+- **completed**: 完了 - 分析完了、結果保存済み（`task_completed_at`設定、パフォーマンス指標保存）
+- **failed**: 失敗 - エラーで中断、再試行可能（`error_message`設定、`retry_count`増加）
+- **skipped**: スキップ - 条件に合わず実行されず
+
+**重要な特徴**:
+- `execution_id`と組み合わせて実行単位での進捗追跡
+- 時間情報（created/started/completed）と連動したライフサイクル管理
+- エラーハンドリング（failed状態 + error_message）とリトライ機能内蔵
+- WebUIでの実行進捗バー表示に使用
+- 新システムで実際に更新・参照される（`status`カラムは旧システムの名残）
 
 ### 銘柄追加フロー
 
@@ -473,10 +521,14 @@ execution_logs: symbol_addition_20250620_001523_b2658d4d|BTC|CANCELLED
 analyses: BTC|1h|Conservative_ML|49|0.5|1.2|...
 ```
 
-**推奨改善案**:
-1. `analyses`テーブルに`execution_id`フィールド追加
-2. 外部キー制約の設定
-3. 分析結果保存時の`execution_id`関連付け実装
+**✅ 改善完了（2025年6月23日）**:
+1. `analyses`テーブルに`execution_id`フィールド追加済み
+2. 新システムで`execution_id`による完全な追跡機能実装済み
+3. `task_status`による詳細な進捗管理機能実装済み
+
+**重要**: `status`カラム（旧システム）と`task_status`カラム（新システム）は別物
+- `status`: 全て"pending"固定（旧システムの名残、実質未使用）
+- `task_status`: 実際の進捗管理で使用（pending/running/completed/failed/skipped）
 
 #### 重要な特徴
 

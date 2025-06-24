@@ -27,7 +27,8 @@ class AutoSymbolTrainer:
     
     def __init__(self):
         self.logger = get_colored_logger(__name__)
-        self.analysis_system = ScalableAnalysisSystem()
+        # Force use of root large_scale_analysis directory to prevent DB fragmentation
+        self.analysis_system = ScalableAnalysisSystem("large_scale_analysis") 
         self.execution_db = ExecutionLogDatabase()
         # 実行ログの一時保存は廃止（データベースを使用）
         
@@ -48,11 +49,13 @@ class AutoSymbolTrainer:
         try:
             self.logger.info(f"Starting automatic training for symbol: {symbol}")
             
-            # 重複実行チェック
+            # 重複実行チェック（同じexecution_idは除外）
             existing_executions = self.execution_db.list_executions(limit=20)
             running_symbols = [
-                exec_item['symbol'] for exec_item in existing_executions 
-                if exec_item.get('status') == 'RUNNING' and exec_item.get('symbol') == symbol
+                exec_item for exec_item in existing_executions 
+                if (exec_item.get('status') == 'RUNNING' and 
+                    exec_item.get('symbol') == symbol and 
+                    exec_item.get('execution_id') != execution_id)  # 同じexecution_idは除外
             ]
             
             if running_symbols:
@@ -119,15 +122,30 @@ class AutoSymbolTrainer:
             await self._execute_step(execution_id, 'result_save', 
                                    self._save_results, symbol)
             
-            # 実行完了
-            self.execution_db.update_execution_status(
-                execution_id,
-                ExecutionStatus.SUCCESS,
-                current_operation='完了',
-                progress_percentage=100
-            )
+            # 実行完了前に分析結果の存在確認
+            analysis_results_exist = self._verify_analysis_results(symbol, execution_id)
             
-            self.logger.success(f"Symbol {symbol} training completed successfully!")
+            if analysis_results_exist:
+                # 分析結果が存在する場合のみSUCCESS
+                self.execution_db.update_execution_status(
+                    execution_id,
+                    ExecutionStatus.SUCCESS,
+                    current_operation='完了',
+                    progress_percentage=100
+                )
+                self.logger.success(f"Symbol {symbol} training completed successfully!")
+            else:
+                # 分析結果が存在しない場合はFAILED
+                self.execution_db.update_execution_status(
+                    execution_id,
+                    ExecutionStatus.FAILED,
+                    current_operation='分析結果なし - 処理失敗',
+                    progress_percentage=100,
+                    error_message="No analysis results found despite successful steps"
+                )
+                self.logger.error(f"❌ Symbol {symbol} training failed: No analysis results found")
+                raise ValueError(f"No analysis results found for {symbol} despite successful execution steps")
+            
             return execution_id
             
         except Exception as e:
@@ -481,8 +499,8 @@ class AutoSymbolTrainer:
                         limit=1
                     )
                     
-                    if not query_results.empty:
-                        result = query_results.iloc[0].to_dict()
+                    if query_results and len(query_results) > 0:
+                        result = query_results[0] if isinstance(query_results, list) else query_results.iloc[0].to_dict()
                         result['status'] = 'success'
                         results.append(result)
                         
@@ -500,18 +518,26 @@ class AutoSymbolTrainer:
                     failed_tests += 1
                     results.append({'status': 'failed', 'config': config})
             
+            successful_tests = len(configs) - failed_tests
+            
+            # 🔧 重要: 成功したテストが0件の場合は失敗として扱う
+            if successful_tests == 0 and processed_count == 0:
+                error_msg = f"全戦略の分析が失敗しました。{failed_tests}件のテストが失敗。"
+                self.logger.error(f"❌ {symbol}: {error_msg}")
+                raise ValueError(error_msg)
+            
             self.logger.success(f"Backtest completed: {len(configs)} configurations tested")
             
             return {
                 'total_combinations': len(configs),
-                'successful_tests': len(configs) - failed_tests,
+                'successful_tests': successful_tests,
                 'failed_tests': failed_tests,
                 'low_performance_count': low_performance_count,
                 'best_performance': best_performance,
                 'results_summary': {
-                    'avg_sharpe': sum(r.get('sharpe_ratio', 0) for r in results) / len(results),
-                    'max_sharpe': max(r.get('sharpe_ratio', 0) for r in results),
-                    'min_sharpe': min(r.get('sharpe_ratio', 0) for r in results)
+                    'avg_sharpe': sum(r.get('sharpe_ratio', 0) for r in results) / len(results) if results else 0,
+                    'max_sharpe': max(r.get('sharpe_ratio', 0) for r in results) if results else 0,
+                    'min_sharpe': min(r.get('sharpe_ratio', 0) for r in results) if results else 0
                 }
             }
             
@@ -622,6 +648,49 @@ class AutoSymbolTrainer:
     def list_executions(self, limit: int = 10) -> List[Dict]:
         """実行履歴の一覧取得"""
         return self.execution_db.list_executions(limit=limit)
+    
+    def _verify_analysis_results(self, symbol: str, execution_id: str) -> bool:
+        """分析結果の存在確認"""
+        try:
+            import sqlite3
+            from pathlib import Path
+            
+            analysis_db_path = Path(__file__).parent / "large_scale_analysis" / "analysis.db"
+            if not analysis_db_path.exists():
+                self.logger.warning(f"Analysis database not found: {analysis_db_path}")
+                return False
+                
+            with sqlite3.connect(analysis_db_path) as conn:
+                # 該当execution_idの分析結果を確認
+                cursor = conn.execute('''
+                    SELECT COUNT(*) FROM analyses 
+                    WHERE symbol = ? AND execution_id = ?
+                ''', (symbol, execution_id))
+                
+                result_count = cursor.fetchone()[0]
+                
+                if result_count > 0:
+                    self.logger.info(f"✅ {symbol} の分析結果確認: {result_count} 件")
+                    return True
+                else:
+                    # execution_idがNULLの場合も確認（旧システム対応）
+                    cursor = conn.execute('''
+                        SELECT COUNT(*) FROM analyses 
+                        WHERE symbol = ? AND execution_id IS NULL
+                        AND generated_at > datetime('now', '-5 minutes')
+                    ''', (symbol,))
+                    
+                    recent_count = cursor.fetchone()[0]
+                    if recent_count > 0:
+                        self.logger.warning(f"⚠️ {symbol} の分析結果はexecution_idなしで {recent_count} 件存在")
+                        return True
+                    else:
+                        self.logger.error(f"❌ {symbol} の分析結果が見つかりません（execution_id: {execution_id}）")
+                        return False
+                        
+        except Exception as e:
+            self.logger.error(f"分析結果確認エラー: {e}")
+            return False
 
 
 async def main():

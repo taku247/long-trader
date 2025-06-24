@@ -390,14 +390,10 @@ class NewSymbolAdditionSystem:
                                                     "戦略未選択エラー")
                     return False
                     
-                # カスタム戦略の場合はstrategy_configsを使用
-                if execution_mode == ExecutionMode.CUSTOM:
-                    strategy_configs = self.get_strategy_configs_for_legacy(selected_strategy_ids)
-                    selected_strategies = None
-                    selected_timeframes = None
-                else:
-                    selected_strategies, selected_timeframes = self.convert_strategy_ids_to_legacy_format(selected_strategy_ids)
-                    strategy_configs = None
+                # 🔧 修正: SELECTIVE/CUSTOMモード共に戦略ID個別処理に統一
+                strategy_configs = self.get_strategy_configs_for_legacy(selected_strategy_ids)
+                selected_strategies = None  # デカルト積を無効化
+                selected_timeframes = None
             
             self.logger.info(f"変換完了 - 戦略: {selected_strategies}, 時間足: {selected_timeframes}, 設定: {len(strategy_configs) if strategy_configs else 0}")
             

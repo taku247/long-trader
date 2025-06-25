@@ -509,9 +509,19 @@ class ScalableAnalysisSystem:
             logger.warning(f"時間足設定読み込みエラー: {e}")
         return {}
     
-    def _generate_real_analysis(self, symbol, timeframe, config, evaluation_period_days=90):
+    def _generate_real_analysis(self, symbol, timeframe, config, custom_period_days=None):
         """条件ベースのハイレバレッジ分析 - 市場条件を満たした場合のみシグナル生成"""
         try:
+            # 時間足設定から評価期間を動的に取得
+            tf_config = self._load_timeframe_config(timeframe)
+            
+            if custom_period_days is not None:
+                evaluation_period_days = custom_period_days
+                print(f"📅 カスタム評価期間: {evaluation_period_days}日")
+            else:
+                evaluation_period_days = tf_config.get('data_days', 90)  # 設定ファイルから取得
+                print(f"📅 時間足別評価期間: {evaluation_period_days}日 ({timeframe}足設定)")
+            
             # 本格的な戦略分析のため、実際のAPIデータを使用
             from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
             
@@ -572,19 +582,42 @@ class ScalableAnalysisSystem:
                 }
                 evaluation_interval = default_intervals.get(timeframe, timedelta(hours=4))
             
+            # 実データに基づく最初の有効な評価時刻を決定
+            data_start_time = pd.to_datetime(ohlcv_data.index[0], utc=True) if hasattr(ohlcv_data.index[0], 'tz_localize') else pd.to_datetime(ohlcv_data.index[0]).tz_localize('UTC')
+            
+            # 評価間隔の境界に合う最初の時刻を見つける
+            effective_start_time = self._find_first_valid_evaluation_time(data_start_time, evaluation_interval)
+            
+            if effective_start_time > start_time:
+                logger.warning(f"⚠️ データ制約により分析開始時刻を調整: {start_time.strftime('%Y-%m-%d %H:%M')} → {effective_start_time.strftime('%Y-%m-%d %H:%M')}")
+            
             # 条件ベースの分析実行
-            current_time = start_time
+            current_time = effective_start_time
             total_evaluations = 0
             signals_generated = 0
             
-            # 時間足設定から最大評価回数を取得
-            max_evaluations = tf_config.get('max_evaluations', 100)  # フォールバック値
+            # 評価回数の動的計算（期間カバー率を改善）
+            config_max_evaluations = tf_config.get('max_evaluations', 100)
+            
+            # 期間カバー率80%を目標とした評価回数計算
+            total_period_minutes = evaluation_period_days * 24 * 60
+            total_possible_evaluations = total_period_minutes // evaluation_interval.total_seconds() * 60
+            target_coverage = 0.8  # 80%カバー率を目標
+            calculated_max_evaluations = int(total_possible_evaluations * target_coverage)
+            
+            # 設定値と計算値の最大値を使用（ただし、合理的な上限5000を設定）
+            max_evaluations = min(max(config_max_evaluations, calculated_max_evaluations), 5000)
+            
+            # カバー率の計算
+            actual_coverage = (max_evaluations * evaluation_interval.total_seconds() / 60) / total_period_minutes * 100
             
             print(f"🔍 条件ベース分析: {start_time.strftime('%Y-%m-%d')} から {end_time.strftime('%Y-%m-%d')}")
             print(f"📊 評価間隔: {evaluation_interval} ({timeframe}足最適化)")
-            print(f"🛡️ 最大評価回数: {max_evaluations}回")
+            print(f"🛡️ 最大評価回数: {max_evaluations}回 (設定値: {config_max_evaluations}, 計算値: {calculated_max_evaluations})")
+            print(f"📈 期間カバー率: {actual_coverage:.1f}%")
             
-            max_signals = max_evaluations // 2  # 評価回数の半分まで（例：20評価で最大10シグナル）
+            # トレード機会による制限（評価回数の1/5程度）
+            max_signals = max(max_evaluations // 5, 10)  # 最低10回の機会は確保
             
             while (current_time <= end_time and 
                    total_evaluations < max_evaluations and 
@@ -694,7 +727,8 @@ class ScalableAnalysisSystem:
                         print(f"       検出プロバイダー: {provider_info['base_provider']}")
                         print(f"       ML強化: {provider_info['ml_provider']}")
                         
-                        # 支持線・抵抗線を検出
+                        # 支持線・抵抗線を検出（リアルタイムは全データ使用）
+                        print(f"       リアルタイムモード: 全データ使用 {len(ohlcv_data)}本")
                         support_levels, resistance_levels = detector.detect_levels(ohlcv_data, current_price)
                         
                         # 上位レベルのみ選択（パフォーマンス向上）
@@ -703,6 +737,19 @@ class ScalableAnalysisSystem:
                         resistance_levels = resistance_levels[:max_levels]
                         
                         if not support_levels and not resistance_levels:
+                            # 詳細ログを追加
+                            data_stats = {
+                                "data_points": len(ohlcv_data),
+                                "price_range": f"{ohlcv_data['low'].min():.4f} - {ohlcv_data['high'].max():.4f}",
+                                "current_price": current_price,
+                                "volatility": ((ohlcv_data['high'] - ohlcv_data['low']) / ohlcv_data['close']).mean(),
+                                "timeframe": timeframe
+                            }
+                            logger.error(f"🔍 {symbol} {timeframe} 支持線・抵抗線検出失敗詳細:")
+                            logger.error(f"  📊 データ統計: {data_stats}")
+                            logger.error(f"  ⚙️ 検出設定: min_touches={provider_info.get('min_touches', 'N/A')}, tolerance={provider_info.get('tolerance_pct', 'N/A')}")
+                            logger.error(f"  🤖 ML使用: {provider_info['ml_provider']}")
+                            
                             raise Exception(f"有効な支持線・抵抗線が検出されませんでした。市場データが不十分である可能性があります。")
                         
                         print(f"   ✅ 支持線・抵抗線検出成功: 支持線{len(support_levels)}個, 抵抗線{len(resistance_levels)}個")
@@ -1504,21 +1551,47 @@ class ScalableAnalysisSystem:
             else:
                 candle_start_time = candle_start_time.astimezone(timezone.utc)
             
-            # より柔軟なマッチング（数分の誤差を許容）
+            # より柔軟なマッチング（段階的許容範囲拡大）
             time_tolerance = timedelta(minutes=1)
             target_candles = market_data[
                 abs(market_data['timestamp'] - candle_start_time) <= time_tolerance
             ]
             
             if target_candles.empty:
-                # デバッグ情報を追加
-                available_times = market_data['timestamp'].head(10).tolist()
-                raise Exception(
-                    f"該当ローソク足が見つかりません: {symbol} {timeframe} "
-                    f"trade_time={target_time}, candle_start={candle_start_time}. "
-                    f"利用可能な最初の10件: {available_times}. "
-                    f"実際の値のみ使用のため、フォールバックは使用しません。"
-                )
+                # 段階的に許容範囲を拡大（最大30分まで）
+                for tolerance_minutes in [5, 15, 30]:
+                    time_tolerance = timedelta(minutes=tolerance_minutes)
+                    target_candles = market_data[
+                        abs(market_data['timestamp'] - candle_start_time) <= time_tolerance
+                    ]
+                    if not target_candles.empty:
+                        time_diff = abs(target_candles.iloc[0]['timestamp'] - candle_start_time)
+                        logger.warning(
+                            f"⚠️ {symbol} {timeframe}: {tolerance_minutes}分許容範囲で最寄りローソク足使用 "
+                            f"(時差: {time_diff})"
+                        )
+                        break
+                
+                if target_candles.empty:
+                    # それでも見つからない場合は最寄りのローソク足を使用
+                    time_diffs = abs(market_data['timestamp'] - candle_start_time)
+                    min_diff_idx = time_diffs.idxmin()
+                    min_diff = time_diffs[min_diff_idx]
+                    
+                    if min_diff <= timedelta(hours=2):  # 2時間以内なら使用
+                        target_candles = market_data.iloc[[min_diff_idx]]
+                        logger.warning(
+                            f"⚠️ {symbol} {timeframe}: 最寄りローソク足使用 (時差: {min_diff})"
+                        )
+                    else:
+                        # デバッグ情報を追加
+                        available_times = market_data['timestamp'].head(10).tolist()
+                        raise Exception(
+                            f"該当ローソク足が見つかりません: {symbol} {timeframe} "
+                            f"trade_time={target_time}, candle_start={candle_start_time}. "
+                            f"利用可能な最初の10件: {available_times}. "
+                            f"最小時差: {min_diff} (2時間を超過)"
+                        )
             
             # 最も近いローソク足を選択
             target_candle = target_candles.iloc[0]
@@ -1574,6 +1647,49 @@ class ScalableAnalysisSystem:
             )
         
         return candle_start
+    
+    def _find_first_valid_evaluation_time(self, data_start_time, evaluation_interval):
+        """
+        実際のOHLCVデータ開始時刻に基づいて、評価間隔の境界に合う最初の有効な評価時刻を見つける
+        
+        Args:
+            data_start_time: 実際のOHLCVデータの最初のタイムスタンプ
+            evaluation_interval: 評価間隔（timedelta）
+            
+        Returns:
+            datetime: 最初の有効な評価時刻
+        """
+        # 評価間隔を分単位に変換
+        interval_minutes = int(evaluation_interval.total_seconds() / 60)
+        
+        # データ開始時刻を評価間隔の境界に合わせる
+        # 例: データ開始が06:30、評価間隔が60分の場合 → 07:00を返す
+        
+        # 現在の時刻から評価間隔の境界時刻を計算
+        current = data_start_time
+        
+        # 時間・分を評価間隔の境界に合わせる
+        if interval_minutes >= 60:
+            # 1時間以上の間隔の場合、時間境界に合わせる
+            hours_interval = interval_minutes // 60
+            aligned_hour = (current.hour // hours_interval + 1) * hours_interval
+            if aligned_hour >= 24:
+                current = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            else:
+                current = current.replace(hour=aligned_hour, minute=0, second=0, microsecond=0)
+        else:
+            # 1時間未満の間隔の場合、分境界に合わせる
+            total_minutes = current.hour * 60 + current.minute
+            aligned_minutes = ((total_minutes // interval_minutes) + 1) * interval_minutes
+            
+            if aligned_minutes >= 24 * 60:
+                current = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            else:
+                aligned_hour = aligned_minutes // 60
+                aligned_minute = aligned_minutes % 60
+                current = current.replace(hour=aligned_hour, minute=aligned_minute, second=0, microsecond=0)
+        
+        return current
     
     def _find_tp_sl_exit(self, bot, symbol, timeframe, entry_time, entry_price, tp_price, sl_price):
         """

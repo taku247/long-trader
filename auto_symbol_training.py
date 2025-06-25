@@ -766,12 +766,22 @@ class AutoSymbolTrainer:
 
 
 async def main():
-    """テスト実行"""
+    """コマンドライン引数によるシンボル追加実行"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Auto Symbol Training System')
+    parser.add_argument('--symbol', type=str, default='HYPE', help='Symbol to add (default: HYPE)')
+    parser.add_argument('--days', type=int, default=90, help='Days of historical data (default: 90)')
+    parser.add_argument('--verbose', action='store_true', help='Verbose output')
+    
+    args = parser.parse_args()
+    
     trainer = AutoSymbolTrainer()
     
     try:
-        # 有効な銘柄でのテスト実行
-        execution_id = await trainer.add_symbol_with_training("HYPE")
+        # 指定された銘柄でのテスト実行
+        print(f"🚀 Starting automatic training for symbol: {args.symbol}")
+        execution_id = await trainer.add_symbol_with_training(args.symbol)
         print(f"Execution completed: {execution_id}")
         
         # 実行状況の確認

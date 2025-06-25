@@ -34,6 +34,7 @@ class FailReason(Enum):
     INSUFFICIENT_DATA_QUALITY = "insufficient_data_quality"
     INSUFFICIENT_RESOURCES = "insufficient_resources"
     DATABASE_CONNECTION_FAILED = "database_connection_failed"
+    CONFIG_VALIDATION_FAILED = "config_validation_failed"
 
 
 @dataclass
@@ -146,18 +147,23 @@ class SymbolEarlyFailValidator:
             if not result.passed:
                 return result
             
-            # 7. 厳格データ品質（重め、30秒タイムアウト）
+            # 7. 戦略設定バリデーション（軽量）
+            result = await self._check_strategy_config_validation(symbol)
+            if not result.passed:
+                return result
+            
+            # 8. 厳格データ品質（重め、30秒タイムアウト）
             result = await self._check_strict_data_quality(symbol)
             if not result.passed:
                 return result
             
-            # 8. 既存のOHLCV履歴データチェック（90日分）
+            # 9. 既存のOHLCV履歴データチェック（90日分）
             if self.config.get("enable_ohlcv_check", True):
                 result = await self._check_historical_data_availability(symbol)
                 if not result.passed:
                     return result
             
-            # 9. カスタム検証ルール実行
+            # 10. カスタム検証ルール実行
             for custom_validator in self.custom_validators:
                 try:
                     result = custom_validator(symbol)
@@ -645,6 +651,81 @@ class SymbolEarlyFailValidator:
                 metadata={"error_details": str(e)}
             )
     
+    async def _check_strategy_config_validation(self, symbol: str) -> EarlyFailResult:
+        """戦略設定バリデーション"""
+        try:
+            # 設定値を取得
+            strategy_config = self.config.get('strategy_config_validation', {})
+            if not strategy_config.get('enabled', True):
+                return EarlyFailResult(symbol=symbol, passed=True, metadata={"skipped": "strategy_config_validation_disabled"})
+            
+            # 必須戦略の存在確認
+            required_strategies = strategy_config.get('required_strategies', ['Conservative_ML', 'Aggressive_Traditional', 'Full_ML'])
+            available_strategies = []
+            
+            # 戦略設定マネージャーから利用可能戦略を取得
+            try:
+                from config_manager import ConfigManager
+                config_manager = ConfigManager()
+                
+                for strategy in required_strategies:
+                    try:
+                        # 各戦略の設定が取得できるかチェック
+                        conditions = config_manager.get_entry_conditions('1h', strategy)
+                        if conditions:
+                            available_strategies.append(strategy)
+                    except Exception:
+                        # 戦略設定取得失敗は無視（後で判定）
+                        pass
+                        
+            except ImportError:
+                # ConfigManagerが利用できない場合はスキップ
+                return EarlyFailResult(
+                    symbol=symbol, passed=True,
+                    metadata={"warning": "ConfigManager未利用のため戦略設定バリデーションをスキップ"}
+                )
+            
+            # 最低限必要な戦略数チェック
+            min_required = strategy_config.get('min_required_strategies', 2)
+            if len(available_strategies) < min_required:
+                missing_strategies = set(required_strategies) - set(available_strategies)
+                error_message = self.config.get('fail_messages', {}).get('config_validation_failed',
+                                               "戦略設定不足: {available}/{required} 戦略のみ利用可能（不足: {missing}）").format(
+                    available=len(available_strategies), required=len(required_strategies), 
+                    missing=', '.join(missing_strategies))
+                suggestion = self.config.get('suggestions', {}).get('config_validation_failed',
+                                           "config_manager.py の戦略設定を確認してください")
+                
+                return EarlyFailResult(
+                    symbol=symbol, passed=False,
+                    fail_reason=FailReason.CONFIG_VALIDATION_FAILED,
+                    error_message=error_message,
+                    suggestion=suggestion,
+                    metadata={
+                        "available_strategies": available_strategies,
+                        "required_strategies": required_strategies,
+                        "missing_strategies": list(missing_strategies)
+                    }
+                )
+            
+            # 戦略設定バリデーション成功
+            return EarlyFailResult(
+                symbol=symbol, passed=True,
+                metadata={
+                    "available_strategies": available_strategies,
+                    "required_strategies": required_strategies,
+                    "strategy_config_valid": True
+                }
+            )
+            
+        except Exception as e:
+            return EarlyFailResult(
+                symbol=symbol, passed=False,
+                fail_reason=FailReason.CONFIG_VALIDATION_FAILED,
+                error_message=f"戦略設定バリデーション中にエラー: {str(e)}",
+                suggestion="config_manager.py の設定を確認してください"
+            )
+    
     def _log_validation_success(self, symbol: str):
         """Early Fail検証成功時の目立つサーバーログ出力"""
         # ログ設定取得
@@ -668,7 +749,7 @@ class SymbolEarlyFailValidator:
                 f"🚀 EARLY FAIL VALIDATION SUCCESS - {symbol} 🚀",
                 border,
                 f"⏰ 検証完了時刻: {validation_time}",
-                f"🔍 検証項目: 9項目すべて合格",
+                f"🔍 検証項目: 10項目すべて合格",
                 f"📊 実行内容:",
                 f"   ✅ 1. シンボル存在チェック",
                 f"   ✅ 2. 取引所サポートチェック", 
@@ -676,9 +757,10 @@ class SymbolEarlyFailValidator:
                 f"   ✅ 4. 取引所アクティブ状態（取引可能）",
                 f"   ✅ 5. システムリソース（CPU/メモリ/ディスク正常）",
                 f"   ✅ 6. データベース接続性（execution_logs・analysis DB）",
-                f"   ✅ 7. データ品質（95%以上完全性）",
-                f"   ✅ 8. 履歴データ可用性（90日分）",
-                f"   ✅ 9. カスタム検証ルール",
+                f"   ✅ 7. 戦略設定バリデーション（利用可能戦略確認）",
+                f"   ✅ 8. データ品質（95%以上完全性）",
+                f"   ✅ 9. 履歴データ可用性（90日分）",
+                f"   ✅ 10. カスタム検証ルール",
                 "",
                 f"🎯 {symbol} は全ての品質基準を満たしており、分析処理の実行が承認されました",
                 f"🔥 マルチプロセス分析を安全に開始できます",
@@ -693,15 +775,15 @@ class SymbolEarlyFailValidator:
             success_messages = [
                 "",
                 f"🚀 EARLY FAIL SUCCESS - {symbol} 🚀",
-                f"⏰ {validation_time} | 🔍 9項目合格 | 🎯 分析承認済み",
-                f"✅ API接続・取引状態・リソース・DB接続・データ品質 すべて正常",
+                f"⏰ {validation_time} | 🔍 10項目合格 | 🎯 分析承認済み",
+                f"✅ API接続・取引状態・リソース・DB接続・戦略設定・データ品質 すべて正常",
                 ""
             ]
         
         else:
             # ミニマルスタイル
             success_messages = [
-                f"🚀 {symbol}: Early Fail検証完了 - 9項目すべて合格 🎯"
+                f"🚀 {symbol}: Early Fail検証完了 - 10項目すべて合格 🎯"
             ]
         
         # ログレベル取得

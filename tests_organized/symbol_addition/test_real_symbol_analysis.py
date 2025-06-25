@@ -12,7 +12,8 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, project_root)
 
 def test_real_symbol_analysis():
     """実在のシンボル（HYPE）で分析をテスト"""

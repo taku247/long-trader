@@ -32,7 +32,7 @@ class AutoSymbolTrainer:
         self.execution_db = ExecutionLogDatabase()
         # 実行ログの一時保存は廃止（データベースを使用）
         
-    async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False) -> str:
+    async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False, custom_period_settings: dict = None) -> str:
         """
         銘柄を追加して指定戦略・時間足で自動学習・バックテストを実行
         
@@ -109,11 +109,11 @@ class AutoSymbolTrainer:
             
             # Step 1: データ取得と検証
             await self._execute_step(execution_id, 'data_fetch', 
-                                   self._fetch_and_validate_data, symbol)
+                                   self._fetch_and_validate_data, symbol, custom_period_settings)
             
             # Step 2: 選択された戦略・時間足でバックテスト実行
             await self._execute_step(execution_id, 'backtest', 
-                                   self._run_comprehensive_backtest, symbol, selected_strategies, selected_timeframes, strategy_configs, skip_pretask_creation)
+                                   self._run_comprehensive_backtest, symbol, selected_strategies, selected_timeframes, strategy_configs, skip_pretask_creation, custom_period_settings)
             
             # Step 3: ML学習実行
             await self._execute_step(execution_id, 'ml_training', 
@@ -328,7 +328,7 @@ class AutoSymbolTrainer:
         # 3. デフォルト: Hyperliquid
         return 'hyperliquid'
     
-    async def _fetch_and_validate_data(self, symbol: str) -> Dict:
+    async def _fetch_and_validate_data(self, symbol: str, custom_period_settings: dict = None) -> Dict:
         """データ取得と検証（Hyperliquidバリデーション統合）"""
         
         try:
@@ -363,8 +363,39 @@ class AutoSymbolTrainer:
             
             try:
                 self.logger.info(f"🚀 STARTING OHLCV DATA VALIDATION for {symbol}")
-                # 1時間足、90日分のデータを取得
-                ohlcv_data = await api_client.get_ohlcv_data_with_period(symbol, '1h', days=90)
+                self.logger.info(f"📅 カスタム期間設定受信: {custom_period_settings}")
+                
+                # 期間設定に応じてデータ取得
+                if custom_period_settings and custom_period_settings.get('mode') == 'custom':
+                    self.logger.info(f"📅 カスタム期間設定使用: {custom_period_settings}")
+                    
+                    # カスタム期間に200本前データを含む期間でデータ取得
+                    from datetime import datetime, timedelta, timezone
+                    import dateutil.parser
+                    
+                    try:
+                        start_date_str = custom_period_settings.get('start_date')
+                        end_date_str = custom_period_settings.get('end_date')
+                        
+                        start_time = dateutil.parser.parse(start_date_str).replace(tzinfo=timezone.utc)
+                        end_time = dateutil.parser.parse(end_date_str).replace(tzinfo=timezone.utc)
+                        
+                        # 200本前データ（1時間足で200時間前）
+                        pre_period_hours = 200
+                        adjusted_start_time = start_time - timedelta(hours=pre_period_hours)
+                        
+                        self.logger.info(f"📅 カスタム期間データ取得: {adjusted_start_time.strftime('%Y-%m-%d %H:%M')} ～ {end_time.strftime('%Y-%m-%d %H:%M')}")
+                        
+                        # カスタム期間でのデータ取得
+                        ohlcv_data = await api_client.get_ohlcv_data(symbol, '1h', adjusted_start_time, end_time)
+                        
+                    except Exception as e:
+                        self.logger.error(f"カスタム期間設定エラー: {e}")
+                        # フォールバック: デフォルト90日間
+                        ohlcv_data = await api_client.get_ohlcv_data_with_period(symbol, '1h', days=90)
+                else:
+                    # デフォルト: 1時間足、90日分のデータを取得
+                    ohlcv_data = await api_client.get_ohlcv_data_with_period(symbol, '1h', days=90)
                 
                 data_info = {
                     'records': len(ohlcv_data),
@@ -374,9 +405,17 @@ class AutoSymbolTrainer:
                     }
                 }
                 
-                # 3. データ品質チェック
-                if data_info['records'] < 1000:
-                    raise ValueError(f"{symbol}: Only {data_info['records']} data points available (minimum: 1000)")
+                # 3. データ品質チェック（カスタム期間設定時は柔軟に調整）
+                if custom_period_settings and custom_period_settings.get('mode') == 'custom':
+                    # カスタム期間設定時は最低100データポイント（約4日分）
+                    minimum_required = 100
+                    if data_info['records'] < minimum_required:
+                        raise ValueError(f"{symbol}: Only {data_info['records']} data points available (minimum for custom period: {minimum_required})")
+                    self.logger.info(f"✅ カスタム期間データ品質OK: {data_info['records']}データポイント")
+                else:
+                    # デフォルト期間（90日）の場合は従来通り1000データポイント必要
+                    if data_info['records'] < 1000:
+                        raise ValueError(f"{symbol}: Only {data_info['records']} data points available (minimum: 1000)")
                 
                 self.logger.success(f"📊 Data fetched: {data_info['records']} records for {symbol}")
                 
@@ -416,7 +455,7 @@ class AutoSymbolTrainer:
             
             raise
     
-    async def _run_comprehensive_backtest(self, symbol: str, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False) -> Dict:
+    async def _run_comprehensive_backtest(self, symbol: str, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False, custom_period_settings: dict = None) -> Dict:
         """全戦略・全時間足でバックテスト実行（選択的実行対応）"""
         
         try:
@@ -458,46 +497,14 @@ class AutoSymbolTrainer:
             
             # バックテスト実行（ScalableAnalysisSystemを使用 + 進捗ロガー統合）
             # 支持線・抵抗線データ不足時はシグナルなしとして継続
-            try:
-                # 実行IDを取得（現在の実行IDを使用）
-                current_execution_id = getattr(self, '_current_execution_id', None)
-                
-                processed_count = self.analysis_system.generate_batch_analysis(
-                    configs, 
-                    symbol=symbol, 
-                    execution_id=current_execution_id,
-                    skip_pretask_creation=skip_pretask_creation
-                )
-                
-                if processed_count == 0:
-                    # 全戦略で有効なシグナルが見つからなかった場合
-                    warning_msg = f"⚠️ {symbol}: 現在の市場状況では有効な支持線・抵抗線が検出されませんでした。シグナルなしとして記録します。"
-                    self.logger.warning(warning_msg)
-                    print(warning_msg)
-                    
-                    # シグナルなしの場合も"成功"として扱う
-                    # analysesテーブルにシグナルなしのレコードを作成
-                    for config in configs:
-                        self._create_no_signal_record(symbol, config, current_execution_id)
-                    
-                    # processed_countを設定数に変更（シグナルなしでも処理完了として扱う）
-                    processed_count = len(configs)
-                    
-            except Exception as e:
-                if "支持線" in str(e) or "抵抗線" in str(e) or "CriticalAnalysis" in str(e):
-                    # 支持線・抵抗線データ不足は警告扱いとし、処理継続
-                    warning_msg = f"⚠️ {symbol}: 支持線・抵抗線検出エラー - {str(e)[:100]}。シグナルなしとして継続します。"
-                    self.logger.warning(warning_msg)
-                    print(warning_msg)
-                    
-                    # エラーの場合もシグナルなしレコードを作成
-                    for config in configs:
-                        self._create_no_signal_record(symbol, config, getattr(self, '_current_execution_id', None), str(e)[:100])
-                    
-                    processed_count = len(configs)  # エラーでも処理完了として扱う
-                else:
-                    # その他のエラーは従来通り例外として処理
-                    raise
+            # 🔧 修正: 戦略別独立実行でエラー隔離を実現
+            current_execution_id = getattr(self, '_current_execution_id', None)
+            processed_count = self._execute_strategies_independently(
+                configs, 
+                symbol, 
+                current_execution_id,
+                custom_period_settings
+            )
             
             # 結果の集計（データベースから取得）
             results = []
@@ -712,6 +719,85 @@ class AutoSymbolTrainer:
             
         except Exception as e:
             self.logger.error(f"シグナルなしレコード作成エラー: {e}")
+
+    def _execute_strategies_independently(self, configs: List[Dict], symbol: str, execution_id: str, custom_period_settings: dict = None) -> int:
+        """
+        戦略を独立実行してエラー隔離を実現
+        各戦略の失敗が他戦略に影響しないよう個別処理
+        
+        Args:
+            configs: 戦略設定リスト
+            symbol: 銘柄名
+            execution_id: 実行ID
+            custom_period_settings: カスタム期間設定
+            
+        Returns:
+            成功した戦略数
+        """
+        success_count = 0
+        
+        self.logger.info(f"🔧 戦略別独立実行開始: {len(configs)}戦略")
+        
+        for i, config in enumerate(configs):
+            strategy_name = f"{config['strategy']}-{config['timeframe']}"
+            
+            try:
+                self.logger.info(f"  戦略 {i+1}/{len(configs)}: {strategy_name}")
+                
+                # 個別戦略分析を実行
+                result = self._execute_single_strategy(
+                    config, 
+                    symbol, 
+                    execution_id, 
+                    custom_period_settings
+                )
+                
+                if result:
+                    success_count += 1
+                    self.logger.info(f"  ✅ {strategy_name}: 分析成功")
+                else:
+                    self.logger.warning(f"  ⚠️ {strategy_name}: シグナルなし")
+                    # シグナルなしレコード作成
+                    self._create_no_signal_record(symbol, config, execution_id)
+                    
+            except Exception as e:
+                error_msg = str(e)
+                self.logger.error(f"  ❌ {strategy_name}: 分析エラー - {error_msg[:100]}")
+                
+                # エラーの場合もシグナルなしレコード作成（エラー情報付き）
+                self._create_no_signal_record(symbol, config, execution_id, error_msg[:100])
+                
+                # 重要: 他戦略の処理を継続
+                continue
+        
+        self.logger.info(f"🎯 独立実行結果: {success_count}/{len(configs)} 戦略成功")
+        return success_count
+    
+    def _execute_single_strategy(self, config: Dict, symbol: str, execution_id: str, custom_period_settings: dict = None) -> bool:
+        """
+        単一戦略の分析実行
+        
+        Args:
+            config: 戦略設定
+            symbol: 銘柄名
+            execution_id: 実行ID
+            custom_period_settings: カスタム期間設定
+            
+        Returns:
+            成功フラグ
+        """
+        # 単一設定でバッチ分析を実行
+        single_config_list = [config]
+        
+        processed_count = self.analysis_system.generate_batch_analysis(
+            single_config_list,
+            symbol=symbol,
+            execution_id=execution_id,
+            skip_pretask_creation=True,  # 既にPre-task作成済み
+            custom_period_settings=custom_period_settings
+        )
+        
+        return processed_count > 0
 
     def get_execution_status(self, execution_id: str) -> Optional[Dict]:
         """実行状況の取得"""

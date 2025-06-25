@@ -1716,6 +1716,13 @@ class WebDashboard:
                 selected_timeframes = data.get('selected_timeframes') 
                 strategy_configs = data.get('strategy_configs')  # カスタム戦略設定
                 
+                # 期間指定パラメータ
+                period_mode = data.get('period_mode', 'auto')  # auto/custom
+                custom_start_date = data.get('start_date')
+                custom_end_date = data.get('end_date')
+                
+                self.logger.info(f"📅 Period settings: mode={period_mode}, start={custom_start_date}, end={custom_end_date}")
+                
                 # Optional validation - warn but don't block
                 import asyncio
                 from hyperliquid_validator import HyperliquidValidator, ValidationContext
@@ -1890,7 +1897,12 @@ class WebDashboard:
                                 symbol=symbol,
                                 execution_id=execution_id,
                                 execution_mode=exec_mode,
-                                selected_strategy_ids=selected_strategy_ids
+                                selected_strategy_ids=selected_strategy_ids,
+                                custom_period_settings={
+                                    'mode': period_mode,
+                                    'start_date': custom_start_date,
+                                    'end_date': custom_end_date
+                                } if period_mode == 'custom' else None
                             )
                         )
                         self.logger.info(f"Symbol {symbol} addition completed: {result}")

@@ -58,16 +58,7 @@ class ScalableAnalysisSystem:
         self.data_dir = self.base_dir / "data"
         self.compressed_dir = self.base_dir / "compressed"
         
-        # DB使用ログ機能追加
-        caller_frame = inspect.currentframe().f_back
-        caller_file = caller_frame.f_code.co_filename if caller_frame else "unknown"
-        caller_function = caller_frame.f_code.co_name if caller_frame else "unknown"
-        
-        logger.info(f"🔍 ScalableAnalysisSystem初期化:")
-        logger.info(f"  📁 base_dir: {self.base_dir.absolute()}")
-        logger.info(f"  🗃️ DB path: {self.db_path.absolute()}")
-        logger.info(f"  📍 呼び出し元: {os.path.basename(caller_file)}:{caller_function}")
-        logger.info(f"  🕐 現在ディレクトリ: {os.getcwd()}")
+        # Note: 初期化ログを削除（冗長出力防止）
         
         for dir_path in [self.charts_dir, self.data_dir, self.compressed_dir]:
             dir_path.mkdir(exist_ok=True)
@@ -87,41 +78,31 @@ class ScalableAnalysisSystem:
     
     def init_database(self):
         """SQLiteデータベースを初期化"""
-        logger.info(f"🗃️ データベース初期化: {self.db_path.absolute()}")
-        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
             # 既存テーブル確認
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
             existing_tables = [row[0] for row in cursor.fetchall()]
-            logger.info(f"  📋 既存テーブル: {existing_tables}")
             
             # analysesテーブルが存在する場合、カラム構造を確認
             if 'analyses' in existing_tables:
                 cursor.execute("PRAGMA table_info(analyses);")
                 columns = [row[1] for row in cursor.fetchall()]
-                logger.info(f"  📊 analysesテーブルカラム: {columns}")
                 
                 # execution_idカラムの存在確認
-                if 'execution_id' in columns:
-                    logger.info("  ✅ execution_idカラム: 存在")
-                else:
-                    logger.warning("  ⚠️ execution_idカラム: 不在")
+                if 'execution_id' not in columns:
                     # execution_idカラムを追加
                     cursor.execute('ALTER TABLE analyses ADD COLUMN execution_id TEXT')
-                    logger.info("  ✅ execution_idカラムを追加しました")
+                    logger.info("execution_idカラムを追加しました")
                 
-                if 'task_status' in columns:
-                    logger.info("  ✅ task_statusカラム: 存在")
-                else:
-                    logger.warning("  ⚠️ task_statusカラム: 不在")
+                if 'task_status' not in columns:
                     # 不足カラムを追加
                     cursor.execute('ALTER TABLE analyses ADD COLUMN task_status TEXT DEFAULT "pending"')
                     cursor.execute('ALTER TABLE analyses ADD COLUMN task_started_at TIMESTAMP')
                     cursor.execute('ALTER TABLE analyses ADD COLUMN task_completed_at TIMESTAMP')
                     cursor.execute('ALTER TABLE analyses ADD COLUMN error_message TEXT')
-                    logger.info("  ✅ task_statusカラム等を追加しました")
+                    logger.info("task_statusカラム等を追加しました")
             
             # 分析メタデータテーブル
             cursor.execute('''
@@ -188,7 +169,7 @@ class ScalableAnalysisSystem:
             logger.warning(f"Failed to check cancellation status: {e}")
             return False
     
-    def generate_batch_analysis(self, batch_configs, max_workers=None, symbol=None, execution_id=None, skip_pretask_creation=False):
+    def generate_batch_analysis(self, batch_configs, max_workers=None, symbol=None, execution_id=None, skip_pretask_creation=False, custom_period_settings=None):
         """
         バッチで大量の分析を並列生成
         
@@ -198,7 +179,11 @@ class ScalableAnalysisSystem:
             symbol: 銘柄名（進捗表示用）
             execution_id: 実行ID（進捗表示用）
             skip_pretask_creation: Pre-task作成をスキップするかどうか
+            custom_period_settings: カスタム期間設定
         """
+        # カスタム期間設定の初期化（安全性のため最初に実行）
+        custom_period_settings = custom_period_settings or {}
+        
         if max_workers is None:
             max_workers = min(cpu_count(), 4)  # Rate Limit対策で最大4並列
         
@@ -223,6 +208,13 @@ class ScalableAnalysisSystem:
         # バッチをチャンクに分割
         chunk_size = max(1, len(batch_configs) // max_workers)
         chunks = [batch_configs[i:i + chunk_size] for i in range(0, len(batch_configs), chunk_size)]
+        
+        # 期間設定を環境変数に設定（子プロセス用）
+        import os
+        import json
+        if custom_period_settings and custom_period_settings.get('mode'):
+            os.environ['CUSTOM_PERIOD_SETTINGS'] = json.dumps(custom_period_settings)
+            logger.info(f"📅 期間設定を環境変数に設定: {custom_period_settings}")
         
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = []
@@ -509,15 +501,78 @@ class ScalableAnalysisSystem:
             logger.warning(f"時間足設定読み込みエラー: {e}")
         return {}
     
+    def _calculate_period_with_history(self, custom_period_settings, timeframe):
+        """カスタム期間に200本前データを含む期間を計算"""
+        try:
+            from datetime import datetime, timedelta
+            
+            start_date = custom_period_settings.get('start_date')
+            end_date = custom_period_settings.get('end_date')
+            
+            if not start_date or not end_date:
+                logger.warning("カスタム期間設定に開始・終了日時がありません")
+                return 90  # デフォルト
+            
+            # 文字列から日時に変換
+            if isinstance(start_date, str):
+                start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            else:
+                start_dt = start_date
+                
+            if isinstance(end_date, str):
+                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            else:
+                end_dt = end_date
+            
+            # 時間足に応じた200本前の期間を計算
+            timeframe_minutes = {
+                '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30, '1h': 60
+            }
+            
+            minutes_per_candle = timeframe_minutes.get(timeframe, 60)
+            history_period = timedelta(minutes=200 * minutes_per_candle)
+            
+            # 開始日時から200本前を計算
+            actual_start = start_dt - history_period
+            
+            # 必要な総期間を日数で計算
+            total_period = end_dt - actual_start
+            period_days = max(total_period.days + 1, 7)  # 最低7日
+            
+            logger.info(f"📅 期間計算: {start_dt} → {end_dt}, 200本前含む: {actual_start} ({period_days}日)")
+            return period_days
+            
+        except Exception as e:
+            logger.error(f"期間計算エラー: {e}")
+            return 90  # デフォルト
+    
     def _generate_real_analysis(self, symbol, timeframe, config, custom_period_days=None):
         """条件ベースのハイレバレッジ分析 - 市場条件を満たした場合のみシグナル生成"""
+        # 変数初期化（安全性確保）
+        custom_period_settings = None
+        
         try:
+            # 環境変数からカスタム期間設定を読み取り
+            try:
+                import os
+                if 'CUSTOM_PERIOD_SETTINGS' in os.environ:
+                    custom_period_settings = json.loads(os.environ['CUSTOM_PERIOD_SETTINGS'])
+                    logger.info(f"📅 環境変数から期間設定読み取り: {custom_period_settings}")
+            except Exception as e:
+                logger.warning(f"期間設定環境変数読み取りエラー: {e}")
+                custom_period_settings = None
+            
             # 時間足設定から評価期間を動的に取得
             tf_config = self._load_timeframe_config(timeframe)
             
+            # 期間設定の優先順位: custom_period_days > custom_period_settings > 設定ファイル
             if custom_period_days is not None:
                 evaluation_period_days = custom_period_days
                 print(f"📅 カスタム評価期間: {evaluation_period_days}日")
+            elif custom_period_settings and custom_period_settings.get('mode') == 'custom':
+                # カスタム期間の場合は200本前データを含む期間を計算
+                evaluation_period_days = self._calculate_period_with_history(custom_period_settings, timeframe)
+                print(f"📅 ユーザー指定期間+200本: {evaluation_period_days}日 ({timeframe}足)")
             else:
                 evaluation_period_days = tf_config.get('data_days', 90)  # 設定ファイルから取得
                 print(f"📅 時間足別評価期間: {evaluation_period_days}日 ({timeframe}足設定)")
@@ -582,19 +637,18 @@ class ScalableAnalysisSystem:
                 }
                 evaluation_interval = default_intervals.get(timeframe, timedelta(hours=4))
             
-            # 実データに基づく最初の有効な評価時刻を決定
-            data_start_time = pd.to_datetime(ohlcv_data.index[0], utc=True) if hasattr(ohlcv_data.index[0], 'tz_localize') else pd.to_datetime(ohlcv_data.index[0]).tz_localize('UTC')
-            
-            # 評価間隔の境界に合う最初の時刻を見つける
-            effective_start_time = self._find_first_valid_evaluation_time(data_start_time, evaluation_interval)
-            
-            if effective_start_time > start_time:
-                logger.warning(f"⚠️ データ制約により分析開始時刻を調整: {start_time.strftime('%Y-%m-%d %H:%M')} → {effective_start_time.strftime('%Y-%m-%d %H:%M')}")
+            # 初期化: effective_start_timeをstart_timeに設定（後でデータに基づいて調整）
+            effective_start_time = start_time
             
             # 条件ベースの分析実行
             current_time = effective_start_time
             total_evaluations = 0
             signals_generated = 0
+            
+            # 重要変数の初期化（安全性確保）
+            result = {}
+            ohlcv_data = None
+            bot = None
             
             # 評価回数の動的計算（期間カバー率を改善）
             config_max_evaluations = tf_config.get('max_evaluations', 100)
@@ -626,7 +680,7 @@ class ScalableAnalysisSystem:
                 try:
                     # 出力抑制で市場条件の評価（バックテストフラグ付き）
                     with suppress_all_output():
-                        result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time)
+                        result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time, custom_period_settings=custom_period_settings)
                     
                     if not result or 'current_price' not in result:
                         current_time += evaluation_interval
@@ -702,8 +756,8 @@ class ScalableAnalysisSystem:
                             if hasattr(bot, '_cached_data') and not bot._cached_data.empty:
                                 ohlcv_data = bot._cached_data
                             else:
-                                # ボットのfetch_market_dataメソッドを使用
-                                ohlcv_data = bot._fetch_market_data(symbol, timeframe)
+                                # ボットのfetch_market_dataメソッドを使用（カスタム期間設定を渡す）
+                                ohlcv_data = bot._fetch_market_data(symbol, timeframe, custom_period_settings)
                             
                             if ohlcv_data.empty:
                                 raise Exception("OHLCVデータが空です")
@@ -714,6 +768,17 @@ class ScalableAnalysisSystem:
                         
                         if len(ohlcv_data) < 50:
                             raise Exception(f"支持線・抵抗線検出に必要なデータが不足しています。{len(ohlcv_data)}本（最低50本必要）")
+                        
+                        # 実データに基づく最初の有効な評価時刻を決定（初回データ取得時のみ）
+                        if total_evaluations == 0:
+                            data_start_time = pd.to_datetime(ohlcv_data.index[0], utc=True) if hasattr(ohlcv_data.index[0], 'tz_localize') else pd.to_datetime(ohlcv_data.index[0]).tz_localize('UTC')
+                            
+                            # 評価間隔の境界に合う最初の時刻を見つける
+                            effective_start_time = self._find_first_valid_evaluation_time(data_start_time, evaluation_interval)
+                            
+                            if effective_start_time > start_time:
+                                logger.warning(f"⚠️ データ制約により分析開始時刻を調整: {start_time.strftime('%Y-%m-%d %H:%M')} → {effective_start_time.strftime('%Y-%m-%d %H:%M')}")
+                                current_time = effective_start_time  # current_timeも更新
                         
                         # 柔軟な支持線・抵抗線検出器を初期化（設定ファイル対応）
                         detector = FlexibleSupportResistanceDetector(
@@ -729,6 +794,7 @@ class ScalableAnalysisSystem:
                         
                         # 支持線・抵抗線を検出（リアルタイムは全データ使用）
                         print(f"       リアルタイムモード: 全データ使用 {len(ohlcv_data)}本")
+                        print(f"       🔍 支持線・抵抗線検出開始 (評価{total_evaluations}回目, 時刻: {current_time.strftime('%Y-%m-%d %H:%M')})")
                         support_levels, resistance_levels = detector.detect_levels(ohlcv_data, current_price)
                         
                         # 上位レベルのみ選択（パフォーマンス向上）
@@ -775,11 +841,13 @@ class ScalableAnalysisSystem:
                         )
                         
                     except Exception as e:
-                        # 支持線・抵抗線データ不足により分析を停止
+                        # 支持線・抵抗線データ不足の場合は、この評価をスキップして次に進む
                         error_msg = f"支持線・抵抗線データの検出・分析に失敗: {str(e)}"
-                        print(f"❌ {symbol} {timeframe} {config}: {error_msg}")
-                        logger.error(f"Support/resistance analysis error for {symbol}: {error_msg}")
-                        raise Exception(f"戦略分析失敗 - {error_msg}")
+                        print(f"⚠️ {symbol} {timeframe} {config}: {error_msg} (評価{total_evaluations}をスキップ)")
+                        print(f"   📅 スキップした時刻: {current_time.strftime('%Y-%m-%d %H:%M')} → 次の評価に継続")
+                        logger.warning(f"Support/resistance analysis failed for {symbol} at {current_time}: {error_msg}")
+                        # 次の評価時点に進む（continue先でevaluation_intervalが加算される）
+                        continue
                     
                     # 🔧 重要な修正: 実際の市場データから各トレードのエントリー価格を取得
                     # 理由: current_priceが固定値のため、実際の時系列データを使用

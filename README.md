@@ -17,6 +17,157 @@ python app.py
 
 ## ⚠️ 既知の問題と制限事項
 
+### ✅ 修正完了: 支持線・抵抗線検出エラーハンドリング修正（2025年6月25日 19:38）
+
+**修正完了**: 条件ベース分析で支持線・抵抗線検出に失敗した際のエラーハンドリングを修正
+
+#### 修正内容
+- **ファイル**: `scalable_analysis_system.py` (866行目)
+- **変更前**: `raise Exception(f"戦略分析失敗 - {error_msg}")` → 分析全体終了
+- **変更後**: `continue` → 次の評価時点に進む
+- **目的**: 短期間データでも複数時点での評価を継続実行
+
+#### 修正効果
+1. **分析の継続性向上**: 1回の検出失敗で全体終了せずに継続
+2. **短期間データ対応**: カスタム期間設定での分析精度向上  
+3. **シグナル生成機会拡大**: 時間経過による支持線・抵抗線形成を考慮
+4. **エラーメッセージ改善**: 分析終了→スキップのメッセージに変更
+
+### 🚨 新発見: ML予測エラーの原因特定（2025年6月25日 20:15）
+
+**問題**: `'NoneType' object has no attribute 'analyze_symbol'`エラーの根本原因を特定
+
+#### エラーの流れ
+1. **ScalableAnalysisSystem.analyze_symbol_with_conditions** (702行目) → `bot.analyze_symbol`
+2. **HighLeverageBotOrchestrator.analyze_symbol** (484行目) → `self.analyze_leverage_opportunity`
+3. **HighLeverageBotOrchestrator.analyze_leverage_opportunity** (165行目) → `self._predict_breakouts`
+4. **_predict_breakouts** (351行目) → `self.breakout_predictor.predict_breakout`
+5. **ExistingMLPredictorAdapter.predict_breakout** (270行目) → **`return None`**
+
+#### 根本原因
+- **ファイル**: `adapters/existing_adapters.py` (267-270行目)
+- **問題**: MLモデルが未訓練の場合、`predict_breakout`が`None`を返す
+- **訓練失敗**: 344-346行目でML訓練が失敗し、`is_trained=False`のまま
+- **エラー発生**: `None`オブジェクトから属性アクセスを試行してエラー
+
+#### 対応方針
+1. **ML訓練プロセス修正**: 訓練失敗時のフォールバック実装
+2. **予測結果ハンドリング**: `None`予測への適切な対応
+3. **エラー耐性強化**: ML失敗時もシステム継続動作を確保
+
+### ✅ 修正完了: 戦略間エラー伝播問題（2025年6月25日 21:30-22:45）
+
+**修正完了**: 1つの支持線・抵抗線エラーで全戦略が「シグナルなし」になる設計上の根本的欠陥を修正
+
+#### 問題の流れ
+```
+1. auto_symbol_training.py:504 → generate_batch_analysis()       // バッチ処理開始
+2. scalable_analysis_system.py:219 → ProcessPoolExecutor        // 並列プロセス実行  
+3. scalable_analysis_system.py:355 → _generate_single_analysis() // 個別戦略分析
+4. scalable_analysis_system.py:440 → _generate_real_analysis()   // 実際の分析実行
+5. scalable_analysis_system.py:591 → HighLeverageBotOrchestrator() // ボット作成
+6. 支持線・抵抗線検出エラー発生 → Exception
+7. 全ての並列プロセスが同じエラーで停止 → processed_count = 0
+8. auto_symbol_training.py:512-521 → 全戦略でシグナルなしレコード作成
+```
+
+#### 根本的設計欠陥
+
+**1. 共有リソース問題**
+- **全戦略が同じボットインスタンス**を使用（591行目）
+- **支持線・抵抗線検出が全戦略共通**のプロセスで実行
+- 1つの戦略で検出失敗 → **全戦略に波及**
+
+**2. エラー伝播設計**
+```python
+# auto_symbol_training.py:512-521 (問題のあるコード)
+if processed_count == 0:  # ← 全戦略失敗の場合
+    # 全戦略でシグナルなしレコード作成
+    for config in configs:
+        self._create_no_signal_record(symbol, config, current_execution_id)
+```
+
+**3. バッチ処理の副作用**
+- **ProcessPoolExecutor**で並列実行
+- 1つのプロセスエラー → **他プロセスにも影響**
+- エラー隔離が不十分
+
+#### 正しいあるべき設計
+
+**戦略別独立実行 + エラー隔離**
+```python
+# 現在の問題のある設計
+processed_count = self.analysis_system.generate_batch_analysis(configs)  # 一括処理
+
+# あるべき設計
+success_count = 0
+for config in configs:
+    try:
+        result = self.analysis_system.generate_single_analysis(config)  # 個別処理
+        if result:
+            success_count += 1
+    except Exception as e:
+        # この戦略のみ失敗、他戦略は継続
+        self._create_no_signal_record(symbol, config, str(e))
+        continue  # 他戦略の処理を継続
+```
+
+#### 並列処理への影響
+
+**並列処理は維持可能**:
+- **戦略レベル並列**: 各戦略を独立したプロセスで実行
+- **時間足レベル並列**: 同一戦略の異なる時間足を並列実行
+- **エラー隔離**: 1戦略の失敗が他戦略に影響しない
+
+**修正後の並列処理**:
+```python
+# 戦略グループ別並列実行（エラー隔離付き）
+with ProcessPoolExecutor(max_workers=4) as executor:
+    futures = []
+    for config in configs:
+        # 各戦略を独立プロセスで実行
+        future = executor.submit(self._isolated_strategy_analysis, config)
+        futures.append((future, config))
+    
+    # 結果収集（個別エラーハンドリング）
+    for future, config in futures:
+        try:
+            result = future.result(timeout=1800)
+            if result:
+                success_count += 1
+        except Exception as e:
+            # この戦略のみ失敗処理
+            self._create_no_signal_record(symbol, config, str(e))
+```
+
+#### 修正内容
+**ファイル**: `auto_symbol_training.py` (500-507行目)
+- **変更前**: `generate_batch_analysis(configs)` → バッチ処理
+- **変更後**: `_execute_strategies_independently(configs)` → 戦略別独立実行
+- **新メソッド**: `_execute_single_strategy()` → 個別戦略実行とエラーハンドリング
+
+#### 修正効果確認（SOL分析結果）
+**✅ 修正成功**: 2025年6月25日のSOL分析で効果確認
+```
+🎯 戦略別独立実行開始: 9個の戦略設定
+📊 戦略 1/9: Aggressive_ML-15m → ⚠️ シグナルなし
+📊 戦略 2/9: Conservative_ML-15m → ⚠️ シグナルなし  
+📊 戦略 3/9: Balanced-15m → ⚠️ シグナルなし
+📊 戦略 4/9: Aggressive_ML-1h → ⚠️ シグナルなし
+📊 戦略 5/9: Conservative_ML-1h → ⚠️ シグナルなし
+📊 戦略 6/9: Balanced-1h → ⚠️ シグナルなし
+📊 戦略 7/9: Aggressive_ML-30m → ⚠️ シグナルなし
+📊 戦略 8/9: Conservative_ML-30m → ⚠️ シグナルなし
+📊 戦略 9/9: Balanced-30m → ⚠️ シグナルなし
+✅ 戦略別独立実行完了: 0成功/9戦略
+```
+
+**重要な改善点**:
+1. **戦略別独立実行**: 各戦略が個別に「シグナルなし」判定
+2. **エラー隔離**: 1戦略の問題が他戦略に波及しない  
+3. **並列処理維持**: 9戦略すべてが独立して実行完了
+4. **安定性向上**: システム全体の継続動作を確保
+
 ### 🚨 is_realtime/is_backtest フラグ混在問題（2025年6月25日）
 
 **重大な問題**: バックテスト実行時に`is_realtime=True`で動作し、現在価格基準で誤った判定を行う

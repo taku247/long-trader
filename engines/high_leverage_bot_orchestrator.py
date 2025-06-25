@@ -100,7 +100,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             print(f"❌ プラグイン初期化エラー: {e}")
             print("🔄 基本的なフォールバックシステムを使用します")
     
-    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h", is_backtest: bool = False, target_timestamp: datetime = None) -> LeverageRecommendation:
+    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None) -> LeverageRecommendation:
         """
         ハイレバレッジ機会を総合分析
         
@@ -144,7 +144,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                 print(f"⚡ 短期取引モード: {timeframe}足の最適化を適用")
             
             # === STEP 1: データ取得 ===
-            market_data = self._fetch_market_data(symbol, timeframe)
+            market_data = self._fetch_market_data(symbol, timeframe, custom_period_settings)
             
             if market_data.empty:
                 raise Exception(f"{symbol}の市場データ取得に失敗 - 実データが必要です")
@@ -208,7 +208,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             print(f"❌ 分析エラー: {e}")
             raise Exception(f"分析中にエラーが発生: {str(e)} - フォールバックは使用しません")
     
-    def _fetch_market_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+    def _fetch_market_data(self, symbol: str, timeframe: str, custom_period_settings: dict = None) -> pd.DataFrame:
         """市場データを取得（マルチ取引所APIクライアントを使用）"""
         
         # キャッシュされたデータがあれば使用
@@ -223,9 +223,44 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             # 取引所設定を読み込んでクライアントを初期化
             api_client = MultiExchangeAPIClient()
             
-            # 90日間のデータを取得（UTC時刻を使用）
-            end_time = datetime.now(timezone.utc)
-            start_time = end_time - timedelta(days=90)
+            # カスタム期間設定またはデフォルト90日間のデータ取得期間を決定
+            if custom_period_settings and custom_period_settings.get('mode') == 'custom':
+                # カスタム期間設定使用
+                from datetime import datetime as dt
+                import dateutil.parser
+                
+                start_date_str = custom_period_settings.get('start_date')
+                end_date_str = custom_period_settings.get('end_date')
+                
+                try:
+                    # ISO形式の日時文字列をパース
+                    start_time = dateutil.parser.parse(start_date_str).replace(tzinfo=timezone.utc)
+                    end_time = dateutil.parser.parse(end_date_str).replace(tzinfo=timezone.utc)
+                    
+                    # 200本前データを考慮した期間調整
+                    timeframe_minutes = {
+                        '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30, 
+                        '1h': 60, '2h': 120, '4h': 240, '6h': 360, '12h': 720, '1d': 1440
+                    }
+                    
+                    if timeframe in timeframe_minutes:
+                        pre_period_minutes = 200 * timeframe_minutes[timeframe]
+                        start_time = start_time - timedelta(minutes=pre_period_minutes)
+                        print(f"📅 カスタム期間設定使用: {start_time.strftime('%Y-%m-%d %H:%M')} ～ {end_time.strftime('%Y-%m-%d %H:%M')} (200本前データ含む)")
+                    else:
+                        print(f"📅 カスタム期間設定使用: {start_time.strftime('%Y-%m-%d %H:%M')} ～ {end_time.strftime('%Y-%m-%d %H:%M')}")
+                        
+                except Exception as e:
+                    print(f"⚠️ カスタム期間設定パースエラー: {e}")
+                    # フォールバック: デフォルト90日間
+                    end_time = datetime.now(timezone.utc)
+                    start_time = end_time - timedelta(days=90)
+                    print(f"📅 デフォルト期間使用: 90日間")
+            else:
+                # デフォルト90日間のデータを取得（UTC時刻を使用）
+                end_time = datetime.now(timezone.utc)
+                start_time = end_time - timedelta(days=90)
+                print(f"📅 デフォルト期間使用: 90日間")
             
             # 非同期でデータを取得
             loop = asyncio.new_event_loop()
@@ -433,7 +468,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
     
     # _generate_sample_data method removed - no fallback data allowed
     
-    def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML", is_backtest: bool = False, target_timestamp: datetime = None) -> Dict:
+    def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None) -> Dict:
         """
         シンボル分析（リアルタイム監視システム用）
         
@@ -446,7 +481,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             Dict: 分析結果辞書
         """
         
-        recommendation = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp)
+        recommendation = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp, custom_period_settings)
         
         return {
             'symbol': symbol,

@@ -106,6 +106,36 @@
                 </div>
             </div>
             
+            <!-- 期間指定オプション -->
+            <div class="row mb-3">
+                <div class="col-12">
+                    <label class="form-label">分析期間設定</label>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">期間指定方法</label>
+                            <select class="form-select" id="periodMode" onchange="togglePeriodOptions()">
+                                <option value="auto">自動設定 (時間足別設定)</option>
+                                <option value="custom">カスタム期間指定</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3" id="startDateField" style="display: none;">
+                            <label class="form-label">開始日時</label>
+                            <input type="datetime-local" class="form-control" id="startDate">
+                            <small class="text-muted">支持線検出用に200本前から取得</small>
+                        </div>
+                        <div class="col-md-4 mb-3" id="endDateField" style="display: none;">
+                            <label class="form-label">終了日時</label>
+                            <input type="datetime-local" class="form-control" id="endDate">
+                            <small class="text-muted">現在時刻が初期値</small>
+                        </div>
+                    </div>
+                    <div id="periodInfo" class="alert alert-info" style="display: none;">
+                        <i class="bi bi-info-circle"></i> 
+                        <span id="periodInfoText">-</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- 実行予測 -->
             <div id="executionEstimate" class="alert alert-secondary" style="display: none;">
                 <strong>実行予測:</strong>
@@ -160,6 +190,39 @@
 <script>
 let customStrategies = [];
 let selectedCustomStrategies = [];
+
+// 期間設定切り替え
+function togglePeriodOptions() {
+    const mode = document.getElementById('periodMode').value;
+    const startField = document.getElementById('startDateField');
+    const endField = document.getElementById('endDateField');
+    const infoDiv = document.getElementById('periodInfo');
+    const infoText = document.getElementById('periodInfoText');
+    
+    if (mode === 'custom') {
+        startField.style.display = 'block';
+        endField.style.display = 'block';
+        infoDiv.style.display = 'block';
+        
+        // 現在時刻を終了日時の初期値に設定
+        const now = new Date();
+        const localDateTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        document.getElementById('endDate').value = localDateTime;
+        
+        // 1週間前を開始日時の初期値に設定
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const weekAgoDateTime = new Date(weekAgo.getTime() - weekAgo.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        document.getElementById('startDate').value = weekAgoDateTime;
+        
+        infoText.textContent = '支持線・抵抗線検出のため、指定開始日時の200本前からOHLCVデータを取得します。';
+    } else {
+        startField.style.display = 'none';
+        endField.style.display = 'none';
+        infoDiv.style.display = 'none';
+    }
+    
+    updateExecutionEstimate();
+}
 
 // 実行モード切り替え
 function toggleExecutionOptions() {
@@ -283,6 +346,14 @@ function updateExecutionEstimate() {
         text += ` (${efficiency}%効率化)`;
     }
     
+    // 期間設定の情報を追加
+    const periodMode = document.getElementById('periodMode').value;
+    if (periodMode === 'custom') {
+        text += ', カスタム期間(+200本前データ)';
+    } else {
+        text += ', 自動期間設定';
+    }
+    
     estimateText.textContent = text;
 }
 
@@ -313,6 +384,23 @@ document.getElementById('enhancedAddSymbolForm').addEventListener('submit', asyn
     
     try {
         const payload = { symbol };
+        
+        // 期間設定を追加
+        const periodMode = document.getElementById('periodMode').value;
+        payload.period_mode = periodMode;
+        
+        if (periodMode === 'custom') {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            
+            if (!startDate || !endDate) {
+                showAlert('開始日時と終了日時を入力してください', 'warning');
+                return;
+            }
+            
+            payload.start_date = startDate;
+            payload.end_date = endDate;
+        }
         
         if (mode === 'selective') {
             // 選択された戦略・時間足を取得

@@ -75,6 +75,9 @@ class ColoredLogger:
         # Remove existing handlers to avoid duplicates
         self.logger.handlers.clear()
         
+        # Prevent propagation to root logger to avoid duplicate messages
+        self.logger.propagate = False
+        
         # Console handler with colors
         console_handler = logging.StreamHandler(sys.stdout)
         console_formatter = ColorFormatter(

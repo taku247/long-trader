@@ -20,6 +20,8 @@ from real_time_system.utils.colored_log import get_colored_logger
 from scalable_analysis_system import ScalableAnalysisSystem
 from execution_log_database import ExecutionLogDatabase, ExecutionType, ExecutionStatus
 from engines.leverage_decision_engine import InsufficientMarketDataError, InsufficientConfigurationError, LeverageAnalysisError
+from engines.filtering_framework import FilteringFramework, FilteringStatistics
+from symbol_early_fail_validator import SymbolEarlyFailValidator
 
 # progress_tracker統合
 try:
@@ -41,6 +43,10 @@ class AutoSymbolTrainer:
         self.execution_db = ExecutionLogDatabase()
         # 実行ログの一時保存は廃止（データベースを使用）
         
+        # Early Fail検証システム初期化
+        self.early_fail_validator = SymbolEarlyFailValidator()
+        self.logger.info("✅ フィルタリングシステム初期化完了")
+        
     async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False, custom_period_settings: dict = None) -> str:
         """
         銘柄を追加して指定戦略・時間足で自動学習・バックテストを実行
@@ -58,6 +64,16 @@ class AutoSymbolTrainer:
         """
         try:
             self.logger.info(f"Starting automatic training for symbol: {symbol}")
+            
+            # 🚀 Early Fail検証実行
+            self.logger.info(f"🔍 Early Fail検証開始: {symbol}")
+            early_fail_result = await self._run_early_fail_validation(symbol)
+            if not early_fail_result.passed:
+                error_msg = f"Early Fail検証失敗: {early_fail_result.fail_reason} - {early_fail_result.error_message}"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            self.logger.info(f"✅ Early Fail検証合格: {symbol}")
             
             # 重複実行チェック（同じexecution_idは除外）
             existing_executions = self.execution_db.list_executions(limit=20)
@@ -551,10 +567,16 @@ class AutoSymbolTrainer:
             
             self.logger.info(f"Generated {len(configs)} backtest configurations")
             
+            # execution_id取得
+            current_execution_id = getattr(self, '_current_execution_id', None)
+            
+            # 注意: 9段階フィルタリングは実際のバックテスト処理内で時系列実行される
+            # ここでは設定レベルでの事前フィルタリングは行わない
+            self.logger.info(f"バックテスト実行設定数: {len(configs)}")
+            
             # バックテスト実行（ScalableAnalysisSystemを使用 + 進捗ロガー統合）
             # 支持線・抵抗線データ不足時はシグナルなしとして継続
             # 🔧 修正: 戦略別独立実行でエラー隔離を実現
-            current_execution_id = getattr(self, '_current_execution_id', None)
             
             # execution_idが環境変数にも設定されているか確認
             import os
@@ -870,6 +892,113 @@ class AutoSymbolTrainer:
     def list_executions(self, limit: int = 10) -> List[Dict]:
         """実行履歴の一覧取得"""
         return self.execution_db.list_executions(limit=limit)
+    
+    async def _run_early_fail_validation(self, symbol: str):
+        """Early Fail検証実行"""
+        try:
+            # Early Fail検証を非同期実行
+            import asyncio
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, 
+                self.early_fail_validator.validate_symbol,
+                symbol
+            )
+            
+            # validate_symbolがコルーチンを返す場合の対処
+            if asyncio.iscoroutine(result):
+                result = await result
+            
+            if result.passed:
+                self.logger.info(f"✅ Early Fail検証成功: {symbol}")
+                # メタデータをログに記録
+                if result.metadata:
+                    self.logger.info(f"📊 検証メタデータ: {result.metadata}")
+            else:
+                self.logger.warning(f"❌ Early Fail検証失敗: {symbol} - {result.fail_reason}")
+                if result.suggestion:
+                    self.logger.info(f"💡 提案: {result.suggestion}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"❌ Early Fail検証中にエラー: {symbol} - {str(e)}")
+            # エラー時は失敗扱いで結果を返す
+            from symbol_early_fail_validator import EarlyFailResult, FailReason
+            return EarlyFailResult(
+                symbol=symbol,
+                passed=False,
+                fail_reason=FailReason.API_CONNECTION_FAILED,
+                error_message=f"検証中にエラーが発生: {str(e)}"
+            )
+    
+    async def _apply_filtering_framework(self, configs: List[Dict], symbol: str, execution_id: str) -> List[Dict]:
+        """
+        注意: このメソッドは非推奨です。
+        9段階フィルタリングは実際のバックテスト処理内で時系列毎に実行されます。
+        ここでは設定レベルでの事前フィルタリングは行いません。
+        """
+        self.logger.warning("⚠️ _apply_filtering_framework は非推奨です。9段階フィルタリングはバックテスト内で時系列実行されます。")
+        
+        # 設定をそのまま返す（フィルタリングなし）
+        return configs
+    
+    async def _evaluate_config_viability(self, config: Dict, symbol: str) -> bool:
+        """個別戦略設定の実行可能性評価（軽量版）"""
+        try:
+            # 基本的な設定検証
+            required_fields = ['symbol', 'timeframe', 'strategy']
+            if not all(field in config for field in required_fields):
+                return False
+            
+            # 戦略固有の軽量チェック
+            strategy = config['strategy']
+            timeframe = config['timeframe']
+            
+            # 簡単な戦略・時間足組み合わせチェック
+            if strategy == 'Conservative_ML' and timeframe in ['1m', '3m']:
+                # 保守的ML戦略は短期間足では効果が低い
+                return False
+            
+            if strategy == 'Aggressive_Traditional' and timeframe in ['1h']:
+                # アグレッシブ従来戦略は長期間足では効果が低い
+                return False
+            
+            # TODO: 将来的に実際のFilteringFrameworkと連携
+            # 現在は基本的な論理チェックのみ実装
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️ 設定評価中にエラー: {config} - {str(e)}")
+            # エラー時は保守的に通す
+            return True
+    
+    async def _record_filtering_statistics(self, execution_id: str, total_configs: int, passed_configs: int, filtered_configs: int):
+        """フィルタリング統計をexecution_logに記録"""
+        try:
+            metadata = {
+                'filtering_statistics': {
+                    'total_configurations': total_configs,
+                    'passed_configurations': passed_configs,
+                    'filtered_configurations': filtered_configs,
+                    'filter_rate_percent': (filtered_configs / total_configs) * 100 if total_configs > 0 else 0,
+                    'timestamp': datetime.now().isoformat()
+                }
+            }
+            
+            # execution_logのメタデータを更新
+            self.execution_db.add_execution_step(
+                execution_id,
+                "filtering_framework_precheck",
+                ExecutionStatus.COMPLETED.value,  # .valueを追加
+                metadata=metadata
+            )
+            
+            self.logger.info(f"📝 フィルタリング統計記録完了: {execution_id}")
+            
+        except Exception as e:
+            self.logger.warning(f"⚠️ フィルタリング統計記録エラー: {str(e)}")
     
     def _verify_analysis_results(self, symbol: str, execution_id: str) -> bool:
         """分析結果の存在確認"""

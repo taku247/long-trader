@@ -25,6 +25,9 @@ from progress_logger import SymbolProgressLogger
 # エラー例外のインポート
 from engines.leverage_decision_engine import InsufficientConfigurationError
 
+# 9段階フィルタリングシステムのインポート
+from engines.filtering_framework import FilteringFramework
+
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -75,6 +78,9 @@ class ScalableAnalysisSystem:
         
         # 実行制御
         self.current_execution_id = None
+        
+        # 9段階フィルタリングシステム（遅延初期化）
+        self.filtering_framework = None
     
     def init_database(self):
         """SQLiteデータベースを初期化"""
@@ -736,8 +742,41 @@ class ScalableAnalysisSystem:
             
             # 重要変数の初期化（安全性確保）
             result = {}
-            ohlcv_data = None
+            ohlcv_df = None
             bot = None
+            
+            # 🔧 OHLCVデータを事前取得（実データ利用）
+            try:
+                # APIクライアント初期化
+                from hyperliquid_api_client import MultiExchangeAPIClient
+                api_client = MultiExchangeAPIClient(exchange_type=exchange)
+                
+                # OHLCVデータ取得（評価期間 + 追加200本）
+                logger.info(f"📊 {symbol} {timeframe} のOHLCVデータ取得中...")
+                ohlcv_df = api_client.get_ohlcv_dataframe(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    days=evaluation_period_days + 10  # 余裕を持たせる
+                )
+                
+                if ohlcv_df is not None and not ohlcv_df.empty:
+                    logger.info(f"✅ OHLCVデータ取得成功: {len(ohlcv_df)}本")
+                    
+                    # RealPreparedDataの作成
+                    from engines.data_preparers import RealPreparedData
+                    real_prepared_data = RealPreparedData(ohlcv_df)
+                    
+                    # FilteringFrameworkの初期化（実データ使用）
+                    self.filtering_framework = FilteringFramework(
+                        prepared_data_factory=lambda: real_prepared_data,
+                        strategy_factory=lambda: self._create_strategy_from_config(config)
+                    )
+                else:
+                    logger.warning(f"⚠️ OHLCVデータ取得失敗、モックデータを使用")
+                    ohlcv_df = None
+            except Exception as e:
+                logger.warning(f"⚠️ OHLCVデータ取得エラー: {e}、モックデータを使用")
+                ohlcv_df = None
             
             # 評価回数の動的計算（期間カバー率を改善）
             config_max_evaluations = tf_config.get('max_evaluations', 100)
@@ -766,6 +805,12 @@ class ScalableAnalysisSystem:
                    total_evaluations < max_evaluations and 
                    signals_generated < max_signals):
                 total_evaluations += 1
+                
+                # 🚀 9段階フィルタリングシステム実行（軽量事前チェック）
+                if self._should_skip_evaluation_timestamp(current_time, symbol, timeframe, config):
+                    current_time += evaluation_interval
+                    continue
+                
                 try:
                     # 出力抑制で市場条件の評価（バックテストフラグ付き）
                     with suppress_all_output():
@@ -1194,6 +1239,190 @@ class ScalableAnalysisSystem:
             print(f"   ✅ エントリー条件満足: L={leverage:.1f}x, C={confidence:.1%}, RR={risk_reward:.1f}")
         
         return all_conditions_met
+    
+    def _create_strategy_from_config(self, config: str):
+        """設定から戦略オブジェクトを作成"""
+        class ConfigBasedStrategy:
+            def __init__(self, config_name):
+                self.name = config_name
+                
+                # 基本設定
+                self.min_volume_threshold = 500000
+                self.max_spread_threshold = 0.05
+                self.min_liquidity_score = 0.5
+                
+                # 戦略別の設定
+                if 'Conservative' in config_name:
+                    self.min_ml_confidence = 0.8
+                    self.min_support_strength = 0.7
+                    self.min_resistance_strength = 0.7
+                    self.max_volatility = 0.1
+                elif 'Aggressive' in config_name:
+                    self.min_ml_confidence = 0.6
+                    self.min_support_strength = 0.5
+                    self.min_resistance_strength = 0.5
+                    self.max_volatility = 0.2
+                else:
+                    self.min_ml_confidence = 0.7
+                    self.min_support_strength = 0.6
+                    self.min_resistance_strength = 0.6
+                    self.max_volatility = 0.15
+                
+                # 距離条件
+                self.min_distance_from_support = 0.5
+                self.max_distance_from_support = 5.0
+                self.min_distance_from_resistance = 1.0
+                self.max_distance_from_resistance = 8.0
+                
+                # ボラティリティ条件
+                self.min_volatility = 0.01
+                self.max_atr_ratio = 0.05
+                
+                # ML条件
+                self.required_ml_signal = "BUY"
+                self.min_ml_signal_strength = 0.6
+        
+        return ConfigBasedStrategy(config)
+    
+    def _should_skip_evaluation_timestamp(self, timestamp: datetime, symbol: str, timeframe: str, config: dict) -> bool:
+        """
+        9段階フィルタリングシステムで評価タイムスタンプをスキップすべきかチェック
+        
+        Args:
+            timestamp: 評価対象のタイムスタンプ
+            symbol: 対象銘柄
+            timeframe: 時間足
+            config: 戦略設定
+            
+        Returns:
+            bool: True=スキップすべき, False=処理続行
+        """
+        try:
+            # FilteringFrameworkが初期化されていない場合（実データが取得できなかった場合のフォールバック）
+            if not hasattr(self, 'filtering_framework') or self.filtering_framework is None:
+                # モックデータで初期化
+                self._initialize_filtering_framework()
+                
+                # それでも初期化されていない場合は処理続行
+                if self.filtering_framework is None:
+                    return False
+            
+            # FilteringFrameworkで9段階フィルタリング実行
+            filter_result = self.filtering_framework._execute_filter_chain(timestamp)
+            
+            # フィルターを通過しなかった場合はスキップ
+            return not filter_result.passed
+            
+        except Exception as e:
+            # エラー時は安全にスキップしない（処理続行）
+            logger.warning(f"フィルタリング実行エラー: {e}")
+            return False
+    
+    def _create_mock_prepared_data(self, symbol: str, timestamp: datetime):
+        """フィルタリング用のモック準備データを作成"""
+        class MockPreparedData:
+            def __init__(self, symbol, timestamp):
+                self.symbol = symbol
+                self.timestamp = timestamp
+                
+            def has_missing_data_around(self, eval_time):
+                return False  # 通常はデータ欠損なし
+                
+            def has_price_anomaly_at(self, eval_time):
+                return False  # 通常は価格異常なし
+                
+            def is_valid(self):
+                return True  # 通常は有効データ
+                
+            def get_volume_at(self, eval_time):
+                return 1000000  # モック取引量
+                
+            def get_spread_at(self, eval_time):
+                return 0.001  # モックスプレッド
+                
+            def get_liquidity_score_at(self, eval_time):
+                return 0.8  # モック流動性スコア
+                
+            def get_price_at(self, eval_time):
+                return 100.0  # モック価格
+                
+            def get_market_volatility(self, eval_time):
+                return 0.02  # モックボラティリティ
+        
+        return MockPreparedData(symbol, timestamp)
+    
+    def _initialize_filtering_framework(self):
+        """フォールバック用のモックデータでFilteringFrameworkを初期化
+        
+        実データが取得できなかった場合に使用
+        """
+        # モックPreparedDataクラス
+        class MockPreparedData:
+            def get_price_at(self, eval_time):
+                return 50000.0
+            def get_volume_at(self, eval_time):
+                return 1000000
+            def get_spread_at(self, eval_time):
+                return 0.001
+            def get_liquidity_score_at(self, eval_time):
+                return 0.8
+            def has_missing_data_around(self, eval_time):
+                return False
+            def has_price_anomaly_at(self, eval_time):
+                return False
+            def is_valid(self):
+                return True
+            def get_volatility_at(self, eval_time):
+                return 0.03
+            def get_atr_at(self, eval_time):
+                return 1000.0
+            def get_price_change_volatility_at(self, eval_time):
+                return 0.02
+            def get_ml_confidence_at(self, eval_time):
+                return 0.75
+            def get_ml_prediction_at(self, eval_time):
+                return "BUY"
+            def get_ml_signal_strength_at(self, eval_time):
+                return 0.8
+        
+        # モック戦略
+        class MockStrategy:
+            def __init__(self):
+                self.name = "MockStrategy"
+                self.min_volume_threshold = 500000
+                self.max_spread_threshold = 0.05
+                self.min_liquidity_score = 0.5
+                self.min_ml_confidence = 0.7
+                self.min_support_strength = 0.6
+                self.min_resistance_strength = 0.6
+                self.max_volatility = 0.15
+                self.min_distance_from_support = 0.5
+                self.max_distance_from_support = 5.0
+                self.min_distance_from_resistance = 1.0
+                self.max_distance_from_resistance = 8.0
+                self.min_volatility = 0.01
+                self.max_atr_ratio = 0.05
+                self.required_ml_signal = "BUY"
+                self.min_ml_signal_strength = 0.6
+        
+        # FilteringFramework初期化
+        self.filtering_framework = FilteringFramework(
+            prepared_data_factory=lambda: MockPreparedData(),
+            strategy_factory=lambda: MockStrategy()
+        )
+    
+    def _create_mock_strategy(self, config: dict, timeframe: str):
+        """フィルタリング用のモック戦略オブジェクトを作成"""
+        class MockStrategy:
+            def __init__(self, config, timeframe):
+                self.config = config
+                self.timeframe = timeframe
+                self.min_volume_threshold = 100000
+                self.max_spread_threshold = 0.01
+                self.min_liquidity_score = 0.5
+                self.strategy_type = config if isinstance(config, str) else "Full_ML"
+        
+        return MockStrategy(config, timeframe)
     
     def _analysis_exists(self, analysis_id):
         """分析が既に存在するかチェック"""

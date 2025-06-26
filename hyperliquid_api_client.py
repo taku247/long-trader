@@ -688,6 +688,38 @@ class MultiExchangeAPIClient:
     def is_valid_timeframe(self, timeframe: str) -> bool:
         """有効な時間足かチェック"""
         return timeframe in self.timeframe_config
+    
+    def get_ohlcv_dataframe(self, symbol: str, timeframe: str, days: int = 30) -> pd.DataFrame:
+        """
+        指定された期間のOHLCVデータをDataFrameとして取得
+        
+        Args:
+            symbol: 銘柄名
+            timeframe: 時間足 ('1m', '5m', '15m', '30m', '1h', '4h', '1d')
+            days: 取得期間（日数）
+            
+        Returns:
+            pd.DataFrame: OHLCVデータ
+        """
+        # 非同期メソッドを同期的に実行
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # イベントループが実行中の場合
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, self._get_ohlcv_dataframe_async(symbol, timeframe, days))
+                return future.result()
+        else:
+            return loop.run_until_complete(self._get_ohlcv_dataframe_async(symbol, timeframe, days))
+    
+    async def _get_ohlcv_dataframe_async(self, symbol: str, timeframe: str, days: int) -> pd.DataFrame:
+        """
+        非同期でOHLCVデータを取得
+        """
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days)
+        
+        return await self.get_ohlcv_async(symbol, timeframe, start_time, end_time)
 
 
 # 後方互換性のためのエイリアス

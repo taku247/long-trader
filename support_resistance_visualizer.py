@@ -17,7 +17,12 @@ import argparse
 from scipy.signal import argrelextrema
 from matplotlib.colors import LinearSegmentedColormap
 import warnings
+import logging
 warnings.filterwarnings('ignore')
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 def detect_fractal_levels(df, window=5):
     """
@@ -168,47 +173,172 @@ def find_all_levels(df, min_touches=2):
     """
     すべての価格レベルを検出（最小タッチ回数でフィルタ）
     """
-    print(f"  フラクタルレベルを検出中... (データ数: {len(df)}行)")
+    import os
+    from datetime import datetime
+    
+    # デバッグログ設定（並列プロセス対応）
+    debug_mode = os.environ.get('SUPPORT_RESISTANCE_DEBUG', 'false').lower() == 'true'
+    debug_log_path = None
+    if debug_mode:
+        debug_log_path = f"/tmp/sr_debug_{os.getpid()}.log"
+        with open(debug_log_path, 'a') as f:
+            f.write(f"\n--- Support/Resistance Visualizer Debug (PID: {os.getpid()}) ---\n")
+            f.write(f"find_all_levels called with {len(df)} rows, min_touches={min_touches}\n")
+            f.write(f"Starting at {datetime.now()}\n")
+    
+    print(f"  🔍 フラクタルレベル検出開始 (データ数: {len(df)}行, min_touches={min_touches})")
+    
+    # データ最小要件チェック
+    if len(df) < 10:
+        print(f"  ❌ データ不足: {len(df)}本 < 10本 (最小要件)")
+        if debug_mode:
+            with open(debug_log_path, 'a') as f:
+                f.write(f"❌ Insufficient data: {len(df)} < 10 candles\n")
+        return []
+    
+    # 価格範囲の確認
+    if not df.empty:
+        price_min = df['close'].min()
+        price_max = df['close'].max()
+        price_range_pct = (price_max - price_min) / price_min * 100
+        print(f"  📊 価格範囲: {price_min:.4f} - {price_max:.4f} (レンジ{price_range_pct:.1f}%)")
+    
     # フラクタルレベルを検出
     resistance_levels, support_levels = detect_fractal_levels(df)
-    print(f"  → 抵抗線候補: {len(resistance_levels)}個, 支持線候補: {len(support_levels)}個")
+    print(f"  📈 フラクタル検出完了: 抵抗線候補{len(resistance_levels)}個, 支持線候補{len(support_levels)}個")
+    
+    if debug_mode:
+        with open(debug_log_path, 'a') as f:
+            f.write(f"Fractal detection: {len(resistance_levels)} resistance candidates, {len(support_levels)} support candidates\n")
+    
+    if not resistance_levels and not support_levels:
+        print(f"  ⚠️ フラクタル検出結果0個 → 局所最高値・最安値が検出されず")
+        if debug_mode:
+            with open(debug_log_path, 'a') as f:
+                f.write(f"❌ No fractal levels detected - no local maxima/minima found\n")
+        return []
     
     # 価格レベルをクラスタリング
-    print(f"  価格レベルをクラスタリング中...")
+    print(f"  🔗 価格レベルクラスタリング開始...")
     resistance_clusters = cluster_price_levels(resistance_levels)
     support_clusters = cluster_price_levels(support_levels)
-    print(f"  → 抵抗線クラスター: {len(resistance_clusters)}個, 支持線クラスター: {len(support_clusters)}個")
+    print(f"  📊 クラスタリング完了: 抵抗線{len(resistance_clusters)}クラスター, 支持線{len(support_clusters)}クラスター")
+    
+    if debug_mode:
+        with open(debug_log_path, 'a') as f:
+            f.write(f"Clustering completed: {len(resistance_clusters)} resistance clusters, {len(support_clusters)} support clusters\n")
+    
+    # クラスター統計
+    if resistance_clusters:
+        cluster_sizes = [len(cluster) for cluster in resistance_clusters]
+        valid_resistance_clusters = sum(1 for size in cluster_sizes if size >= min_touches)
+        print(f"  📋 抵抗線クラスター詳細: 平均サイズ{np.mean(cluster_sizes):.1f}, 有効{valid_resistance_clusters}個 (>={min_touches}タッチ)")
+    
+    if support_clusters:
+        cluster_sizes = [len(cluster) for cluster in support_clusters]
+        valid_support_clusters = sum(1 for size in cluster_sizes if size >= min_touches)
+        print(f"  📋 支持線クラスター詳細: 平均サイズ{np.mean(cluster_sizes):.1f}, 有効{valid_support_clusters}個 (>={min_touches}タッチ)")
     
     # すべてのレベルの詳細を計算
-    print(f"  レベルの詳細を計算中... (min_touches={min_touches})")
+    print(f"  ⚙️ レベル詳細計算開始...")
     all_levels = []
     
     resistance_count = 0
     for i, cluster in enumerate(resistance_clusters):
-        if i % 20 == 0 and i > 0:
-            print(f"    抵抗線処理中: {i}/{len(resistance_clusters)}...")
-        if len(cluster) >= min_touches:
+        cluster_size = len(cluster)
+        if cluster_size >= min_touches:
             level_info = calculate_level_details(cluster, df)
             if level_info:
                 level_info['type'] = 'resistance'
                 all_levels.append(level_info)
                 resistance_count += 1
+                if resistance_count <= 3:  # 最初の3個のみ詳細表示
+                    print(f"    ✅ 抵抗線{resistance_count}: 価格{level_info['price']:.4f}, 強度{level_info['strength']:.3f}, {cluster_size}タッチ")
+        else:
+            if i < 5:  # 最初の5個のみ表示
+                print(f"    ❌ 抵抗線除外: {cluster_size}タッチ < {min_touches} (不足)")
     
     support_count = 0
     for i, cluster in enumerate(support_clusters):
-        if i % 20 == 0 and i > 0:
-            print(f"    支持線処理中: {i}/{len(support_clusters)}...")
-        if len(cluster) >= min_touches:
+        cluster_size = len(cluster)
+        if cluster_size >= min_touches:
             level_info = calculate_level_details(cluster, df)
             if level_info:
                 level_info['type'] = 'support'
                 all_levels.append(level_info)
                 support_count += 1
+                if support_count <= 3:  # 最初の3個のみ詳細表示
+                    print(f"    ✅ 支持線{support_count}: 価格{level_info['price']:.4f}, 強度{level_info['strength']:.3f}, {cluster_size}タッチ")
+        else:
+            if i < 5:  # 最初の5個のみ表示
+                print(f"    ❌ 支持線除外: {cluster_size}タッチ < {min_touches} (不足)")
     
-    print(f"  → 有効な抵抗線: {resistance_count}個, 有効な支持線: {support_count}個")
+    print(f"  📊 有効レベル集計: 抵抗線{resistance_count}個, 支持線{support_count}個")
+    
+    if debug_mode:
+        with open(debug_log_path, 'a') as f:
+            f.write(f"Valid level count: {resistance_count} resistances, {support_count} supports\n")
+    
+    if not all_levels:
+        print(f"  🚨 最終結果: 有効レベル0個 → 検出条件を満たすレベルなし")
+        print(f"  📋 シグナルなしの理由:")
+        print(f"    - min_touches={min_touches}の条件を満たすクラスターなし")
+        print(f"    - または強度計算でraw_strength/200が0.0になった")
+        
+        if debug_mode:
+            with open(debug_log_path, 'a') as f:
+                f.write(f"❌ FINAL RESULT: 0 valid levels\n")
+                f.write(f"Reasons for no signal:\n")
+                f.write(f"  - No clusters meeting min_touches={min_touches} requirement\n")
+                f.write(f"  - Or strength calculation resulted in raw_strength/200 = 0.0\n")
+                f.write(f"Cluster analysis:\n")
+                for i, cluster in enumerate(resistance_clusters + support_clusters):
+                    cluster_size = len(cluster)
+                    f.write(f"  Cluster {i+1}: {cluster_size} touches ({'✓' if cluster_size >= min_touches else '✗'})\n")
+        
+        return []
     
     # 強度でソート
     all_levels.sort(key=lambda x: x['strength'], reverse=True)
+    
+    print(f"  🎯 最終レベル一覧 (強度順):")
+    for i, level in enumerate(all_levels[:5]):  # 上位5個のみ表示
+        print(f"    {i+1}. {level['type']} {level['price']:.4f} (強度{level['strength']:.3f}, {level['touch_count']}タッチ)")
+    
+    if len(all_levels) > 5:
+        print(f"    ... 他{len(all_levels)-5}個のレベル")
+    
+    # サーバーログにも記録
+    support_count = sum(1 for l in all_levels if l['type'] == 'support')
+    resistance_count = sum(1 for l in all_levels if l['type'] == 'resistance')
+    
+    if support_count > 0 or resistance_count > 0:
+        logger.info(f"✅ 支持線・抵抗線検出成功 (support_resistance_visualizer):")
+        logger.info(f"   📊 支持線: {support_count}個検出")
+        if support_count > 0:
+            support_levels = [l for l in all_levels if l['type'] == 'support']
+            for i, s in enumerate(support_levels[:3], 1):  # 上位3個表示
+                logger.info(f"      {i}. 価格: ${s['price']:.2f} 強度: {s['strength']:.2f} タッチ数: {s['touch_count']}")
+            if support_count > 3:
+                logger.info(f"      ... 他{support_count-3}個")
+                
+        logger.info(f"   📈 抵抗線: {resistance_count}個検出")
+        if resistance_count > 0:
+            resistance_levels = [l for l in all_levels if l['type'] == 'resistance']
+            for i, r in enumerate(resistance_levels[:3], 1):  # 上位3個表示
+                logger.info(f"      {i}. 価格: ${r['price']:.2f} 強度: {r['strength']:.2f} タッチ数: {r['touch_count']}")
+            if resistance_count > 3:
+                logger.info(f"      ... 他{resistance_count-3}個")
+    else:
+        logger.warning(f"⚠️  支持線・抵抗線が検出されませんでした (support_resistance_visualizer)")
+    
+    if debug_mode:
+        with open(debug_log_path, 'a') as f:
+            f.write(f"✅ FINAL LEVEL LIST (sorted by strength):\n")
+            for i, level in enumerate(all_levels):
+                f.write(f"  {i+1}. {level['type']} {level['price']:.4f} (strength {level['strength']:.3f}, {level['touch_count']} touches)\n")
+            f.write(f"find_all_levels completed at {datetime.now()}\n")
+            f.write(f"--- End of Support/Resistance Visualizer Debug ---\n")
     
     return all_levels
 

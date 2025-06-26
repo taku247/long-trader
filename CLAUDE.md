@@ -1,5 +1,27 @@
 # Claude Code セッション記録
 
+## 🌐 MCPサーバー統合環境 (2025-06-26)
+**✅ Claude Code MCP Server導入済み**: ブラウザでの直接動作確認が可能
+
+### 🖥️ ブラウザアクセス可能なURL
+- **Webダッシュボード**: `http://localhost:5001`
+- **リアルタイム分析進捗**: `http://localhost:5001/analysis-progress`
+- **銘柄管理画面**: `http://localhost:5001/symbols-enhanced`
+- **API直接アクセス**: `http://localhost:5001/api/analysis/recent`
+
+### 📊 MCP統合機能
+- **ファイルベースリアルタイム進捗追跡**: ProcessPoolExecutor環境での進捗共有完全対応
+- **プロセス間進捗データ同期**: `/tmp/progress_*.json`による永続化
+- **メモリ+ファイル統合API**: 最新データ自動優先表示
+- **Claude Codeからの直接操作**: 銘柄追加・進捗確認・動作テストが可能
+
+### 🎯 動作確認手順
+1. Claude Codeから銘柄追加実行: `curl -X POST http://localhost:5001/api/symbol/add -d '{"symbol":"SOL"}'`
+2. 進捗をリアルタイム確認: `http://localhost:5001/analysis-progress`
+3. 分析結果の詳細表示: 各フェーズ（data_validation → backtest → support_resistance → ml_prediction → leverage_decision）
+
+**💡 Note**: MCP環境により、ローカルサーバーへの直接アクセス・API呼び出し・ファイル操作が可能なため、完全な動作検証が実現
+
 ## 開発方針
 
 ### 🚨 is_realtime/is_backtest フラグ管理の必須確認 (2025-06-25)

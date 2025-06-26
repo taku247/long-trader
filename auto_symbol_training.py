@@ -21,6 +21,15 @@ from scalable_analysis_system import ScalableAnalysisSystem
 from execution_log_database import ExecutionLogDatabase, ExecutionType, ExecutionStatus
 from engines.leverage_decision_engine import InsufficientMarketDataError, InsufficientConfigurationError, LeverageAnalysisError
 
+# progress_tracker統合
+try:
+    from web_dashboard.analysis_progress import progress_tracker
+    PROGRESS_TRACKER_AVAILABLE = True
+    print("✅ progress_tracker インポート成功")
+except ImportError as e:
+    PROGRESS_TRACKER_AVAILABLE = False
+    print(f"⚠️ progress_tracker インポートエラー: {e}")
+
 
 class AutoSymbolTrainer:
     """銘柄追加時の自動学習・バックテストシステム"""
@@ -98,6 +107,20 @@ class AutoSymbolTrainer:
             # 実行IDをインスタンス変数として保存（進捗ロガー用）
             self._current_execution_id = execution_id
             
+            # 実行IDを環境変数に設定（子プロセス用）
+            import os
+            os.environ['CURRENT_EXECUTION_ID'] = execution_id
+            self.logger.info(f"📝 実行IDを環境変数に設定: {execution_id}")
+            
+            # progress_tracker初期化
+            if PROGRESS_TRACKER_AVAILABLE:
+                self.logger.info(f"📊 progress_tracker初期化開始: {symbol}, {execution_id}")
+                progress_tracker.start_analysis(symbol, execution_id)
+                progress_tracker.update_stage(execution_id, "initializing")
+                self.logger.info(f"✅ progress_tracker初期化完了")
+            else:
+                self.logger.warning("⚠️ progress_tracker利用不可")
+            
             # 実行開始
             self.execution_db.update_execution_status(
                 execution_id,
@@ -134,6 +157,11 @@ class AutoSymbolTrainer:
                     current_operation='完了',
                     progress_percentage=100
                 )
+                
+                # progress_tracker最終更新（成功）
+                if PROGRESS_TRACKER_AVAILABLE:
+                    progress_tracker.complete_analysis(execution_id, "signal_detected", "Analysis completed successfully")
+                    
                 self.logger.success(f"Symbol {symbol} training completed successfully!")
             else:
                 # 分析結果が存在しない場合はFAILED
@@ -144,6 +172,15 @@ class AutoSymbolTrainer:
                     progress_percentage=100,
                     error_message="No analysis results found despite successful steps"
                 )
+                
+                # progress_tracker最終更新（失敗）
+                if PROGRESS_TRACKER_AVAILABLE:
+                    self.logger.info(f"📊 progress_tracker失敗更新開始: {execution_id}")
+                    progress_tracker.fail_analysis(execution_id, "result_validation", "No analysis results found despite successful execution steps")
+                    self.logger.info(f"✅ progress_tracker失敗更新完了")
+                else:
+                    self.logger.warning("⚠️ progress_tracker利用不可のため失敗更新スキップ")
+                    
                 self.logger.error(f"❌ Symbol {symbol} training failed: No analysis results found")
                 raise ValueError(f"No analysis results found for {symbol} despite successful execution steps")
             
@@ -151,6 +188,10 @@ class AutoSymbolTrainer:
             
         except Exception as e:
             self.logger.error(f"Error in symbol training: {e}")
+            
+            # progress_tracker最終更新（例外発生）
+            if PROGRESS_TRACKER_AVAILABLE:
+                progress_tracker.fail_analysis(execution_id, "exception", f"Training failed with exception: {str(e)}")
             
             # エラー情報をデータベースに記録
             self.execution_db.add_execution_error(execution_id, {
@@ -191,6 +232,21 @@ class AutoSymbolTrainer:
                 ExecutionStatus.RUNNING,
                 current_operation=current_operation
             )
+            
+            # progress_tracker段階更新
+            if PROGRESS_TRACKER_AVAILABLE:
+                stage_mapping = {
+                    'data_fetch': 'data_validation',
+                    'backtest': 'backtest_analysis', 
+                    'ml_training': 'ml_training',
+                    'result_save': 'finalizing'
+                }
+                stage = stage_mapping.get(step_name, step_name)
+                self.logger.info(f"📊 progress_tracker段階更新: {step_name} -> {stage} (execution_id: {execution_id})")
+                progress_tracker.update_stage(execution_id, stage)
+                self.logger.info(f"✅ progress_tracker段階更新完了")
+            else:
+                self.logger.warning(f"⚠️ progress_tracker利用不可のため段階更新スキップ: {step_name}")
             
             # ステップ実行
             result = await step_function(*args, **kwargs)
@@ -499,6 +555,14 @@ class AutoSymbolTrainer:
             # 支持線・抵抗線データ不足時はシグナルなしとして継続
             # 🔧 修正: 戦略別独立実行でエラー隔離を実現
             current_execution_id = getattr(self, '_current_execution_id', None)
+            
+            # execution_idが環境変数にも設定されているか確認
+            import os
+            env_execution_id = os.environ.get('CURRENT_EXECUTION_ID')
+            if current_execution_id and not env_execution_id:
+                os.environ['CURRENT_EXECUTION_ID'] = current_execution_id
+                self.logger.info(f"📝 実行IDを環境変数に再設定: {current_execution_id}")
+            
             processed_count = self._execute_strategies_independently(
                 configs, 
                 symbol, 

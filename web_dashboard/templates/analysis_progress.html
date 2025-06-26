@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム分析進捗</title>
+    <style>
+        .progress-container { max-width: 800px; margin: 20px auto; padding: 20px; }
+        .analysis-card { border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 8px; }
+        .stage { display: inline-block; padding: 5px 10px; margin: 2px; border-radius: 4px; font-size: 12px; }
+        .stage.success { background: #d4edda; color: #155724; }
+        .stage.failed { background: #f8d7da; color: #721c24; }
+        .stage.running { background: #fff3cd; color: #856404; }
+        .stage.pending { background: #f1f1f1; color: #666; }
+        .level { margin: 5px 0; padding: 8px; background: #f8f9fa; border-radius: 4px; }
+        .support { border-left: 4px solid #28a745; }
+        .resistance { border-left: 4px solid #dc3545; }
+        .refresh-btn { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="progress-container">
+        <h1>🔍 リアルタイム分析進捗</h1>
+        
+        <button class="refresh-btn" onclick="loadRecentAnalyses()">最新データ取得</button>
+        
+        <div id="analyses-container">
+            <p>データを読み込み中...</p>
+        </div>
+    </div>
+
+    <script>
+        async function loadRecentAnalyses() {
+            try {
+                const response = await fetch('/api/analysis/recent?hours=1');
+                const data = await response.json();
+                
+                const container = document.getElementById('analyses-container');
+                container.innerHTML = '';
+                
+                if (data.analyses.length === 0) {
+                    container.innerHTML = '<p>最近の分析結果がありません</p>';
+                    return;
+                }
+                
+                data.analyses.forEach(analysis => {
+                    const card = createAnalysisCard(analysis);
+                    container.appendChild(card);
+                });
+                
+            } catch (error) {
+                console.error('Error loading analyses:', error);
+                document.getElementById('analyses-container').innerHTML = '<p>エラー: データの読み込みに失敗しました</p>';
+            }
+        }
+        
+        function createAnalysisCard(analysis) {
+            const card = document.createElement('div');
+            card.className = 'analysis-card';
+            
+            const stageStatus = (stage) => {
+                if (stage.status === 'success') return 'success';
+                if (stage.status === 'failed') return 'failed';
+                if (stage.status === 'running') return 'running';
+                return 'pending';
+            };
+            
+            card.innerHTML = `
+                <h3>${analysis.symbol} - ${analysis.execution_id.split('_').slice(0, 2).join('_')}</h3>
+                <p><strong>開始時刻:</strong> ${new Date(analysis.start_time).toLocaleString('ja-JP')}</p>
+                <p><strong>現在段階:</strong> ${analysis.current_stage} | <strong>最終結果:</strong> ${analysis.final_signal}</p>
+                
+                <div style="margin: 15px 0;">
+                    <h4>分析進捗:</h4>
+                    <span class="stage ${stageStatus(analysis.support_resistance)}">
+                        🔍 Support/Resistance: ${analysis.support_resistance.status}
+                        ${analysis.support_resistance.supports_count > 0 ? `(${analysis.support_resistance.supports_count}S, ${analysis.support_resistance.resistances_count}R)` : ''}
+                    </span>
+                    <span class="stage ${stageStatus(analysis.ml_prediction)}">
+                        🤖 ML Prediction: ${analysis.ml_prediction.status}
+                    </span>
+                    <span class="stage ${stageStatus(analysis.market_context)}">
+                        📈 Market Context: ${analysis.market_context.status}
+                    </span>
+                    <span class="stage ${stageStatus(analysis.leverage_decision)}">
+                        ⚖️ Leverage Decision: ${analysis.leverage_decision.status}
+                    </span>
+                </div>
+                
+                ${analysis.support_resistance.status === 'success' && analysis.support_resistance.supports.length > 0 ? `
+                <div style="margin: 15px 0;">
+                    <h4>検出レベル:</h4>
+                    ${analysis.support_resistance.supports.map(s => 
+                        `<div class="level support">📍 Support: $${s.price.toFixed(2)} (強度: ${s.strength.toFixed(3)})</div>`
+                    ).join('')}
+                    ${analysis.support_resistance.resistances.map(r => 
+                        `<div class="level resistance">📈 Resistance: $${r.price.toFixed(2)} (強度: ${r.strength.toFixed(3)})</div>`
+                    ).join('')}
+                </div>
+                ` : ''}
+                
+                ${analysis.final_message ? `<p><strong>詳細:</strong> ${analysis.final_message}</p>` : ''}
+            `;
+            
+            return card;
+        }
+        
+        // 自動更新
+        setInterval(loadRecentAnalyses, 5000); // 5秒ごと
+        
+        // 初回読み込み
+        loadRecentAnalyses();
+    </script>
+</body>
+</html>

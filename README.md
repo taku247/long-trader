@@ -2,6 +2,87 @@
 
 ハイレバレッジ取引における最適な戦略を見つけるための包括的なバックテスト・分析システム
 
+## 📋 TODO - 検討事項
+
+### 🔄 銘柄追加処理の順序見直し（2025年6月26日）
+
+**現在の処理順序**:
+1. `data_validation` - データ検証
+2. `backtest` - バックテスト実行 ← **現在は最初**
+3. `support_resistance` - 支持線・抵抗線検出
+4. `ml_prediction` - ML予測
+5. `market_context` - 市場コンテキスト分析
+6. `leverage_decision` - レバレッジ判定
+
+**現在の設計の問題点**:
+- **バックテストで既に支持線・抵抗線検出が実行される**ため、`support_resistance`フェーズと重複
+- 支持線・抵抗線検出がバックテスト内部で行われ、結果の可視性が低い
+- ユーザーが「バックテストは最後の段階」と誤解しやすい
+
+**検討中の改善案**:
+1. **支持線・抵抗線検出を最初のフェーズに移動**
+   - データ検証 → 支持線・抵抗線検出 → バックテスト の順序
+   - 検出結果の可視性向上
+   - 処理の論理的な流れが明確化
+
+2. **バックテストフェーズの役割明確化**
+   - 支持線・抵抗線データを入力として受け取る
+   - 純粋に戦略評価に専念
+   - 重複処理の排除
+
+**影響範囲**:
+- `auto_symbol_training.py` - フェーズ順序の変更
+- `scalable_analysis_system.py` - 処理ロジックの調整
+- `web_dashboard/` - 進捗表示UIの更新
+- テストケース全般
+
+**優先度**: 中（ユーザビリティと処理効率の改善）
+
+### ⚡ リアルタイム監視エンドポイント分離（2025年6月26日）
+
+**現在の問題**:
+- 現在の銘柄追加エンドポイントは**バックテスト用の重い処理**（18戦略 × 最大5000評価）
+- 処理時間: 数分〜数十分（リアルタイム監視には不適切）
+- 当初はリアルタイム監視の一機能として設計されたが、現実的でない
+
+**解決方針 - エンドポイント分離**:
+
+1. **現在のエンドポイント**: `/api/symbol/add` 
+   - **用途**: バックテスト専用（詳細分析・履歴保存）
+   - **処理内容**: 全戦略・全時間足の包括的分析
+   - **応答時間**: 数分〜数十分（許容）
+
+2. **新しいエンドポイント**: `/api/realtime/signal` 
+   - **用途**: リアルタイム監視専用（高速判定）
+   - **処理内容**: 現在価格での1回の支持線・抵抗線検出 + 簡潔な売買判定
+   - **応答時間**: 秒単位（目標: 3秒以内）
+
+**実装予定の新エンドポイント仕様**:
+```json
+POST /api/realtime/signal
+{
+  "symbol": "BTC",
+  "timeframe": "1h"
+}
+
+Response: {
+  "signal": "BUY|SELL|HOLD",
+  "confidence": 0.75,
+  "leverage": 2.5,
+  "current_price": 45000.00,
+  "support_level": 44500.00,
+  "resistance_level": 45800.00,
+  "reasoning": "Strong support at $44,500 with high confidence"
+}
+```
+
+**利点**:
+- 責務の明確化（バックテスト vs リアルタイム）
+- パフォーマンス最適化（用途別の処理設計）
+- ユーザビリティ向上（適切な応答時間）
+
+**優先度**: 高（リアルタイム監視の実用性確保）
+
 ## 🎯 重要な起動方法
 
 ### 🌐 Webダッシュボード（メイン）
@@ -167,6 +248,245 @@ with ProcessPoolExecutor(max_workers=4) as executor:
 2. **エラー隔離**: 1戦略の問題が他戦略に波及しない  
 3. **並列処理維持**: 9戦略すべてが独立して実行完了
 4. **安定性向上**: システム全体の継続動作を確保
+
+### ✅ 修正完了: 支持線・抵抗線検出詳細ログ実装（2025年6月25日 23:00）
+
+**修正完了**: 「⚠️ シグナルなし」の背景にある支持線・抵抗線検出プロセスの詳細ログを実装
+
+#### 修正内容
+**ファイル**: 
+- `engines/high_leverage_bot_orchestrator.py` (285-386行目) → `_analyze_support_resistance`メソッド
+- `support_resistance_visualizer.py` (167-263行目) → `find_all_levels`関数
+
+#### 追加された詳細ログ
+
+**1. 検出開始時の状況確認**
+```
+📊 サポレジ検出開始: データ2015本, 現在価格125.4500
+📐 標準パラメータ適用: window=5, min_touches=2, tolerance=1.0%
+```
+
+**2. フラクタル検出結果**
+```
+📈 フラクタル検出完了: 抵抗線候補45個, 支持線候補38個
+📊 価格範囲: 120.1234 - 130.5678 (レンジ8.5%)
+⚠️ フラクタル検出結果0個 → 局所最高値・最安値が検出されず
+```
+
+**3. クラスタリング詳細分析**
+```
+📊 クラスタリング完了: 抵抗線15クラスター, 支持線12クラスター
+📋 抵抗線クラスター詳細: 平均サイズ3.0, 有効8個 (>=2タッチ)
+📋 支持線クラスター詳細: 平均サイズ2.4, 有効5個 (>=2タッチ)
+```
+
+**4. レベル判定過程の可視化**
+```
+✅ 抵抗線1: 価格127.8500, 強度0.734, 3タッチ
+✅ 抵抗線2: 価格129.2100, 強度0.651, 2タッチ
+❌ 抵抗線除外: 1タッチ < 2 (不足)
+✅ 支持線1: 価格123.2100, 強度0.654, 2タッチ
+❌ 支持線除外: 1タッチ < 2 (不足)
+```
+
+**5. 現在価格フィルタリング結果**
+```
+📍 現在価格フィルタ後: 有効支持線4個, 有効抵抗線3個
+```
+
+**6. 最終選択と距離計算**
+```
+🎯 最終選択: 支持線2個, 抵抗線3個 (上限5個)
+📍 選択された支持線:
+  1. 123.2100 (強度0.654, 1.8%下)
+  2. 121.8900 (強度0.543, 2.9%下)
+📍 選択された抵抗線:
+  1. 127.8500 (強度0.734, 1.9%上)
+  2. 129.2100 (強度0.651, 3.0%上)
+```
+
+**7. シグナルなし時の原因分析**
+```
+🚨 最終結果: 有効なサポレジレベルが0個 → シグナルなし
+📋 シグナルなしの理由:
+  - フラクタル分析で局所最高値・最安値が不足
+  - クラスタリング後にmin_touches=2の条件を満たすレベルなし
+  - 強度計算でraw_strength/200が0.0になった
+```
+
+#### 検出失敗パターン分析
+
+**パターン1: フラクタル検出失敗**
+- **原因**: `scipy.signal.argrelextrema`でorder=5ウィンドウ内に局所最高値・最安値なし
+- **対策**: 新規銘柄用にwindow=3への縮小
+
+**パターン2: クラスタリング失敗**  
+- **原因**: tolerance=1%以内での価格クラスター形成不足
+- **対策**: 新規銘柄用にtolerance=3%への拡大
+
+**パターン3: タッチ回数不足**
+- **原因**: min_touches=2の条件をクラスターが満たさない
+- **対策**: 新規銘柄用にmin_touches=1への緩和
+
+**パターン4: 強度計算で0値**
+- **原因**: `raw_strength/200.0`の正規化で0.0になる
+- **対策**: 強度計算式の調整と重み係数見直し
+
+#### 並列プロセス対応デバッグログ実装（2025年6月25日 追加）
+
+**課題**: ProcessPoolExecutor並列実行時にprintやlogger出力が表示されない
+
+**解決策**: 環境変数制御によるファイルベースデバッグログ
+
+**使用方法**:
+```bash
+# 1. デバッグモード有効化
+export SUPPORT_RESISTANCE_DEBUG=true
+
+# 2. 分析実行
+python auto_symbol_training.py
+
+# 3. デバッグログ確認
+python collect_debug_logs.py
+
+# 4. デバッグモード無効化  
+export SUPPORT_RESISTANCE_DEBUG=false
+```
+
+**出力例**:
+```
+=== Support/Resistance Debug Log (PID: 12345) ===
+Data: 2015 candles, Current price: 125.4500
+Starting analysis at 2025-06-25 23:00:15
+Parameters: window=5, min_touches=2, tolerance=1.0% (standard)
+Starting level detection with analyzer...
+Detection completed: 8 total levels
+First 3 levels:
+  Level 1: resistance 127.8500 (strength 0.734)
+  Level 2: support 123.2100 (strength 0.654)
+  Level 3: resistance 129.2100 (strength 0.651)
+Current price filter results:
+  Valid supports: 2, valid resistances: 3
+  Current price: 125.4500
+🎯 FINAL SELECTION RESULTS:
+  Selected supports: 2, resistances: 3 (max 5)
+  Final Supports:
+    1. 123.2100 (strength 0.654, 1.8% below)
+    2. 121.8900 (strength 0.543, 2.9% below)
+  Final Resistances:
+    1. 127.8500 (strength 0.734, 1.9% above)
+    2. 129.2100 (strength 0.651, 3.0% above)
+Analysis completed at 2025-06-25 23:00:16
+```
+
+**実装ファイル**:
+- `engines/high_leverage_bot_orchestrator.py` → ファイルベースデバッグログ追加
+- `support_resistance_visualizer.py` → 並列プロセス対応ログ追加
+- `collect_debug_logs.py` → ログ収集・表示ツール（新規作成）
+
+#### 🌐 Webダッシュボードでの詳細ログ確認手順
+
+**1. デバッグモード有効化**
+```bash
+# ターミナルで環境変数を設定
+export SUPPORT_RESISTANCE_DEBUG=true
+```
+
+**2. Webダッシュボード起動**
+```bash
+cd web_dashboard
+python app.py
+```
+
+**3. ブラウザで銘柄追加**
+1. http://localhost:5001 にアクセス
+2. 銘柄追加フォームで銘柄を追加
+3. 分析実行を待つ
+
+**4. 詳細ログ確認（2つの方法）**
+
+*方法A: ログ収集ツール使用（推奨）*
+```bash
+# 別のターミナルで実行
+python collect_debug_logs.py
+```
+
+*方法B: 直接ログファイル確認*
+```bash
+# ログファイル一覧
+ls -la /tmp/sr_debug_*.log
+
+# 最新のログを表示
+tail -f /tmp/sr_debug_*.log
+
+# 全ログ内容表示
+cat /tmp/sr_debug_*.log
+```
+
+**5. リアルタイム監視（オプション）**
+```bash
+# 分析実行中にリアルタイムでログ監視
+watch -n 1 'ls -la /tmp/sr_debug_*.log 2>/dev/null || echo "ログファイル待機中..."'
+
+# 新しいログが生成されたらすぐ表示
+while true; do
+    if ls /tmp/sr_debug_*.log 1> /dev/null 2>&1; then
+        echo "=== 新しいデバッグログ発見 ==="
+        cat /tmp/sr_debug_*.log
+        break
+    fi
+    sleep 1
+done
+```
+
+**6. ログクリーンアップ**
+```bash
+# 使用後にログファイル削除
+python collect_debug_logs.py
+# → "ログファイルを削除しますか? (y/N):" で y を選択
+
+# または手動削除
+rm /tmp/sr_debug_*.log
+```
+
+#### 📋 ログで確認できる詳細情報
+
+**支持線・抵抗線検出の全プロセス**:
+- データ取得状況（本数、価格範囲）
+- フラクタル検出結果（候補数）
+- クラスタリング結果（有効レベル数）
+- 強度計算詳細
+- 現在価格フィルタリング
+- 最終選択されたレベル
+- **シグナルなしの具体的理由**
+
+#### 💡 デバッグ効率化Tips
+
+**ワンライナー起動**:
+```bash
+# デバッグ用のワンライナー
+export SUPPORT_RESISTANCE_DEBUG=true && cd web_dashboard && python app.py &
+# → バックグラウンドでWebダッシュボード起動
+
+# 別ターミナルでログ監視
+watch -n 2 python collect_debug_logs.py
+```
+
+**ログ分析用コマンド**:
+```bash
+# エラーパターンを検索
+grep -i "no levels\|failed\|error" /tmp/sr_debug_*.log
+
+# 成功パターンを検索  
+grep -i "final selection\|completed" /tmp/sr_debug_*.log
+```
+
+#### デバッグ効果
+- **従来**: 「⚠️ Balanced-1h: シグナルなし」のみ
+- **改善後**: 検出失敗の具体的原因と各段階の数値が詳細ログで確認可能
+- **並列対応**: ProcessPoolExecutor実行時も全プロセスのデバッグ情報を取得
+- **Webダッシュボード対応**: ブラウザからの銘柄追加時も詳細プロセス追跡可能
+- **運用改善**: 新規銘柄特有の問題パターンを特定しやすくなり、パラメータ調整の根拠データ取得
 
 ### 🚨 is_realtime/is_backtest フラグ混在問題（2025年6月25日）
 

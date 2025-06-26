@@ -100,7 +100,14 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             print(f"❌ プラグイン初期化エラー: {e}")
             print("🔄 基本的なフォールバックシステムを使用します")
     
-    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None) -> LeverageRecommendation:
+    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None, execution_id: str = None) -> LeverageRecommendation:
+        # execution_idが渡されていない場合は環境変数から取得
+        if not execution_id:
+            import os
+            env_execution_id = os.environ.get('CURRENT_EXECUTION_ID')
+            if env_execution_id:
+                execution_id = env_execution_id
+                print(f"📝 環境変数からexecution_id取得: {execution_id}")
         """
         ハイレバレッジ機会を総合分析
         
@@ -122,6 +129,8 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         
         try:
             print(f"\n🎯 ハイレバレッジ機会分析開始: {symbol} ({timeframe})")
+            if execution_id:
+                print(f"🆔 Execution ID: {execution_id}")
             print("=" * 60)
             
             # 銘柄カテゴリの判定
@@ -155,7 +164,8 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             print("\n🔍 サポート・レジスタンス分析中...")
             support_levels, resistance_levels = self._analyze_support_resistance(
                 market_data, 
-                is_short_timeframe=is_short_timeframe
+                is_short_timeframe=is_short_timeframe,
+                execution_id=execution_id
             )
             
             print(f"📍 検出レベル: サポート{len(support_levels)}件, レジスタンス{len(resistance_levels)}件")
@@ -282,13 +292,46 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             # フォールバックは使用せず、例外を再発生
             raise Exception(f"市場データ取得に失敗: {e} - 実データが必要です")
     
-    def _analyze_support_resistance(self, data: pd.DataFrame, is_short_timeframe: bool = False) -> tuple:
+    def _analyze_support_resistance(self, data: pd.DataFrame, is_short_timeframe: bool = False, execution_id: str = None) -> tuple:
         """サポート・レジスタンス分析"""
         
         support_levels = []
         resistance_levels = []
         
         try:
+            current_price = data['close'].iloc[-1] if not data.empty else 0
+            data_length = len(data)
+            
+            print(f"  📊 サポレジ検出開始: データ{data_length}本, 現在価格{current_price:.4f}")
+            
+            # 進捗更新（Webダッシュボード用）
+            if execution_id:
+                try:
+                    from web_dashboard.analysis_progress import progress_tracker, SupportResistanceResult
+                    print(f"  📊 progress_tracker更新開始: execution_id={execution_id}")
+                    progress_tracker.update_stage(execution_id, "support_resistance")
+                    progress_tracker.update_support_resistance(execution_id, 
+                        SupportResistanceResult(status="running"))
+                    print(f"  ✅ progress_tracker更新成功")
+                except ImportError as e:
+                    print(f"  ⚠️ progress_trackerインポートエラー: {e}")
+                except Exception as e:
+                    print(f"  ❌ progress_tracker更新エラー: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # デバッグログをファイルに出力（並列プロセス対応）
+            import os
+            from datetime import datetime
+            debug_mode = os.environ.get('SUPPORT_RESISTANCE_DEBUG', 'false').lower() == 'true'
+            debug_log_path = None
+            if debug_mode:
+                debug_log_path = f"/tmp/sr_debug_{os.getpid()}.log"
+                with open(debug_log_path, 'a') as f:
+                    f.write(f"\n=== Support/Resistance Debug Log (PID: {os.getpid()}) ===\n")
+                    f.write(f"Data: {data_length} candles, Current price: {current_price:.4f}\n")
+                    f.write(f"Starting analysis at {datetime.now()}\n")
+            
             if self.support_resistance_analyzer:
                 # 短期間足の場合はより敏感なパラメータを使用
                 if is_short_timeframe:
@@ -297,39 +340,217 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                         'min_touches': 2,    # タッチ回数は維持
                         'tolerance': 0.005   # より厳密な許容範囲
                     }
-                    print("  ⚡ 短期取引用パラメータを適用")
+                    print("  ⚡ 短期取引用パラメータ適用: window=3, min_touches=2, tolerance=0.5%")
+                    if debug_mode:
+                        with open(debug_log_path, 'a') as f:
+                            f.write(f"Parameters: window=3, min_touches=2, tolerance=0.5% (short timeframe)\n")
                 else:
                     kwargs = {
                         'window': 5,         # 標準ウィンドウ
                         'min_touches': 2,    # 標準タッチ回数
                         'tolerance': 0.01    # 標準許容範囲
                     }
+                    print("  📐 標準パラメータ適用: window=5, min_touches=2, tolerance=1.0%")
+                    if debug_mode:
+                        with open(debug_log_path, 'a') as f:
+                            f.write(f"Parameters: window=5, min_touches=2, tolerance=1.0% (standard)\n")
+                
+                print(f"  🔍 アナライザーによるレベル検出実行中...")
+                if debug_mode:
+                    with open(debug_log_path, 'a') as f:
+                        f.write(f"Starting level detection with analyzer...\n")
                 
                 all_levels = self.support_resistance_analyzer.find_levels(data, **kwargs)
+                print(f"  📊 検出完了: 総レベル数{len(all_levels)}個")
+                
+                if debug_mode:
+                    with open(debug_log_path, 'a') as f:
+                        f.write(f"Detection completed: {len(all_levels)} total levels\n")
+                        if all_levels:
+                            f.write(f"First 3 levels:\n")
+                            for i, level in enumerate(all_levels[:3]):
+                                f.write(f"  Level {i+1}: {level.level_type} {level.price:.4f} (strength {level.strength:.3f})\n")
+                        else:
+                            f.write(f"No levels detected - possible reasons:\n")
+                            f.write(f"  - Insufficient fractal points\n")
+                            f.write(f"  - Clustering failed to meet min_touches requirement\n")
+                            f.write(f"  - Strength calculation resulted in 0.0\n")
+                
+                # 詳細ログ: 検出されたレベルの分析
+                if not all_levels:
+                    print("  ⚠️ 検出結果: レベル数0個 → シグナルなし確定")
+                    print("  📋 考えられる原因:")
+                    print("    - フラクタル分析で局所最高値・最安値が不足")
+                    print("    - クラスタリング後にmin_touches=2の条件を満たすレベルなし") 
+                    print("    - 強度計算でraw_strength/200が0.0になった")
+                    if debug_mode:
+                        with open(debug_log_path, 'a') as f:
+                            f.write(f"❌ FAILURE ANALYSIS:\n")
+                            f.write(f"  No levels detected (0 levels)\n")
+                            f.write(f"  Possible reasons:\n")
+                            f.write(f"    1. Fractal analysis insufficient local max/min\n")
+                            f.write(f"    2. Clustering failed min_touches=2 requirement\n")
+                            f.write(f"    3. Strength calculation resulted in 0.0 (raw_strength/200)\n")
+                            f.write(f"  Data characteristics:\n")
+                            f.write(f"    - Price range: {data['close'].min():.4f} - {data['close'].max():.4f}\n")
+                            f.write(f"    - Volatility: {(data['close'].max() - data['close'].min()) / data['close'].mean() * 100:.1f}%\n")
+                else:
+                    print(f"  📋 レベル詳細分析:")
+                    for i, level in enumerate(all_levels[:10]):  # 上位10個のみ表示
+                        distance_pct = abs(level.price - current_price) / current_price * 100
+                        print(f"    {i+1}. {level.level_type} {level.price:.4f} (強度{level.strength:.3f}, タッチ{level.touch_count}回, 距離{distance_pct:.1f}%)")
+                    
+                    if debug_mode:
+                        with open(debug_log_path, 'a') as f:
+                            f.write(f"✅ LEVEL ANALYSIS DETAILS:\n")
+                            for i, level in enumerate(all_levels):
+                                distance_pct = abs(level.price - current_price) / current_price * 100
+                                f.write(f"  Level {i+1}: {level.level_type} {level.price:.4f} (strength {level.strength:.3f}, touches {level.touch_count}, distance {distance_pct:.1f}%)\n")
                 
                 # サポートとレジスタンスに分離
+                support_count = 0
+                resistance_count = 0
                 for level in all_levels:
-                    if level.level_type == 'support':
+                    if level.level_type == 'support' and level.price < current_price:
                         support_levels.append(level)
-                    else:
+                        support_count += 1
+                    elif level.level_type == 'resistance' and level.price > current_price:
                         resistance_levels.append(level)
+                        resistance_count += 1
+                
+                print(f"  📍 現在価格フィルタ後: 有効支持線{support_count}個, 有効抵抗線{resistance_count}個")
+                
+                if debug_mode:
+                    with open(debug_log_path, 'a') as f:
+                        f.write(f"Current price filter results:\n")
+                        f.write(f"  Valid supports: {support_count}, valid resistances: {resistance_count}\n")
+                        f.write(f"  Current price: {current_price:.4f}\n")
+                        if support_levels:
+                            f.write(f"  Supports:\n")
+                            for i, level in enumerate(support_levels[:5]):
+                                f.write(f"    {i+1}. {level.price:.4f} (strength {level.strength:.3f})\n")
+                        if resistance_levels:
+                            f.write(f"  Resistances:\n")
+                            for i, level in enumerate(resistance_levels[:5]):
+                                f.write(f"    {i+1}. {level.price:.4f} (strength {level.strength:.3f})\n")
+            else:
+                print("  ❌ support_resistance_analyzerが初期化されていません")
+                raise Exception("サポレジアナライザーが利用できません")
             
             # 現在価格に近い順にソート
             if data.empty:
                 raise Exception("市場データが空のためサポレジ分析できません")
-            current_price = data['close'].iloc[-1]
             
             support_levels.sort(key=lambda x: abs(x.price - current_price))
             resistance_levels.sort(key=lambda x: abs(x.price - current_price))
             
             # 短期間足の場合はより多くのレベルを使用
             max_levels = 7 if is_short_timeframe else 5
-            return support_levels[:max_levels], resistance_levels[:max_levels]
+            final_supports = support_levels[:max_levels]
+            final_resistances = resistance_levels[:max_levels]
+            
+            print(f"  🎯 最終選択: 支持線{len(final_supports)}個, 抵抗線{len(final_resistances)}個 (上限{max_levels}個)")
+            
+            # 最終選択されたレベルの詳細
+            if final_supports:
+                print(f"  📍 選択された支持線:")
+                for i, level in enumerate(final_supports):
+                    distance_pct = (current_price - level.price) / current_price * 100
+                    print(f"    {i+1}. {level.price:.4f} (強度{level.strength:.3f}, {distance_pct:.1f}%下)")
+            
+            if final_resistances:
+                print(f"  📍 選択された抵抗線:")
+                for i, level in enumerate(final_resistances):
+                    distance_pct = (level.price - current_price) / current_price * 100
+                    print(f"    {i+1}. {level.price:.4f} (強度{level.strength:.3f}, {distance_pct:.1f}%上)")
+            
+            if not final_supports and not final_resistances:
+                print("  🚨 最終結果: 有効なサポレジレベルが0個 → シグナルなし")
+            
+            if debug_mode:
+                with open(debug_log_path, 'a') as f:
+                    f.write(f"\n🎯 FINAL SELECTION RESULTS:\n")
+                    f.write(f"  Selected supports: {len(final_supports)}, resistances: {len(final_resistances)} (max {max_levels})\n")
+                    
+                    if final_supports:
+                        f.write(f"  Final Supports:\n")
+                        for i, level in enumerate(final_supports):
+                            distance_pct = (current_price - level.price) / current_price * 100
+                            f.write(f"    {i+1}. {level.price:.4f} (strength {level.strength:.3f}, {distance_pct:.1f}% below)\n")
+                    
+                    if final_resistances:
+                        f.write(f"  Final Resistances:\n")
+                        for i, level in enumerate(final_resistances):
+                            distance_pct = (level.price - current_price) / current_price * 100
+                            f.write(f"    {i+1}. {level.price:.4f} (strength {level.strength:.3f}, {distance_pct:.1f}% above)\n")
+                    
+                    if not final_supports and not final_resistances:
+                        f.write(f"  ❌ FINAL RESULT: 0 valid levels → No signal\n")
+                    
+                    f.write(f"Analysis completed at {datetime.now()}\n")
+                    f.write(f"="*60 + "\n")
+            
+            # 進捗更新（成功時）
+            if execution_id:
+                try:
+                    import sys
+                    import os
+                    # パス追加（ProcessPoolExecutor環境用）
+                    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    if project_root not in sys.path:
+                        sys.path.insert(0, project_root)
+                    
+                    from web_dashboard.analysis_progress import progress_tracker, SupportResistanceResult
+                    print(f"  📊 progress_tracker インポート成功: execution_id={execution_id}")
+                    supports_data = [{"price": level.price, "strength": level.strength, "touch_count": level.touch_count} 
+                                   for level in final_supports]
+                    resistances_data = [{"price": level.price, "strength": level.strength, "touch_count": level.touch_count} 
+                                      for level in final_resistances]
+                    
+                    print(f"  📊 progress_tracker最終更新: supports={len(final_supports)}, resistances={len(final_resistances)}")
+                    
+                    progress_tracker.update_support_resistance(execution_id, 
+                        SupportResistanceResult(
+                            status="success" if (final_supports or final_resistances) else "failed",
+                            supports_count=len(final_supports),
+                            resistances_count=len(final_resistances),
+                            supports=supports_data,
+                            resistances=resistances_data,
+                            error_message="" if (final_supports or final_resistances) else "No valid levels detected"
+                        ))
+                    print(f"  ✅ progress_tracker最終更新成功")
+                except ImportError as e:
+                    print(f"  ⚠️ progress_trackerインポートエラー: {e}")
+                except Exception as e:
+                    print(f"  ❌ progress_tracker最終更新エラー: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            return final_supports, final_resistances
             
         except Exception as e:
             print(f"🚨 サポレジ分析で致命的エラーが発生: {e}")
+            print(f"  📊 データ状態: 長さ{len(data)}本, 空={data.empty}")
+            if not data.empty:
+                print(f"  💰 価格範囲: {data['close'].min():.4f} - {data['close'].max():.4f}")
             import traceback
             print(f"スタックトレース: {traceback.format_exc()}")
+            
+            # 進捗更新（エラー時）
+            if execution_id:
+                try:
+                    from web_dashboard.analysis_progress import progress_tracker, SupportResistanceResult
+                    print(f"  📊 progress_trackerエラー更新: {str(e)[:100]}")
+                    progress_tracker.update_support_resistance(execution_id, 
+                        SupportResistanceResult(status="failed", error_message=str(e)))
+                    print(f"  ✅ progress_trackerエラー更新成功")
+                except ImportError as ie:
+                    print(f"  ⚠️ progress_trackerインポートエラー: {ie}")
+                except Exception as ue:
+                    print(f"  ❌ progress_trackerエラー更新エラー: {ue}")
+                    import traceback
+                    traceback.print_exc()
+            
             raise Exception(f"サポート・レジスタンス分析に失敗: {e} - 不完全なデータでの分析は危険です")
     
     def _predict_breakouts(self, data: pd.DataFrame, levels: list) -> list:
@@ -468,7 +689,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
     
     # _generate_sample_data method removed - no fallback data allowed
     
-    def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None) -> Dict:
+    def analyze_symbol(self, symbol: str, timeframe: str = "1h", strategy: str = "Conservative_ML", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None, execution_id: str = None) -> Dict:
         """
         シンボル分析（リアルタイム監視システム用）
         
@@ -481,7 +702,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             Dict: 分析結果辞書
         """
         
-        recommendation = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp, custom_period_settings)
+        recommendation = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp, custom_period_settings, execution_id)
         
         return {
             'symbol': symbol,

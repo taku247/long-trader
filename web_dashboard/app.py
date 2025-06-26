@@ -20,9 +20,24 @@ parent_dir = str(Path(__file__).parent.parent.absolute())
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = Path(parent_dir) / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+        # デバッグモード確認
+        debug_mode = os.getenv('SUPPORT_RESISTANCE_DEBUG', 'false').lower() == 'true'
+        if debug_mode:
+            print("🔍 Support/Resistance デバッグモード有効 (.env から読み込み)")
+except ImportError:
+    # python-dotenvがインストールされていない場合は警告
+    print("⚠️  python-dotenvがインストールされていません。pip install python-dotenvを実行してください。")
+
 from real_time_system.monitor import RealTimeMonitor
 from real_time_system.utils.colored_log import get_colored_logger
 from scalable_analysis_system import ScalableAnalysisSystem
+from analysis_progress import progress_tracker, AnalysisProgress
 
 # Force ScalableAnalysisSystem to use root directory database only
 # This prevents creation of duplicate web_dashboard/large_scale_analysis/analysis.db
@@ -1834,6 +1849,10 @@ class WebDashboard:
                 # Create execution ID that will be used
                 execution_id = f"symbol_addition_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
                 
+                # リアルタイム進捗追跡開始
+                progress_tracker.start_analysis(symbol, execution_id)
+                progress_tracker.update_stage(execution_id, "initializing")
+                
                 trainer = AutoSymbolTrainer()
                 
                 # 🔧 修正: DB記録を先に同期的に作成
@@ -1949,6 +1968,48 @@ class WebDashboard:
                 
             except Exception as e:
                 self.logger.error(f"Error adding symbol: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        # Real-time Signal Route (New - Lightweight for real-time monitoring)
+        @self.app.route('/api/realtime/signal', methods=['POST'])
+        def api_realtime_signal():
+            """Get real-time trading signal for a symbol (lightweight, fast response)."""
+            try:
+                data = request.get_json()
+                if not data or 'symbol' not in data:
+                    return jsonify({'error': 'Symbol is required'}), 400
+                
+                symbol = data['symbol'].upper().strip()
+                timeframe = data.get('timeframe', '1h')
+                
+                if not symbol:
+                    return jsonify({'error': 'Invalid symbol'}), 400
+                
+                # TODO: Implement lightweight real-time signal generation
+                # This endpoint should:
+                # 1. Perform single support/resistance detection (not 5000+ evaluations)
+                # 2. Generate immediate buy/sell/hold signal
+                # 3. Respond within 3 seconds
+                # 4. Use current market data only
+                # 5. Return simple trading recommendation
+                
+                # Placeholder response for now
+                return jsonify({
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'signal': None,  # TODO: Implement "BUY"|"SELL"|"HOLD"
+                    'confidence': None,  # TODO: Implement 0.0-1.0
+                    'leverage': None,  # TODO: Implement recommended leverage
+                    'current_price': None,  # TODO: Fetch current price
+                    'support_level': None,  # TODO: Nearest support level
+                    'resistance_level': None,  # TODO: Nearest resistance level
+                    'reasoning': "TODO: Implement real-time signal generation",
+                    'response_time_ms': None,  # TODO: Track response time
+                    'status': 'not_implemented'
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error generating real-time signal: {e}")
                 return jsonify({'error': str(e)}), 500
         
         @self.app.route('/api/symbol/retry', methods=['POST'])
@@ -2905,6 +2966,258 @@ class WebDashboard:
             except Exception as e:
                 self.logger.error(f"Error getting execution progress: {e}")
                 return jsonify({'error': str(e)}), 500
+
+        # Real-time Analysis Progress API
+        @self.app.route('/api/analysis/progress/<execution_id>', methods=['GET'])
+        def api_analysis_progress(execution_id):
+            """リアルタイム分析進捗取得"""
+            try:
+                progress = progress_tracker.get_progress(execution_id)
+                if not progress:
+                    return jsonify({'error': 'Progress not found'}), 404
+                
+                return jsonify(progress.to_dict())
+                
+            except Exception as e:
+                self.logger.error(f"Error getting analysis progress: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/analysis/recent', methods=['GET'])
+        def api_analysis_recent():
+            """最近の分析結果取得（ファイルベース対応）"""
+            try:
+                hours = int(request.args.get('hours', 1))
+                
+                # まずメモリベースのprogress_trackerから取得
+                recent_analyses = progress_tracker.get_all_recent(hours)
+                
+                # データベース状態との同期を実行
+                self._sync_progress_with_database()
+                
+                # ファイルベースの進捗データも取得して統合
+                file_based_analyses = self._get_file_based_progress_data(hours)
+                self.logger.info(f"📊 API統合: メモリ={len(recent_analyses)}件, ファイル={len(file_based_analyses)}件")
+                
+                # 統合データを作成
+                all_analyses = []
+                
+                # メモリベースデータを追加
+                for progress in recent_analyses:
+                    all_analyses.append(progress.to_dict())
+                
+                # ファイルベースデータを追加（より新しいデータを優先）
+                existing_ids = {analysis['execution_id'] for analysis in all_analyses}
+                for file_analysis in file_based_analyses:
+                    if file_analysis['execution_id'] not in existing_ids:
+                        all_analyses.append(file_analysis)
+                    else:
+                        # 既存のメモリベースデータをファイルベースの最新データで更新
+                        for i, existing_analysis in enumerate(all_analyses):
+                            if existing_analysis['execution_id'] == file_analysis['execution_id']:
+                                # last_updateまたはstart_timeで新しさを判定
+                                file_last_update = file_analysis.get('last_update', file_analysis.get('start_time', ''))
+                                existing_last_update = existing_analysis.get('last_update', existing_analysis.get('start_time', ''))
+                                
+                                # ファイルベースデータの方が新しい場合、または詳細な進捗情報がある場合は置き換え
+                                if (file_last_update > existing_last_update or 
+                                    file_analysis.get('current_stage') != 'initializing' and 
+                                    existing_analysis.get('current_stage') == 'initializing'):
+                                    all_analyses[i] = file_analysis
+                                    self.logger.info(f"📝 更新されたファイルベースデータで置き換え: {file_analysis['execution_id'][:25]}...")
+                                break
+                
+                # 開始時刻でソート
+                all_analyses.sort(key=lambda x: x.get('start_time', ''), reverse=True)
+                
+                return jsonify({
+                    'analyses': all_analyses,
+                    'count': len(all_analyses),
+                    'memory_count': len(recent_analyses),
+                    'file_count': len(file_based_analyses)
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error getting recent analyses: {e}")
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/analysis-progress')
+        def analysis_progress_page():
+            """リアルタイム分析進捗ページ"""
+            return render_template('analysis_progress.html')
+    
+    def _get_file_based_progress_data(self, hours: int = 1) -> list:
+        """ファイルベースの進捗データを取得"""
+        import os
+        import json
+        import glob
+        from datetime import datetime, timedelta
+        
+        file_based_analyses = []
+        
+        try:
+            # /tmp/progress_*.json ファイルを検索
+            progress_files = glob.glob("/tmp/progress_*.json")
+            
+            cutoff_time = datetime.now() - timedelta(hours=hours)
+            
+            for progress_file in progress_files:
+                try:
+                    with open(progress_file, 'r') as f:
+                        data = json.load(f)
+                    
+                    # 時間フィルタリング
+                    start_time_str = data.get('start_time', '')
+                    if start_time_str:
+                        start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                        if start_time < cutoff_time:
+                            continue
+                    
+                    # progress_trackerフォーマットに変換
+                    converted_data = {
+                        'symbol': data.get('symbol', 'UNKNOWN'),
+                        'execution_id': data.get('execution_id', ''),
+                        'start_time': start_time_str,
+                        'current_stage': data.get('current_stage', 'unknown'),
+                        'overall_status': data.get('overall_status', 'unknown'),
+                        'support_resistance': {
+                            'status': data.get('phases', {}).get('support_resistance', {}).get('status', 'pending'),
+                            'supports_count': 0,
+                            'resistances_count': 0,
+                            'supports': [],
+                            'resistances': []
+                        },
+                        'ml_prediction': {
+                            'status': data.get('phases', {}).get('ml_prediction', {}).get('status', 'pending'),
+                            'predictions_count': 0,
+                            'confidence': 0.0,
+                            'error_message': None
+                        },
+                        'market_context': {
+                            'status': data.get('phases', {}).get('market_context', {}).get('status', 'pending'),
+                            'trend_direction': None,
+                            'market_phase': None
+                        },
+                        'leverage_decision': {
+                            'status': data.get('phases', {}).get('leverage_decision', {}).get('status', 'pending'),
+                            'recommended_leverage': 0.0,
+                            'confidence_level': 0.0,
+                            'risk_reward_ratio': 0.0,
+                            'error_message': None
+                        },
+                        'final_signal': None,
+                        'data_source': 'file_based'
+                    }
+                    
+                    file_based_analyses.append(converted_data)
+                    
+                except Exception as e:
+                    self.logger.warning(f"ファイルベース進捗データ読み込みエラー {progress_file}: {e}")
+                    continue
+            
+            self.logger.info(f"📝 ファイルベース進捗データ取得: {len(file_based_analyses)}件")
+            
+        except Exception as e:
+            self.logger.error(f"ファイルベース進捗データ取得エラー: {e}")
+        
+        return file_based_analyses
+    
+    def _sync_progress_with_database(self):
+        """execution_logsの実際のstatusでファイルベース進捗を同期"""
+        import sqlite3
+        import glob
+        import json
+        from datetime import datetime
+        
+        try:
+            # データベース接続
+            conn = sqlite3.connect('execution_logs.db')
+            cursor = conn.cursor()
+            
+            progress_files = glob.glob("/tmp/progress_*.json")
+            synced_count = 0
+            
+            for progress_file in progress_files:
+                try:
+                    with open(progress_file, 'r') as f:
+                        data = json.load(f)
+                    
+                    execution_id = data.get('execution_id')
+                    current_status = data.get('overall_status')
+                    
+                    # ファイルベースが「running」の場合のみチェック
+                    if current_status == 'running' and execution_id:
+                        # データベースの実際のstatusを確認
+                        cursor.execute(
+                            'SELECT status, current_operation, errors, timestamp_end FROM execution_logs WHERE execution_id = ?',
+                            (execution_id,)
+                        )
+                        result = cursor.fetchone()
+                        
+                        if result:
+                            db_status, operation, errors, timestamp_end = result
+                            
+                            # データベースが完了しているのにファイルベースがrunning
+                            if db_status in ['COMPLETED', 'FAILED'] and current_status == 'running':
+                                self.logger.info(f"🔄 進捗同期: {execution_id[:30]}... {current_status} → {db_status}")
+                                
+                                # データベースの実際の状態に合わせて更新
+                                if db_status == 'COMPLETED':
+                                    data['current_stage'] = 'completed'
+                                    data['overall_status'] = 'completed'
+                                    data['final_signal'] = 'analysis_completed'
+                                    
+                                    # 全フェーズを完了状態に
+                                    for phase_name in data.get('phases', {}):
+                                        if data['phases'][phase_name].get('status') in ['running', 'pending']:
+                                            data['phases'][phase_name]['status'] = 'completed'
+                                            
+                                elif db_status == 'FAILED':
+                                    data['current_stage'] = 'failed'
+                                    data['overall_status'] = 'failed'
+                                    
+                                    # エラー情報を反映
+                                    if errors:
+                                        try:
+                                            import json as json_module
+                                            error_data = json_module.loads(errors)
+                                            if error_data and len(error_data) > 0:
+                                                error_msg = error_data[0].get('error_message', 'Unknown error')
+                                                data['error_message'] = error_msg
+                                                
+                                                # 現在runningのフェーズを失敗状態に
+                                                for phase_name, phase_data in data.get('phases', {}).items():
+                                                    if phase_data.get('status') == 'running':
+                                                        phase_data['status'] = 'failed'
+                                                        phase_data['error_message'] = error_msg
+                                        except Exception as e:
+                                            data['error_message'] = 'Analysis failed'
+                                            self.logger.warning(f"エラー情報パース失敗: {e}")
+                                
+                                # 完了時刻をDBから取得
+                                if timestamp_end:
+                                    data['end_time'] = timestamp_end
+                                
+                                data['last_update'] = datetime.now().isoformat()
+                                data['synced_from_db'] = True
+                                data['db_status'] = db_status
+                                
+                                # ファイル更新
+                                with open(progress_file, 'w') as f:
+                                    json.dump(data, f, indent=2)
+                                
+                                synced_count += 1
+                                
+                except Exception as e:
+                    self.logger.warning(f"進捗ファイル処理エラー {progress_file}: {e}")
+                    continue
+            
+            conn.close()
+            
+            if synced_count > 0:
+                self.logger.info(f"📊 データベース同期完了: {synced_count}件の進捗を更新")
+                
+        except Exception as e:
+            self.logger.error(f"データベース同期エラー: {e}")
 
 
 def main():

@@ -9,11 +9,16 @@ from scipy.signal import argrelextrema
 from typing import List, Dict, Any, Optional
 import sys
 import os
+import logging
 
 # プロジェクトルートをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from interfaces.data_types import SupportResistanceLevel
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class SupportResistanceDetector:
@@ -100,6 +105,25 @@ class SupportResistanceDetector:
             # 強度順でソート
             resistance_objects.sort(key=lambda x: x.strength, reverse=True)
             support_objects.sort(key=lambda x: x.strength, reverse=True)
+            
+            # 検出成功をログに出力
+            if support_objects or resistance_objects:
+                logger.info(f"✅ 支持線・抵抗線検出成功:")
+                logger.info(f"   📊 支持線: {len(support_objects)}個検出")
+                if support_objects:
+                    for i, s in enumerate(support_objects[:3], 1):  # 上位3個表示
+                        logger.info(f"      {i}. 価格: ${s.price:.2f} (現在価格の{s.distance_from_current:.1f}%下) 強度: {s.strength:.2f} タッチ数: {s.touch_count}")
+                    if len(support_objects) > 3:
+                        logger.info(f"      ... 他{len(support_objects)-3}個")
+                        
+                logger.info(f"   📈 抵抗線: {len(resistance_objects)}個検出")
+                if resistance_objects:
+                    for i, r in enumerate(resistance_objects[:3], 1):  # 上位3個表示
+                        logger.info(f"      {i}. 価格: ${r.price:.2f} (現在価格の{r.distance_from_current:.1f}%上) 強度: {r.strength:.2f} タッチ数: {r.touch_count}")
+                    if len(resistance_objects) > 3:
+                        logger.info(f"      ... 他{len(resistance_objects)-3}個")
+            else:
+                logger.warning(f"⚠️  支持線・抵抗線が検出されませんでした (現在価格: ${current_price:.2f})")
             
             return support_objects, resistance_objects
             

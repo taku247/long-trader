@@ -216,6 +216,24 @@ class ScalableAnalysisSystem:
             os.environ['CUSTOM_PERIOD_SETTINGS'] = json.dumps(custom_period_settings)
             logger.info(f"📅 期間設定を環境変数に設定: {custom_period_settings}")
         
+        # デバッグモードも子プロセスに伝達
+        debug_mode = os.environ.get('SUPPORT_RESISTANCE_DEBUG', 'false')
+        if debug_mode.lower() == 'true':
+            logger.info(f"🔍 Support/Resistance デバッグモード有効")
+            # 子プロセスでも確実に設定されるようにする
+            os.environ['SUPPORT_RESISTANCE_DEBUG'] = 'true'
+        
+        # execution_idも子プロセスに伝達（progress_tracker用）
+        if execution_id:
+            os.environ['CURRENT_EXECUTION_ID'] = execution_id
+            logger.info(f"📝 実行IDを環境変数に設定: {execution_id}")
+            
+            # ファイルベースprogress_trackerの初期化
+            try:
+                self._init_file_based_progress_tracker(execution_id, symbol)
+            except Exception as e:
+                logger.warning(f"⚠️ ファイルベースprogress_tracker初期化エラー: {e}")
+        
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             for i, chunk in enumerate(chunks):
@@ -249,6 +267,13 @@ class ScalableAnalysisSystem:
             progress_logger.log_phase_complete("バックテスト")
             # 成功判定: 分析が実行された場合（シグナルなしでも成功）
             analysis_attempted = len(batch_configs) > 0
+            
+            # ファイルベースprogress_tracker更新
+            if execution_id:
+                try:
+                    self._update_file_based_progress_tracker(execution_id, "backtest_completed", "support_resistance")
+                except Exception as e:
+                    logger.warning(f"⚠️ ファイルベースprogress_tracker更新エラー: {e}")
             progress_logger.log_final_summary(analysis_attempted)
         else:
             logger.info(f"バッチ分析完了: {total_processed}パターン処理完了")
@@ -301,16 +326,69 @@ class ScalableAnalysisSystem:
             
         return created_count
     
+    def _setup_child_process_logging(self):
+        """子プロセスでのロギング設定を初期化"""
+        import logging
+        import os
+        
+        # 既存のハンドラーをクリア
+        logger = logging.getLogger()
+        logger.handlers = []
+        
+        # ログレベル設定
+        logger.setLevel(logging.INFO)
+        
+        # フォーマッター
+        formatter = logging.Formatter('%(asctime)s - %(process)d - %(levelname)s - %(message)s')
+        
+        # コンソールハンドラー
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+        # server.logファイルハンドラー（存在する場合）
+        server_log_path = os.path.join(os.path.dirname(__file__), 'web_dashboard', 'server.log')
+        if os.path.exists(os.path.dirname(server_log_path)):
+            try:
+                file_handler = logging.FileHandler(server_log_path, mode='a')
+                file_handler.setLevel(logging.INFO)
+                file_handler.setFormatter(formatter)
+                logger.addHandler(file_handler)
+            except Exception as e:
+                # ファイルハンドラーの追加に失敗した場合は無視
+                pass
+        
+        # 各モジュールのロガーも再設定
+        for module_name in ['__main__', 'scalable_analysis_system', 'engines.support_resistance_detector', 
+                           'engines.support_resistance_adapter', 'engines.high_leverage_bot_orchestrator']:
+            module_logger = logging.getLogger(module_name)
+            module_logger.setLevel(logging.INFO)
+    
     def _process_chunk(self, configs_chunk, chunk_id, execution_id=None):
         """チャンクを処理（プロセス内で実行）"""
         import time
         import random
         import os
         
+        # 子プロセスでのロギング設定を追加
+        self._setup_child_process_logging()
+        
         # execution_idを環境変数に設定（子プロセス用）
         if execution_id:
             os.environ['CURRENT_EXECUTION_ID'] = execution_id
             logger.info(f"チャンク {chunk_id}: execution_id {execution_id} を環境変数に設定")
+        else:
+            # 環境変数から取得を試みる
+            env_execution_id = os.environ.get('CURRENT_EXECUTION_ID')
+            if env_execution_id:
+                execution_id = env_execution_id
+                logger.info(f"チャンク {chunk_id}: 環境変数からexecution_id {execution_id} を取得")
+        
+        # デバッグモードの確認（子プロセス内）
+        debug_mode = os.environ.get('SUPPORT_RESISTANCE_DEBUG', 'false').lower() == 'true'
+        if debug_mode:
+            logger.info(f"チャンク {chunk_id}: Support/Resistance デバッグモード有効 (PID: {os.getpid()})")
         
         # プロセス間の競合を防ぐため、わずかな遅延を追加
         # TODO: ランダム遅延は品質問題のためコメントアウト (2024-06-18)
@@ -352,10 +430,14 @@ class ScalableAnalysisSystem:
                     logger.error(f"Missing required keys in config: {config}")
                     continue
                 
+                # execution_idをログ出力
+                logger.info(f"🔍 分析開始: {config['symbol']} {config['timeframe']} {strategy} (execution_id: {execution_id})")
+                
                 result, metrics = self._generate_single_analysis(
                     config['symbol'], 
                     config['timeframe'], 
-                    strategy
+                    strategy,
+                    execution_id
                 )
                 if result:
                     processed += 1
@@ -421,7 +503,7 @@ class ScalableAnalysisSystem:
                 logger.error(f"  📝 エラー詳細: {str(e)}")
                 raise
     
-    def _generate_single_analysis(self, symbol, timeframe, config):
+    def _generate_single_analysis(self, symbol, timeframe, config, execution_id=None):
         """単一の分析を生成（ハイレバレッジボット使用版 + task_status更新）"""
         analysis_id = f"{symbol}_{timeframe}_{config}"
         
@@ -437,7 +519,9 @@ class ScalableAnalysisSystem:
         
         # ハイレバレッジボットを使用した分析を試行
         try:
-            trades_data = self._generate_real_analysis(symbol, timeframe, config)
+            # execution_idをログ出力
+            logger.info(f"🎯 リアル分析開始: {symbol} {timeframe} {config} (execution_id: {execution_id})")
+            trades_data = self._generate_real_analysis(symbol, timeframe, config, execution_id=execution_id)
         except Exception as e:
             logger.error(f"Real analysis failed for {symbol} {timeframe} {config}: {e}")
             logger.error(f"Analysis terminated - no fallback to sample data")
@@ -546,7 +630,7 @@ class ScalableAnalysisSystem:
             logger.error(f"期間計算エラー: {e}")
             return 90  # デフォルト
     
-    def _generate_real_analysis(self, symbol, timeframe, config, custom_period_days=None):
+    def _generate_real_analysis(self, symbol, timeframe, config, custom_period_days=None, execution_id=None):
         """条件ベースのハイレバレッジ分析 - 市場条件を満たした場合のみシグナル生成"""
         # 変数初期化（安全性確保）
         custom_period_settings = None
@@ -568,14 +652,14 @@ class ScalableAnalysisSystem:
             # 期間設定の優先順位: custom_period_days > custom_period_settings > 設定ファイル
             if custom_period_days is not None:
                 evaluation_period_days = custom_period_days
-                print(f"📅 カスタム評価期間: {evaluation_period_days}日")
+                logger.info(f"📅 カスタム評価期間: {evaluation_period_days}日")
             elif custom_period_settings and custom_period_settings.get('mode') == 'custom':
                 # カスタム期間の場合は200本前データを含む期間を計算
                 evaluation_period_days = self._calculate_period_with_history(custom_period_settings, timeframe)
-                print(f"📅 ユーザー指定期間+200本: {evaluation_period_days}日 ({timeframe}足)")
+                logger.info(f"📅 ユーザー指定期間+200本: {evaluation_period_days}日 ({timeframe}足)")
             else:
                 evaluation_period_days = tf_config.get('data_days', 90)  # 設定ファイルから取得
-                print(f"📅 時間足別評価期間: {evaluation_period_days}日 ({timeframe}足設定)")
+                logger.info(f"📅 時間足別評価期間: {evaluation_period_days}日 ({timeframe}足設定)")
             
             # 本格的な戦略分析のため、実際のAPIデータを使用
             from engines.high_leverage_bot_orchestrator import HighLeverageBotOrchestrator
@@ -583,13 +667,13 @@ class ScalableAnalysisSystem:
             # 取引所設定を取得
             exchange = self._get_exchange_from_config(config)
             
-            print(f"🎯 実データによる戦略分析を開始: {symbol} {timeframe} {config} ({exchange})")
-            print("   ⏳ データ取得とML分析のため、処理に数分かかる場合があります...")
+            logger.info(f"🎯 実データによる戦略分析を開始: {symbol} {timeframe} {config} ({exchange})")
+            logger.info("   ⏳ データ取得とML分析のため、処理に数分かかる場合があります...")
             
             # 修正: ハードコード値問題解決のため、毎回新しいボットを作成（キャッシュ無効化）
             # 理由: キャッシュされたデータの再利用により、全トレードで同じエントリー価格が使用される問題を解決
             bot = HighLeverageBotOrchestrator(use_default_plugins=True, exchange=exchange)
-            print(f"🔄 {symbol} 新規ボットでデータ取得中... (価格多様性確保のため)")
+            logger.info(f"🔄 {symbol} 新規ボットでデータ取得中... (価格多様性確保のため)")
             
             # 複数回分析を実行してトレードデータを生成（完全ログ抑制）
             trades = []
@@ -599,21 +683,26 @@ class ScalableAnalysisSystem:
             import time
             
             # 進捗表示用
-            print(f"🔄 {symbol} {timeframe} {config}: 条件ベース分析開始")
+            logger.info(f"🔄 {symbol} {timeframe} {config}: 条件ベース分析開始")
             
-            # 完全にログを抑制するコンテキストマネージャー
+            # 完全にログを抑制するコンテキストマネージャー（デバッグモード時は無効）
             @contextlib.contextmanager
             def suppress_all_output():
-                with open(os.devnull, 'w') as devnull:
-                    old_stdout = sys.stdout
-                    old_stderr = sys.stderr
-                    try:
-                        sys.stdout = devnull
-                        sys.stderr = devnull
-                        yield
-                    finally:
-                        sys.stdout = old_stdout
-                        sys.stderr = old_stderr
+                debug_mode = os.environ.get('SUPPORT_RESISTANCE_DEBUG', 'false').lower() == 'true'
+                if debug_mode:
+                    # デバッグモードの場合は出力を抑制しない
+                    yield
+                else:
+                    with open(os.devnull, 'w') as devnull:
+                        old_stdout = sys.stdout
+                        old_stderr = sys.stderr
+                        try:
+                            sys.stdout = devnull
+                            sys.stderr = devnull
+                            yield
+                        finally:
+                            sys.stdout = old_stdout
+                            sys.stderr = old_stderr
             
             # 条件ベースのシグナル生成期間設定
             end_time = datetime.now(timezone.utc)
@@ -665,7 +754,7 @@ class ScalableAnalysisSystem:
             # カバー率の計算
             actual_coverage = (max_evaluations * evaluation_interval.total_seconds() / 60) / total_period_minutes * 100
             
-            print(f"🔍 条件ベース分析: {start_time.strftime('%Y-%m-%d')} から {end_time.strftime('%Y-%m-%d')}")
+            logger.info(f"🔍 条件ベース分析: {start_time.strftime('%Y-%m-%d')} から {end_time.strftime('%Y-%m-%d')}")
             print(f"📊 評価間隔: {evaluation_interval} ({timeframe}足最適化)")
             print(f"🛡️ 最大評価回数: {max_evaluations}回 (設定値: {config_max_evaluations}, 計算値: {calculated_max_evaluations})")
             print(f"📈 期間カバー率: {actual_coverage:.1f}%")
@@ -680,7 +769,11 @@ class ScalableAnalysisSystem:
                 try:
                     # 出力抑制で市場条件の評価（バックテストフラグ付き）
                     with suppress_all_output():
-                        result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time, custom_period_settings=custom_period_settings)
+                        # execution_idをログ出力（初回のみ）
+                        if total_evaluations == 1:
+                            logger.info(f"🔍 ボット分析開始: execution_id={execution_id}")
+                        
+                        result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time, custom_period_settings=custom_period_settings, execution_id=execution_id)
                     
                     if not result or 'current_price' not in result:
                         current_time += evaluation_interval
@@ -703,7 +796,7 @@ class ScalableAnalysisSystem:
                     if signals_generated % 5 == 0:
                         progress_pct = ((current_time - start_time).total_seconds() / 
                                       (end_time - start_time).total_seconds()) * 100
-                        print(f"🎯 {symbol} {timeframe}: シグナル生成 {signals_generated}件 (進捗: {progress_pct:.1f}%)")
+                        logger.info(f"🎯 {symbol} {timeframe}: シグナル生成 {signals_generated}件 (進捗: {progress_pct:.1f}%)")
                     
                     # レバレッジとTP/SL価格を計算
                     leverage = result.get('leverage', 5.0)
@@ -789,13 +882,25 @@ class ScalableAnalysisSystem:
                         
                         # プロバイダー情報をログに表示
                         provider_info = detector.get_provider_info()
-                        print(f"       検出プロバイダー: {provider_info['base_provider']}")
-                        print(f"       ML強化: {provider_info['ml_provider']}")
+                        logger.info(f"       検出プロバイダー: {provider_info['base_provider']}")
+                        logger.info(f"       ML強化: {provider_info['ml_provider']}")
                         
                         # 支持線・抵抗線を検出（リアルタイムは全データ使用）
-                        print(f"       リアルタイムモード: 全データ使用 {len(ohlcv_data)}本")
-                        print(f"       🔍 支持線・抵抗線検出開始 (評価{total_evaluations}回目, 時刻: {current_time.strftime('%Y-%m-%d %H:%M')})")
+                        logger.info(f"       リアルタイムモード: 全データ使用 {len(ohlcv_data)}本")
+                        logger.info(f"       🔍 支持線・抵抗線検出開始 (評価{total_evaluations}回目, 時刻: {current_time.strftime('%Y-%m-%d %H:%M')})")
                         support_levels, resistance_levels = detector.detect_levels(ohlcv_data, current_price)
+                        
+                        # 検出結果をログに記録（ProcessPoolExecutor対応）
+                        if support_levels or resistance_levels:
+                            logger.info(f"   ✅ 支持線・抵抗線検出成功: 支持線{len(support_levels)}個, 抵抗線{len(resistance_levels)}個")
+                            if support_levels:
+                                for i, s in enumerate(support_levels[:3], 1):
+                                    logger.info(f"      支持線{i}: ${s.price:.2f} (強度: {s.strength:.2f})")
+                            if resistance_levels:
+                                for i, r in enumerate(resistance_levels[:3], 1):
+                                    logger.info(f"      抵抗線{i}: ${r.price:.2f} (強度: {r.strength:.2f})")
+                        else:
+                            logger.warning(f"   ⚠️  支持線・抵抗線が検出されませんでした")
                         
                         # 上位レベルのみ選択（パフォーマンス向上）
                         max_levels = 3
@@ -818,18 +923,18 @@ class ScalableAnalysisSystem:
                             
                             raise Exception(f"有効な支持線・抵抗線が検出されませんでした。市場データが不十分である可能性があります。")
                         
-                        print(f"   ✅ 支持線・抵抗線検出成功: 支持線{len(support_levels)}個, 抵抗線{len(resistance_levels)}個")
+                        logger.info(f"   ✅ 支持線・抵抗線検出成功: 支持線{len(support_levels)}個, 抵抗線{len(resistance_levels)}個")
                         
                         # ML予測スコア情報も表示
                         if provider_info['ml_provider'] != "Disabled":
                             if support_levels:
                                 avg_ml_score = np.mean([getattr(s, 'ml_bounce_probability', 0) for s in support_levels])
-                                print(f"       支持線ML反発予測: 平均{avg_ml_score:.2f}")
+                                logger.info(f"       支持線ML反発予測: 平均{avg_ml_score:.2f}")
                             if resistance_levels:
                                 avg_ml_score = np.mean([getattr(r, 'ml_bounce_probability', 0) for r in resistance_levels])
-                                print(f"       抵抗線ML反発予測: 平均{avg_ml_score:.2f}")
+                                logger.info(f"       抵抗線ML反発予測: 平均{avg_ml_score:.2f}")
                         else:
-                            print(f"       ML予測: 無効化")
+                            logger.info(f"       ML予測: 無効化")
                         
                         # TP/SL価格を実際のデータで計算
                         sltp_levels = sltp_calculator.calculate_levels(
@@ -843,8 +948,8 @@ class ScalableAnalysisSystem:
                     except Exception as e:
                         # 支持線・抵抗線データ不足の場合は、この評価をスキップして次に進む
                         error_msg = f"支持線・抵抗線データの検出・分析に失敗: {str(e)}"
-                        print(f"⚠️ {symbol} {timeframe} {config}: {error_msg} (評価{total_evaluations}をスキップ)")
-                        print(f"   📅 スキップした時刻: {current_time.strftime('%Y-%m-%d %H:%M')} → 次の評価に継続")
+                        logger.warning(f"⚠️ {symbol} {timeframe} {config}: {error_msg} (評価{total_evaluations}をスキップ)")
+                        logger.info(f"   📅 スキップした時刻: {current_time.strftime('%Y-%m-%d %H:%M')} → 次の評価に継続")
                         logger.warning(f"Support/resistance analysis failed for {symbol} at {current_time}: {error_msg}")
                         # 次の評価時点に進む（continue先でevaluation_intervalが加算される）
                         continue
@@ -982,7 +1087,7 @@ class ScalableAnalysisSystem:
                     })
                     
                 except Exception as e:
-                    print(f"⚠️ 分析エラー (評価{total_evaluations}): {str(e)[:100]}")
+                    logger.warning(f"⚠️ 分析エラー (評価{total_evaluations}): {str(e)[:100]}")
                     logger.warning(f"Analysis failed for {symbol} at {current_time}: {e}")
                 
                 # 次の評価時点に進む
@@ -990,14 +1095,14 @@ class ScalableAnalysisSystem:
             
             # 評価回数制限に達した場合の警告
             if total_evaluations >= max_evaluations:
-                print(f"⚠️ {symbol} {timeframe} {config}: 最大評価回数({max_evaluations})に達しました")
+                logger.warning(f"⚠️ {symbol} {timeframe} {config}: 最大評価回数({max_evaluations})に達しました")
             
             if not trades:
                 print(f"ℹ️ {symbol} {timeframe} {config}: 評価期間中に条件を満たすシグナルが見つかりませんでした")
                 return []  # 空のリストを返す（エラーにしない）
             
             evaluation_rate = (signals_generated / total_evaluations * 100) if total_evaluations > 0 else 0
-            print(f"✅ {symbol} {timeframe} {config}: 条件ベース分析完了")
+            logger.info(f"✅ {symbol} {timeframe} {config}: 条件ベース分析完了")
             print(f"   📊 総評価数: {total_evaluations}, シグナル生成: {signals_generated}件 ({evaluation_rate:.1f}%)")
             
             # 価格整合性チェック結果のサマリーを表示
@@ -1007,7 +1112,7 @@ class ScalableAnalysisSystem:
                     print(f"   🔍 価格整合性チェック: {validation_summary['consistency_rate']:.1f}% 整合性")
                     print(f"   📈 平均価格差異: {validation_summary['avg_difference_pct']:.2f}%")
                     if validation_summary['level_counts'].get('critical', 0) > 0:
-                        print(f"   ⚠️ 重大な価格不整合: {validation_summary['level_counts']['critical']}件")
+                        logger.warning(f"   ⚠️ 重大な価格不整合: {validation_summary['level_counts']['critical']}件")
             
             return trades
             
@@ -1933,6 +2038,81 @@ def add_get_timeframe_config_method():
     
     # クラスにメソッドを動的に追加
     ScalableAnalysisSystem.get_timeframe_config = get_timeframe_config
+    
+    def _init_file_based_progress_tracker(self, execution_id: str, symbol: str):
+        """ファイルベースprogress_tracker初期化（プロセス間共有対応）"""
+        import json
+        import os
+        from datetime import datetime
+        
+        progress_file = f"/tmp/progress_{execution_id}.json"
+        
+        # 初期データ作成
+        initial_data = {
+            "symbol": symbol,
+            "execution_id": execution_id,
+            "start_time": datetime.now().isoformat(),
+            "current_stage": "backtest_starting",
+            "overall_status": "running",
+            "phases": {
+                "data_validation": {"status": "completed"},
+                "backtest": {"status": "running", "start_time": datetime.now().isoformat()},
+                "support_resistance": {"status": "pending"},
+                "ml_prediction": {"status": "pending"},
+                "market_context": {"status": "pending"},
+                "leverage_decision": {"status": "pending"}
+            }
+        }
+        
+        # ファイルに保存
+        with open(progress_file, 'w') as f:
+            json.dump(initial_data, f, indent=2)
+        
+        logger.info(f"📝 ファイルベースprogress_tracker初期化完了: {progress_file}")
+    
+    ScalableAnalysisSystem._init_file_based_progress_tracker = _init_file_based_progress_tracker
+    
+    def _update_file_based_progress_tracker(self, execution_id: str, completed_phase: str, next_phase: str):
+        """ファイルベースprogress_tracker更新"""
+        import json
+        import os
+        from datetime import datetime
+        
+        progress_file = f"/tmp/progress_{execution_id}.json"
+        
+        try:
+            # 既存データ読み込み
+            if os.path.exists(progress_file):
+                with open(progress_file, 'r') as f:
+                    data = json.load(f)
+            else:
+                logger.warning(f"進捗ファイルが見つかりません: {progress_file}")
+                return
+            
+            # フェーズ更新
+            current_time = datetime.now().isoformat()
+            
+            if completed_phase in data["phases"]:
+                data["phases"][completed_phase]["status"] = "completed"
+                data["phases"][completed_phase]["end_time"] = current_time
+                
+            if next_phase in data["phases"]:
+                data["phases"][next_phase]["status"] = "running"
+                data["phases"][next_phase]["start_time"] = current_time
+                
+            data["current_stage"] = next_phase
+            data["last_update"] = current_time
+            
+            # ファイルに保存
+            with open(progress_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            logger.info(f"📝 進捗更新: {completed_phase} → {next_phase}")
+            
+        except Exception as e:
+            logger.error(f"❌ ファイルベース進捗更新エラー: {e}")
+    
+    ScalableAnalysisSystem._update_file_based_progress_tracker = _update_file_based_progress_tracker
 
 # メソッド追加を実行
 add_get_timeframe_config_method()

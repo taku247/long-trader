@@ -552,8 +552,9 @@ class ScalableAnalysisSystem:
             chart_path = self._generate_lightweight_chart(analysis_id, trades_data, metrics)
         
         # データベース保存（execution_id付き + task_status更新含む）
-        execution_id = os.environ.get('CURRENT_EXECUTION_ID')
-        self._save_to_database(symbol, timeframe, config, metrics, chart_path, compressed_path, execution_id)
+        # execution_idを環境変数または引数から取得（引数を優先）
+        final_execution_id = execution_id or os.environ.get('CURRENT_EXECUTION_ID')
+        self._save_to_database(symbol, timeframe, config, metrics, chart_path, compressed_path, final_execution_id)
         
         return True, metrics
     

@@ -719,7 +719,7 @@ class MultiExchangeAPIClient:
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=days)
         
-        return await self.get_ohlcv_async(symbol, timeframe, start_time, end_time)
+        return await self.get_ohlcv_data(symbol, timeframe, start_time, end_time)
 
 
 # 後方互換性のためのエイリアス

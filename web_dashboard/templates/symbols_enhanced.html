@@ -376,6 +376,13 @@
             
             if (allStrategies.length === 0) {
                 loadStrategyConfigurations();
+            } else if (mode === 'selective') {
+                // 選択実行モードに切り替えた時、初期選択状態を反映
+                updateSelectedStrategies();
+            } else if (mode === 'custom') {
+                // カスタムモードに切り替えた時、選択状態をリセット
+                selectedStrategyIds = [];
+                updateSelectedCustomStrategies();
             }
             
             updateExecutionEstimate();
@@ -451,6 +458,9 @@
             container.querySelectorAll('.strategy-checkbox').forEach(checkbox => {
                 checkbox.addEventListener('change', updateSelectedStrategies);
             });
+            
+            // 初期選択状態を反映
+            updateSelectedStrategies();
         }
 
         // カスタム戦略一覧描画 (カスタムモード用)
@@ -858,6 +868,38 @@
             // 定期更新
             setInterval(loadRunningSymbols, 30000); // 30秒ごと
         });
+
+        // showAlert function for user notifications
+        function showAlert(message, type = 'info') {
+            const alertArea = document.getElementById('alertArea');
+            if (!alertArea) return;
+            
+            const alertClass = {
+                'success': 'alert-success',
+                'danger': 'alert-danger', 
+                'warning': 'alert-warning',
+                'info': 'alert-info'
+            }[type] || 'alert-info';
+            
+            const alertHTML = `
+                <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                    <strong>${type === 'success' ? '✅' : type === 'danger' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️'}</strong>
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            
+            alertArea.innerHTML = alertHTML;
+            
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                const alert = alertArea.querySelector('.alert');
+                if (alert) {
+                    alert.classList.remove('show');
+                    setTimeout(() => alertArea.innerHTML = '', 150);
+                }
+            }, 5000);
+        }
     </script>
 </body>
 </html>

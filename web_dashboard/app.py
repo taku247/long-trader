@@ -1726,6 +1726,9 @@ class WebDashboard:
                 selected_strategy_ids = data.get('selected_strategy_ids', [])  # strategy_configurations.id
                 execution_mode = data.get('execution_mode', 'default')  # default/selective/custom
                 
+                # リクエスト内容をログに出力（デバッグ用）
+                self.logger.info(f"📨 銘柄追加リクエスト: symbol={symbol}, mode={execution_mode}, strategy_ids={selected_strategy_ids}")
+                
                 # 後方互換性のため旧パラメータも取得
                 selected_strategies = data.get('selected_strategies')
                 selected_timeframes = data.get('selected_timeframes') 
@@ -3130,7 +3133,7 @@ class WebDashboard:
         
         try:
             # データベース接続
-            conn = sqlite3.connect('execution_logs.db')
+            conn = sqlite3.connect('../execution_logs.db')
             cursor = conn.cursor()
             
             progress_files = glob.glob("/tmp/progress_*.json")

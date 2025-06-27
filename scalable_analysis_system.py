@@ -1648,7 +1648,7 @@ class ScalableAnalysisSystem:
         return str(chart_path)
     
     def _save_to_database(self, symbol, timeframe, config, metrics, chart_path, compressed_path, execution_id=None):
-        """データベースに保存（execution_id対応 + task_status更新）"""
+        """データベースに保存（execution_id対応 + task_status更新 + 支持線・抵抗線データ保存）"""
         logger.info(f"💾 DB保存開始: {symbol} {timeframe} {config}")
         logger.info(f"  🗃️ 保存先DB: {self.db_path.absolute()}")
         logger.info(f"  🔑 execution_id: {execution_id or os.environ.get('CURRENT_EXECUTION_ID', 'None')}")
@@ -1678,6 +1678,8 @@ class ScalableAnalysisSystem:
                 ))
                 
                 updated_rows = cursor.rowcount
+                analysis_id = None
+                
                 if updated_rows == 0:
                     # Pre-taskが存在しない場合は従来通りINSERT
                     logger.warning(f"⚠️ Pre-taskレコードなし - INSERT実行: {symbol} {timeframe} {config}")
@@ -1695,6 +1697,50 @@ class ScalableAnalysisSystem:
                         datetime.now(timezone.utc).isoformat(),
                         execution_id
                     ))
+                    analysis_id = cursor.lastrowid
+                else:
+                    # 既存レコードのIDを取得
+                    cursor.execute('''
+                        SELECT id FROM analyses 
+                        WHERE symbol=? AND timeframe=? AND config=? AND execution_id=?
+                    ''', (symbol, timeframe, config, execution_id))
+                    result = cursor.fetchone()
+                    if result:
+                        analysis_id = result[0]
+                
+                # 支持線・抵抗線データの保存
+                if analysis_id and 'leverage_details' in metrics and metrics['leverage_details']:
+                    logger.info(f"📊 支持線・抵抗線データ保存開始: {len(metrics['leverage_details'])}件")
+                    
+                    for i, detail in enumerate(metrics['leverage_details']):
+                        cursor.execute('''
+                            INSERT INTO leverage_calculation_details 
+                            (analysis_id, trade_number, support_distance_pct, support_constraint_leverage,
+                             risk_reward_ratio, risk_reward_constraint_leverage, confidence_pct, 
+                             confidence_constraint_leverage, btc_correlation, btc_constraint_leverage,
+                             volatility_pct, volatility_constraint_leverage, trend_strength,
+                             trend_multiplier, min_constraint_leverage, safety_margin_pct, final_leverage)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            analysis_id, i + 1,
+                            detail.get('support_distance_pct'),
+                            detail.get('support_constraint_leverage'),
+                            detail.get('risk_reward_ratio'),
+                            detail.get('risk_reward_constraint_leverage'),
+                            detail.get('confidence_pct'),
+                            detail.get('confidence_constraint_leverage'),
+                            detail.get('btc_correlation'),
+                            detail.get('btc_constraint_leverage'),
+                            detail.get('volatility_pct'),
+                            detail.get('volatility_constraint_leverage'),
+                            detail.get('trend_strength'),
+                            detail.get('trend_multiplier'),
+                            detail.get('min_constraint_leverage'),
+                            detail.get('safety_margin_pct'),
+                            detail.get('final_leverage')
+                        ))
+                    
+                    logger.info(f"✅ 支持線・抵抗線データ保存完了: {len(metrics['leverage_details'])}件")
                 
                 conn.commit()
                 logger.info(f"✅ DB保存成功: {symbol} {timeframe} {config} ({'UPDATE' if updated_rows > 0 else 'INSERT'})")

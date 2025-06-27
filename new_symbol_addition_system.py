@@ -371,7 +371,8 @@ class NewSymbolAdditionSystem:
     async def execute_symbol_addition(self, symbol: str, execution_id: str,
                                     execution_mode: ExecutionMode = ExecutionMode.DEFAULT,
                                     selected_strategy_ids: List[int] = None,
-                                    custom_period_settings: Dict = None) -> bool:
+                                    custom_period_settings: Dict = None,
+                                    filter_params: Dict = None) -> bool:
         """銘柄追加実行（既存システム統合）"""
         self.logger.info(f"🚀 銘柄追加開始: {symbol} ({execution_mode.value})")
         
@@ -430,7 +431,8 @@ class NewSymbolAdditionSystem:
                 selected_timeframes=selected_timeframes,
                 strategy_configs=strategy_configs,
                 skip_pretask_creation=True,
-                custom_period_settings=custom_period_settings
+                custom_period_settings=custom_period_settings,
+                filter_params=filter_params
             )
             
             self.logger.success(f"✅ {symbol} 分析完了: {result_execution_id}")

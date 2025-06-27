@@ -8,6 +8,7 @@ import sys
 import os
 import asyncio
 import uuid
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -47,7 +48,7 @@ class AutoSymbolTrainer:
         self.early_fail_validator = SymbolEarlyFailValidator()
         self.logger.info("✅ フィルタリングシステム初期化完了")
         
-    async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False, custom_period_settings: dict = None) -> str:
+    async def add_symbol_with_training(self, symbol: str, execution_id: str = None, selected_strategies: list = None, selected_timeframes: list = None, strategy_configs: list = None, skip_pretask_creation: bool = False, custom_period_settings: dict = None, filter_params: dict = None) -> str:
         """
         銘柄を追加して指定戦略・時間足で自動学習・バックテストを実行
         
@@ -64,6 +65,9 @@ class AutoSymbolTrainer:
         """
         try:
             self.logger.info(f"Starting automatic training for symbol: {symbol}")
+            
+            # jsonモジュールを関数内でも確実に利用可能にする
+            import json
             
             # 🚀 Early Fail検証実行
             self.logger.info(f"🔍 Early Fail検証開始: {symbol}")
@@ -124,9 +128,13 @@ class AutoSymbolTrainer:
             self._current_execution_id = execution_id
             
             # 実行IDを環境変数に設定（子プロセス用）
-            import os
             os.environ['CURRENT_EXECUTION_ID'] = execution_id
             self.logger.info(f"📝 実行IDを環境変数に設定: {execution_id}")
+            
+            # フィルターパラメータを環境変数に設定
+            if filter_params:
+                os.environ['FILTER_PARAMS'] = json.dumps(filter_params)
+                self.logger.info(f"🔧 フィルターパラメータを環境変数に設定: {filter_params}")
             
             # progress_tracker初期化
             if PROGRESS_TRACKER_AVAILABLE:

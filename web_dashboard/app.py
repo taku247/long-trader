@@ -1741,6 +1741,10 @@ class WebDashboard:
                 
                 self.logger.info(f"📅 Period settings: mode={period_mode}, start={custom_start_date}, end={custom_end_date}")
                 
+                # フィルターパラメータの取得
+                filter_params = data.get('filter_params', {})
+                self.logger.info(f"🔧 Filter parameters: {filter_params}")
+                
                 # Optional validation - warn but don't block
                 import asyncio
                 from hyperliquid_validator import HyperliquidValidator, ValidationContext
@@ -1924,7 +1928,8 @@ class WebDashboard:
                                     'mode': period_mode,
                                     'start_date': custom_start_date,
                                     'end_date': custom_end_date
-                                } if period_mode == 'custom' else None
+                                } if period_mode == 'custom' else None,
+                                filter_params=filter_params
                             )
                         )
                         self.logger.info(f"Symbol {symbol} addition completed: {result}")

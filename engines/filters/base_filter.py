@@ -205,44 +205,140 @@ class MarketConditionFilter(BaseFilter):
 
 
 class SupportResistanceFilter(BaseFilter):
-    """Filter 3: 支持線・抵抗線存在チェック（軽量）"""
+    """Filter 3: 支持線・抵抗線存在チェック（実装版）"""
     
     def __init__(self):
         super().__init__("support_resistance", "light", 15)
+        self._load_config()
+    
+    def _load_config(self):
+        """設定ファイルおよび環境変数からパラメータを読み込み"""
+        try:
+            import json
+            import os
+            
+            # まず環境変数からフィルターパラメータを確認
+            filter_params_env = os.getenv('FILTER_PARAMS')
+            if filter_params_env:
+                try:
+                    filter_params = json.loads(filter_params_env)
+                    sr_params = filter_params.get('support_resistance', {})
+                    
+                    if sr_params:
+                        # 環境変数のパラメータを優先使用
+                        self.min_support_strength = sr_params.get('min_support_strength', 0.6)
+                        self.min_resistance_strength = sr_params.get('min_resistance_strength', 0.6)
+                        self.min_touch_count = sr_params.get('min_touch_count', 2)
+                        self.max_distance_pct = sr_params.get('max_distance_pct', 0.1)
+                        self.tolerance_pct = sr_params.get('tolerance_pct', 0.02)
+                        self.fractal_window = sr_params.get('fractal_window', 5)
+                        
+                        print(f"🔧 フィルターパラメータを環境変数から適用: {sr_params}")
+                        return
+                except Exception as e:
+                    print(f"⚠️ 環境変数のフィルターパラメータ解析エラー: {e}")
+            
+            # 環境変数がない場合は設定ファイルから読み込み
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                     'config', 'leverage_engine_config.json')
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            criteria = config.get('leverage_engine_constants', {}).get('support_resistance_criteria', {})
+            self.min_support_strength = criteria.get('min_support_strength', 0.6)
+            self.min_resistance_strength = criteria.get('min_resistance_strength', 0.6)
+            self.min_touch_count = criteria.get('min_touch_count', 2)
+            self.max_distance_pct = criteria.get('max_distance_pct', 0.1)
+            
+            # support_resistance_config.jsonから追加パラメータ
+            sr_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                        'config', 'support_resistance_config.json')
+            if os.path.exists(sr_config_path):
+                with open(sr_config_path, 'r', encoding='utf-8') as f:
+                    sr_config = json.load(f)
+                
+                provider_settings = sr_config.get('provider_settings', {}).get('SupportResistanceVisualizer', {})
+                self.tolerance_pct = provider_settings.get('tolerance_pct', 0.02)
+                self.fractal_window = provider_settings.get('fractal_window', 5)
+            else:
+                self.tolerance_pct = 0.02
+                self.fractal_window = 5
+            
+        except Exception as e:
+            # デフォルト値を使用
+            self.min_support_strength = 0.6
+            self.min_resistance_strength = 0.6
+            self.min_touch_count = 2
+            self.max_distance_pct = 0.1
+            self.tolerance_pct = 0.02
+            self.fractal_window = 5
     
     def execute(self, prepared_data, strategy, evaluation_time: datetime) -> FilterResult:
-        """支持線・抵抗線の存在をチェック"""
+        """支持線・抵抗線の存在をチェック（実装版）"""
         self.execution_count += 1
         
         try:
-            # 支持線・抵抗線データを取得（テスト段階では30%の確率で通過）
-            # TODO: 実際の支持線・抵抗線検出ロジックと連携
-            test_hash = hash(str(evaluation_time))
-            has_support_resistance = (test_hash % 10) < 3  # 30%の確率で支持線・抵抗線あり
+            # SupportResistanceDetectorを使用した実際の検出
+            from engines.support_resistance_detector import SupportResistanceDetector
             
-            if not has_support_resistance:
+            # OHLCVデータと現在価格を取得
+            ohlcv_data = prepared_data.get_ohlcv_until(evaluation_time, lookback_periods=200)
+            current_price = prepared_data.get_price_at(evaluation_time)
+            
+            # データフレームに変換
+            import pandas as pd
+            df = pd.DataFrame(ohlcv_data)
+            
+            if len(df) < 10:
                 self.failure_count += 1
                 return FilterResult(
                     passed=False,
-                    reason="有効な支持線・抵抗線が検出されませんでした",
-                    metrics={'support_count': 0, 'resistance_count': 0}
+                    reason=f"データ不足: {len(df)}本（最低10本必要）",
+                    metrics={'data_count': len(df)}
                 )
             
-            # モック支持線・抵抗線データ
-            mock_support_count = 2
-            mock_resistance_count = 1
-            mock_valid_supports = 1
-            mock_valid_resistances = 1
+            # 支持線・抵抗線検出
+            detector = SupportResistanceDetector(
+                min_touches=self.min_touch_count,
+                tolerance_pct=self.tolerance_pct,
+                fractal_window=self.fractal_window
+            )
+            
+            supports, resistances = detector.detect_levels_from_ohlcv(df, current_price)
+            
+            # 強度基準でフィルタリング
+            valid_supports = [s for s in supports if s.strength >= self.min_support_strength]
+            valid_resistances = [r for r in resistances if r.strength >= self.min_resistance_strength]
+            
+            # 通過判定
+            has_valid_levels = len(valid_supports) > 0 or len(valid_resistances) > 0
+            
+            if not has_valid_levels:
+                self.failure_count += 1
+                return FilterResult(
+                    passed=False,
+                    reason=f"有効な支持線・抵抗線なし (支持線{len(supports)}→{len(valid_supports)}, 抵抗線{len(resistances)}→{len(valid_resistances)})",
+                    metrics={
+                        'support_count': len(supports),
+                        'resistance_count': len(resistances),
+                        'valid_support_count': len(valid_supports),
+                        'valid_resistance_count': len(valid_resistances),
+                        'min_support_strength': self.min_support_strength,
+                        'min_resistance_strength': self.min_resistance_strength
+                    }
+                )
             
             self.success_count += 1
             return FilterResult(
                 passed=True,
-                reason="支持線・抵抗線チェック合格",
+                reason=f"支持線・抵抗線チェック合格 (有効支持線{len(valid_supports)}, 有効抵抗線{len(valid_resistances)})",
                 metrics={
-                    'support_count': mock_support_count,
-                    'resistance_count': mock_resistance_count,
-                    'valid_support_count': mock_valid_supports,
-                    'valid_resistance_count': mock_valid_resistances
+                    'support_count': len(supports),
+                    'resistance_count': len(resistances),
+                    'valid_support_count': len(valid_supports),
+                    'valid_resistance_count': len(valid_resistances),
+                    'strongest_support': max([s.strength for s in valid_supports], default=0),
+                    'strongest_resistance': max([r.strength for r in valid_resistances], default=0)
                 }
             )
             

@@ -236,6 +236,99 @@
                                     </div>
                                 </div>
 
+                                <!-- フィルターパラメータ設定 -->
+                                <div class="row mb-3">
+                                    <div class="col-12">
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <div class="d-flex justify-content-between align-items-center">
+                                                    <span><i class="bi bi-sliders"></i> フィルターパラメータ設定</span>
+                                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleFilterParams()">
+                                                        <span id="filterToggleText">詳細設定を表示</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="card-body" id="filterParamsContainer" style="display: none;">
+                                                <!-- 支持線・抵抗線パラメータ -->
+                                                <div class="row mb-3">
+                                                    <div class="col-12">
+                                                        <h6 class="mb-3"><i class="bi bi-graph-up-arrow"></i> 支持線・抵抗線検出</h6>
+                                                        <div class="row">
+                                                            <div class="col-md-3">
+                                                                <label class="form-label">支持線強度 (min_support_strength)</label>
+                                                                <input type="number" class="form-control" id="minSupportStrength" 
+                                                                       value="0.6" min="0" max="1" step="0.1">
+                                                                <small class="text-muted">デフォルト: 0.6</small>
+                                                            </div>
+                                                            <div class="col-md-3">
+                                                                <label class="form-label">抵抗線強度 (min_resistance_strength)</label>
+                                                                <input type="number" class="form-control" id="minResistanceStrength" 
+                                                                       value="0.6" min="0" max="1" step="0.1">
+                                                                <small class="text-muted">デフォルト: 0.6</small>
+                                                            </div>
+                                                            <div class="col-md-3">
+                                                                <label class="form-label">最小タッチ回数 (min_touch_count)</label>
+                                                                <input type="number" class="form-control" id="minTouchCount" 
+                                                                       value="2" min="1" max="10" step="1">
+                                                                <small class="text-muted">デフォルト: 2</small>
+                                                            </div>
+                                                            <div class="col-md-3">
+                                                                <label class="form-label">最大距離 % (max_distance_pct)</label>
+                                                                <input type="number" class="form-control" id="maxDistancePct" 
+                                                                       value="0.1" min="0.01" max="1" step="0.01">
+                                                                <small class="text-muted">デフォルト: 0.1 (10%)</small>
+                                                            </div>
+                                                        </div>
+                                                        <div class="row mt-3">
+                                                            <div class="col-md-4">
+                                                                <label class="form-label">許容範囲 % (tolerance_pct)</label>
+                                                                <input type="number" class="form-control" id="tolerancePct" 
+                                                                       value="0.02" min="0.001" max="0.1" step="0.001">
+                                                                <small class="text-muted">デフォルト: 0.02 (2%)</small>
+                                                            </div>
+                                                            <div class="col-md-4">
+                                                                <label class="form-label">フラクタルウィンドウ (fractal_window)</label>
+                                                                <input type="number" class="form-control" id="fractalWindow" 
+                                                                       value="5" min="3" max="20" step="1">
+                                                                <small class="text-muted">デフォルト: 5</small>
+                                                            </div>
+                                                            <div class="col-md-4">
+                                                                <div class="d-flex justify-content-end align-items-end h-100">
+                                                                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="resetFilterParams()">
+                                                                        <i class="bi bi-arrow-clockwise"></i> デフォルトに戻す
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- フィルター通過率予測 -->
+                                                <div class="alert alert-info">
+                                                    <i class="bi bi-info-circle"></i> 
+                                                    <strong>フィルター設定ガイド:</strong>
+                                                    <ul class="mb-0 mt-2">
+                                                        <li><strong>通過率を上げる:</strong> 強度値を下げる (0.6→0.3)、タッチ回数を減らす (2→1)</li>
+                                                        <li><strong>精度を上げる:</strong> 強度値を上げる (0.6→0.8)、タッチ回数を増やす (2→3)</li>
+                                                        <li><strong>現在の問題:</strong> 99%がFilter 3で除外される → パラメータ緩和推奨</li>
+                                                    </ul>
+                                                </div>
+                                                
+                                                <!-- その他のフィルターパラメータ拡張エリア -->
+                                                <div class="row">
+                                                    <div class="col-12">
+                                                        <h6 class="mb-3"><i class="bi bi-gear"></i> その他のフィルター設定</h6>
+                                                        <div class="alert alert-secondary">
+                                                            <i class="bi bi-wrench"></i> 
+                                                            将来的に追加予定: 市場コンテキスト、ML予測閾値、リスク管理パラメータなど
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- 実行予測 -->
                                 <div id="executionEstimate" class="alert alert-secondary" style="display: none;">
                                     <strong>実行予測:</strong>
@@ -738,6 +831,9 @@
                     payload.start_date = startDate;
                     payload.end_date = endDate;
                 }
+
+                // フィルターパラメータを追加
+                payload.filter_params = getFilterParams();
                 
                 if (mode === 'selective') {
                     // 選択された戦略ID取得
@@ -899,6 +995,46 @@
                     setTimeout(() => alertArea.innerHTML = '', 150);
                 }
             }, 5000);
+        }
+
+        // フィルターパラメータ関連の関数
+        function toggleFilterParams() {
+            const container = document.getElementById('filterParamsContainer');
+            const toggleText = document.getElementById('filterToggleText');
+            
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                toggleText.textContent = '詳細設定を隠す';
+            } else {
+                container.style.display = 'none';
+                toggleText.textContent = '詳細設定を表示';
+            }
+        }
+
+        function resetFilterParams() {
+            // デフォルト値に戻す
+            document.getElementById('minSupportStrength').value = '0.6';
+            document.getElementById('minResistanceStrength').value = '0.6';
+            document.getElementById('minTouchCount').value = '2';
+            document.getElementById('maxDistancePct').value = '0.1';
+            document.getElementById('tolerancePct').value = '0.02';
+            document.getElementById('fractalWindow').value = '5';
+            
+            showAlert('フィルターパラメータをデフォルト値に戻しました', 'info');
+        }
+
+        function getFilterParams() {
+            // フィルターパラメータを収集して返す
+            return {
+                support_resistance: {
+                    min_support_strength: parseFloat(document.getElementById('minSupportStrength').value),
+                    min_resistance_strength: parseFloat(document.getElementById('minResistanceStrength').value),
+                    min_touch_count: parseInt(document.getElementById('minTouchCount').value),
+                    max_distance_pct: parseFloat(document.getElementById('maxDistancePct').value),
+                    tolerance_pct: parseFloat(document.getElementById('tolerancePct').value),
+                    fractal_window: parseInt(document.getElementById('fractalWindow').value)
+                }
+            };
         }
     </script>
 </body>

@@ -830,11 +830,28 @@ class ScalableAnalysisSystem:
                         
                         result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time, custom_period_settings=custom_period_settings, execution_id=execution_id)
                     
+                    # 🔍 analyze_symbolの結果を詳細ログ出力（デバッグ用）
+                    if total_evaluations <= 3:  # 最初の3回のみ詳細ログ
+                        logger.error(f"🔍 analyze_symbol結果詳細 #{total_evaluations} ({symbol} {timeframe}):")
+                        if result:
+                            for key, value in result.items():
+                                logger.error(f"   {key}: {value} (型: {type(value)})")
+                        else:
+                            logger.error(f"   結果: None または空")
+                    
                     if not result or 'current_price' not in result:
+                        if total_evaluations <= 3:
+                            logger.error(f"🚨 analyze_symbol結果が無効 #{total_evaluations}: result={result}")
                         continue
                     
                     # エントリー条件の評価
-                    should_enter = self._evaluate_entry_conditions(result, timeframe)
+                    try:
+                        should_enter = self._evaluate_entry_conditions(result, timeframe)
+                    except Exception as e:
+                        logger.error(f"🚨 エントリー条件評価でエラー #{total_evaluations}:")
+                        logger.error(f"   エラー: {str(e)}")
+                        logger.error(f"   分析結果: {result}")
+                        continue
                     
                     if not should_enter:
                         # 条件を満たさない場合はスキップ
@@ -1200,6 +1217,32 @@ class ScalableAnalysisSystem:
             # 統合設定から条件を取得
             conditions = config_manager.get_entry_conditions(timeframe, strategy)
             
+            # フィルターパラメータからエントリー条件をオーバーライド
+            import os
+            filter_params_env = os.getenv('FILTER_PARAMS')
+            if filter_params_env:
+                try:
+                    import json
+                    filter_params = json.loads(filter_params_env)
+                    entry_conditions = filter_params.get('entry_conditions', {})
+                    
+                    if entry_conditions:
+                        # WebUIからのパラメータで設定をオーバーライド
+                        original_conditions = conditions.copy()
+                        if 'min_leverage' in entry_conditions:
+                            conditions['min_leverage'] = entry_conditions['min_leverage']
+                        if 'min_confidence' in entry_conditions:
+                            conditions['min_confidence'] = entry_conditions['min_confidence']
+                        if 'min_risk_reward' in entry_conditions:
+                            conditions['min_risk_reward'] = entry_conditions['min_risk_reward']
+                        
+                        logger.info(f"🔧 エントリー条件をWebUIパラメータでオーバーライド:")
+                        logger.info(f"   min_leverage: {original_conditions.get('min_leverage')} → {conditions['min_leverage']}")
+                        logger.info(f"   min_confidence: {original_conditions.get('min_confidence')} → {conditions['min_confidence']}")
+                        logger.info(f"   min_risk_reward: {original_conditions.get('min_risk_reward')} → {conditions['min_risk_reward']}")
+                except Exception as e:
+                    logger.warning(f"⚠️ フィルターパラメータのエントリー条件解析エラー: {e}")
+            
         except Exception as e:
             # 設定読み込み失敗時は銘柄追加を停止
             error_msg = f"エントリー条件設定が読み込めませんでした: {e}"
@@ -1210,27 +1253,78 @@ class ScalableAnalysisSystem:
                 missing_config="unified_entry_conditions"
             )
         
+        # 🔍 詳細なエラー検証とログ機能
+        logger.error(f"🔍 エントリー条件評価開始:")
+        logger.error(f"   分析結果の生データ:")
+        logger.error(f"     leverage: {leverage} (型: {type(leverage)})")
+        logger.error(f"     confidence: {confidence} (型: {type(confidence)}) [元の値: {analysis_result.get('confidence')}]")
+        logger.error(f"     risk_reward_ratio: {risk_reward} (型: {type(risk_reward)})")
+        logger.error(f"     current_price: {current_price} (型: {type(current_price)})")
+        
+        # None値チェックと詳細エラー報告
+        validation_errors = []
+        
+        if leverage is None:
+            validation_errors.append("leverage is None - 分析結果からレバレッジ値が取得できませんでした")
+        if confidence is None:
+            validation_errors.append("confidence is None - 分析結果から信頼度が取得できませんでした")
+        if risk_reward is None:
+            validation_errors.append("risk_reward_ratio is None - 分析結果からリスクリワード比が取得できませんでした")
+        if current_price is None:
+            validation_errors.append("current_price is None - 分析結果から現在価格が取得できませんでした")
+        
+        # None値がある場合は詳細エラー情報を出力
+        if validation_errors:
+            logger.error(f"🚨 分析結果にNone値が含まれています:")
+            for error in validation_errors:
+                logger.error(f"   ❌ {error}")
+            logger.error(f"   📊 分析結果の全内容:")
+            for key, value in analysis_result.items():
+                logger.error(f"     {key}: {value} (型: {type(value)})")
+            
+            # None値エラーとして例外を発生
+            raise ValueError(f"分析結果にNone値が含まれています: {', '.join(validation_errors)}")
+        
         # 条件評価
         conditions_met = []
         
-        # 1. レバレッジ条件
-        leverage_ok = leverage >= conditions['min_leverage']
-        conditions_met.append(('leverage', leverage_ok, f"{leverage:.1f}x >= {conditions['min_leverage']}x"))
-        
-        # 2. 信頼度条件
-        confidence_ok = confidence >= conditions['min_confidence']
-        conditions_met.append(('confidence', confidence_ok, f"{confidence:.1%} >= {conditions['min_confidence']:.1%}"))
-        
-        # 3. リスクリワード条件
-        risk_reward_ok = risk_reward >= conditions['min_risk_reward']
-        conditions_met.append(('risk_reward', risk_reward_ok, f"{risk_reward:.1f} >= {conditions['min_risk_reward']}"))
-        
-        # 4. 価格の有効性
-        price_ok = current_price > 0
-        conditions_met.append(('price', price_ok, f"price={current_price}"))
+        try:
+            # 1. レバレッジ条件
+            leverage_ok = leverage >= conditions['min_leverage']
+            conditions_met.append(('leverage', leverage_ok, f"{leverage:.1f}x >= {conditions['min_leverage']}x"))
+            
+            # 2. 信頼度条件
+            confidence_ok = confidence >= conditions['min_confidence']
+            conditions_met.append(('confidence', confidence_ok, f"{confidence:.1%} >= {conditions['min_confidence']:.1%}"))
+            
+            # 3. リスクリワード条件
+            risk_reward_ok = risk_reward >= conditions['min_risk_reward']
+            conditions_met.append(('risk_reward', risk_reward_ok, f"{risk_reward:.1f} >= {conditions['min_risk_reward']}"))
+            
+            # 4. 価格の有効性
+            price_ok = current_price > 0
+            conditions_met.append(('price', price_ok, f"price={current_price}"))
+            
+        except Exception as e:
+            logger.error(f"🚨 エントリー条件評価中にエラーが発生:")
+            logger.error(f"   エラー内容: {str(e)}")
+            logger.error(f"   エラータイプ: {type(e).__name__}")
+            logger.error(f"   値の詳細:")
+            logger.error(f"     leverage: {leverage} (型: {type(leverage)})")
+            logger.error(f"     confidence: {confidence} (型: {type(confidence)})")
+            logger.error(f"     risk_reward: {risk_reward} (型: {type(risk_reward)})")
+            logger.error(f"     current_price: {current_price} (型: {type(current_price)})")
+            raise ValueError(f"エントリー条件評価エラー: {str(e)}") from e
         
         # 全ての条件が満たされているかをチェック
         all_conditions_met = all(condition[1] for condition in conditions_met)
+        
+        # 条件評価結果の詳細ログ
+        logger.error(f"🎯 エントリー条件評価結果:")
+        for condition_name, result, description in conditions_met:
+            status = "✅ OK" if result else "❌ NG"
+            logger.error(f"   {condition_name}: {status} - {description}")
+        logger.error(f"   最終判定: {'✅ 通過' if all_conditions_met else '❌ 除外'}")
         
         # デバッグログ: OPの条件評価詳細
         if 'OP' in str(analysis_result.get('symbol', '')):

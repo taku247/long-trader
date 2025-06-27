@@ -704,6 +704,42 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         
         recommendation = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp, custom_period_settings, execution_id)
         
+        # 🔍 recommendationの詳細検証
+        if recommendation is None:
+            error_msg = f"analyze_leverage_opportunity returned None for {symbol} {timeframe}"
+            print(f"🚨 {error_msg}")
+            raise ValueError(error_msg)
+        
+        # 各値のNone検証と詳細ログ
+        validation_errors = []
+        
+        if recommendation.recommended_leverage is None:
+            validation_errors.append("recommended_leverage is None")
+        if recommendation.confidence_level is None:
+            validation_errors.append("confidence_level is None")
+        if recommendation.risk_reward_ratio is None:
+            validation_errors.append("risk_reward_ratio is None")
+        if recommendation.market_conditions is None:
+            validation_errors.append("market_conditions is None")
+        elif recommendation.market_conditions.current_price is None:
+            validation_errors.append("market_conditions.current_price is None")
+        
+        if validation_errors:
+            error_details = f"LeverageRecommendationにNone値が含まれています: {', '.join(validation_errors)}"
+            print(f"🚨 {error_details}")
+            print(f"📊 recommendation詳細:")
+            print(f"   recommended_leverage: {recommendation.recommended_leverage}")
+            print(f"   confidence_level: {recommendation.confidence_level}")
+            print(f"   risk_reward_ratio: {recommendation.risk_reward_ratio}")
+            print(f"   take_profit_price: {recommendation.take_profit_price}")
+            print(f"   stop_loss_price: {recommendation.stop_loss_price}")
+            if recommendation.market_conditions:
+                print(f"   market_conditions.current_price: {recommendation.market_conditions.current_price}")
+            else:
+                print(f"   market_conditions: None")
+            
+            raise ValueError(error_details)
+        
         return {
             'symbol': symbol,
             'timeframe': timeframe,

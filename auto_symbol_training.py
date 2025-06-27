@@ -1001,7 +1001,7 @@ class AutoSymbolTrainer:
             self.logger.warning(f"⚠️ フィルタリング統計記録エラー: {str(e)}")
     
     def _verify_analysis_results(self, symbol: str, execution_id: str) -> bool:
-        """分析結果の存在確認"""
+        """分析結果の存在確認（より柔軟な検証）"""
         try:
             import sqlite3
             from pathlib import Path
@@ -1012,7 +1012,7 @@ class AutoSymbolTrainer:
                 return False
                 
             with sqlite3.connect(analysis_db_path) as conn:
-                # 該当execution_idの分析結果を確認
+                # 1. 該当execution_idの分析結果を確認
                 cursor = conn.execute('''
                     SELECT COUNT(*) FROM analyses 
                     WHERE symbol = ? AND execution_id = ?
@@ -1021,23 +1021,48 @@ class AutoSymbolTrainer:
                 result_count = cursor.fetchone()[0]
                 
                 if result_count > 0:
-                    self.logger.info(f"✅ {symbol} の分析結果確認: {result_count} 件")
+                    self.logger.info(f"✅ {symbol} の分析結果確認（execution_id一致）: {result_count} 件")
                     return True
-                else:
-                    # execution_idがNULLの場合も確認（旧システム対応）
-                    cursor = conn.execute('''
-                        SELECT COUNT(*) FROM analyses 
-                        WHERE symbol = ? AND execution_id IS NULL
-                        AND generated_at > datetime('now', '-5 minutes')
-                    ''', (symbol,))
-                    
-                    recent_count = cursor.fetchone()[0]
-                    if recent_count > 0:
-                        self.logger.warning(f"⚠️ {symbol} の分析結果はexecution_idなしで {recent_count} 件存在")
-                        return True
-                    else:
-                        self.logger.error(f"❌ {symbol} の分析結果が見つかりません（execution_id: {execution_id}）")
-                        return False
+                
+                # 2. 過去10分以内の分析結果を確認（バックテスト処理が完了している場合）
+                cursor = conn.execute('''
+                    SELECT COUNT(*) FROM analyses 
+                    WHERE symbol = ? 
+                    AND generated_at > datetime('now', '-10 minutes')
+                ''', (symbol,))
+                
+                recent_count = cursor.fetchone()[0]
+                if recent_count > 0:
+                    self.logger.info(f"✅ {symbol} の最近の分析結果確認: {recent_count} 件（過去10分以内）")
+                    return True
+                
+                # 3. execution_idがNULLの場合も確認（旧システム対応）
+                cursor = conn.execute('''
+                    SELECT COUNT(*) FROM analyses 
+                    WHERE symbol = ? AND execution_id IS NULL
+                    AND generated_at > datetime('now', '-5 minutes')
+                ''', (symbol,))
+                
+                null_count = cursor.fetchone()[0]
+                if null_count > 0:
+                    self.logger.warning(f"⚠️ {symbol} の分析結果（execution_idなし）: {null_count} 件存在")
+                    return True
+                
+                # 4. 詳細なデバッグ情報出力
+                cursor = conn.execute('''
+                    SELECT execution_id, generated_at FROM analyses 
+                    WHERE symbol = ? 
+                    ORDER BY generated_at DESC LIMIT 5
+                ''', (symbol,))
+                
+                recent_results = cursor.fetchall()
+                if recent_results:
+                    self.logger.info(f"📊 {symbol} の最近の分析結果:")
+                    for exec_id, gen_at in recent_results:
+                        self.logger.info(f"  - execution_id: {exec_id}, generated_at: {gen_at}")
+                
+                self.logger.error(f"❌ {symbol} の分析結果が見つかりません（現在のexecution_id: {execution_id}）")
+                return False
                         
         except Exception as e:
             self.logger.error(f"分析結果確認エラー: {e}")

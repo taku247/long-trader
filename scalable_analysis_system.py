@@ -712,8 +712,16 @@ class ScalableAnalysisSystem:
                             sys.stderr = old_stderr
             
             # 条件ベースのシグナル生成期間設定
-            end_time = datetime.now(timezone.utc)
-            start_time = end_time - timedelta(days=evaluation_period_days)
+            if custom_period_settings and custom_period_settings.get('mode') == 'custom':
+                # ユーザー指定期間を使用
+                start_time = datetime.fromisoformat(custom_period_settings['start_date'].replace('T', ' ')).replace(tzinfo=timezone.utc)
+                end_time = datetime.fromisoformat(custom_period_settings['end_date'].replace('T', ' ')).replace(tzinfo=timezone.utc)
+                logger.info(f"📅 ユーザー指定期間: {start_time.strftime('%Y-%m-%d %H:%M')} ～ {end_time.strftime('%Y-%m-%d %H:%M')}")
+            else:
+                # デフォルト期間
+                end_time = datetime.now(timezone.utc)
+                start_time = end_time - timedelta(days=evaluation_period_days)
+                logger.info(f"📅 デフォルト期間: {start_time.strftime('%Y-%m-%d %H:%M')} ～ {end_time.strftime('%Y-%m-%d %H:%M')}")
             
             # 時間足設定から評価間隔を取得
             tf_config = self._load_timeframe_config(timeframe)
@@ -752,12 +760,18 @@ class ScalableAnalysisSystem:
                 from hyperliquid_api_client import MultiExchangeAPIClient
                 api_client = MultiExchangeAPIClient(exchange_type=exchange)
                 
-                # OHLCVデータ取得（評価期間 + 追加200本）
+                # OHLCVデータ取得（評価期間 + 支持線・抵抗線用の前データ）
                 logger.info(f"📊 {symbol} {timeframe} のOHLCVデータ取得中...")
+                
+                # 支持線・抵抗線計算用に200本前から取得
+                lookback_days = 10  # 200本分の日数（時間足により調整）
+                data_start_time = start_time - timedelta(days=lookback_days)
+                
                 ohlcv_df = api_client.get_ohlcv_dataframe(
                     symbol=symbol,
                     timeframe=timeframe,
-                    days=evaluation_period_days + 10  # 余裕を持たせる
+                    start_time=data_start_time,
+                    end_time=end_time
                 )
                 
                 if ohlcv_df is not None and not ohlcv_df.empty:
@@ -779,37 +793,32 @@ class ScalableAnalysisSystem:
                 logger.warning(f"⚠️ OHLCVデータ取得エラー: {e}、モックデータを使用")
                 ohlcv_df = None
             
-            # 評価回数の動的計算（期間カバー率を改善）
-            config_max_evaluations = tf_config.get('max_evaluations', 100)
+            # OHLCVデータインデックスベースの評価設定
+            if ohlcv_df is not None and not ohlcv_df.empty:
+                # 評価対象期間の開始インデックスを特定
+                evaluation_start_index = 0
+                for i, row in ohlcv_df.iterrows():
+                    if pd.to_datetime(row['timestamp']).replace(tzinfo=timezone.utc) >= start_time:
+                        evaluation_start_index = i
+                        break
+                
+                # 全OHLCVデータから評価対象部分のみを評価
+                total_evaluations_planned = len(ohlcv_df) - evaluation_start_index
+                logger.info(f"🔍 条件ベース分析: {start_time.strftime('%Y-%m-%d %H:%M')} から {end_time.strftime('%Y-%m-%d %H:%M')}")
+                logger.info(f"📊 評価対象: {evaluation_start_index}本目～{len(ohlcv_df)}本目 (計{total_evaluations_planned}本の{timeframe}足)")
+                print(f"💯 全データ評価: 間引きなし、制限なし")
+            else:
+                logger.warning("⚠️ OHLCVデータが取得できませんでした")
+                return []
             
-            # 期間カバー率80%を目標とした評価回数計算
-            total_period_minutes = evaluation_period_days * 24 * 60
-            total_possible_evaluations = total_period_minutes // evaluation_interval.total_seconds() * 60
-            target_coverage = 0.8  # 80%カバー率を目標
-            calculated_max_evaluations = int(total_possible_evaluations * target_coverage)
-            
-            # 設定値と計算値の最大値を使用（ただし、合理的な上限5000を設定）
-            max_evaluations = min(max(config_max_evaluations, calculated_max_evaluations), 5000)
-            
-            # カバー率の計算
-            actual_coverage = (max_evaluations * evaluation_interval.total_seconds() / 60) / total_period_minutes * 100
-            
-            logger.info(f"🔍 条件ベース分析: {start_time.strftime('%Y-%m-%d')} から {end_time.strftime('%Y-%m-%d')}")
-            print(f"📊 評価間隔: {evaluation_interval} ({timeframe}足最適化)")
-            print(f"🛡️ 最大評価回数: {max_evaluations}回 (設定値: {config_max_evaluations}, 計算値: {calculated_max_evaluations})")
-            print(f"📈 期間カバー率: {actual_coverage:.1f}%")
-            
-            # トレード機会による制限（評価回数の1/5程度）
-            max_signals = max(max_evaluations // 5, 10)  # 最低10回の機会は確保
-            
-            while (current_time <= end_time and 
-                   total_evaluations < max_evaluations and 
-                   signals_generated < max_signals):
+            # 全OHLCVデータを順次評価（制限なし）
+            for current_index in range(evaluation_start_index, len(ohlcv_df)):
+                current_row = ohlcv_df.iloc[current_index]
+                current_time = pd.to_datetime(current_row['timestamp']).replace(tzinfo=timezone.utc)
                 total_evaluations += 1
                 
                 # 🚀 9段階フィルタリングシステム実行（軽量事前チェック）
                 if self._should_skip_evaluation_timestamp(current_time, symbol, timeframe, config):
-                    current_time += evaluation_interval
                     continue
                 
                 try:
@@ -822,7 +831,6 @@ class ScalableAnalysisSystem:
                         result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time, custom_period_settings=custom_period_settings, execution_id=execution_id)
                     
                     if not result or 'current_price' not in result:
-                        current_time += evaluation_interval
                         continue
                     
                     # エントリー条件の評価
@@ -833,7 +841,6 @@ class ScalableAnalysisSystem:
                         # デバッグログ追加
                         if symbol == 'OP' and total_evaluations <= 5:  # 最初の5回のみログ
                             logger.error(f"🚨 OP条件不満足 #{total_evaluations}: leverage={result.get('leverage')}, confidence={result.get('confidence')}, RR={result.get('risk_reward_ratio')}")
-                        current_time += evaluation_interval
                         continue
                     
                     signals_generated += 1
@@ -1136,12 +1143,10 @@ class ScalableAnalysisSystem:
                     logger.warning(f"⚠️ 分析エラー (評価{total_evaluations}): {str(e)[:100]}")
                     logger.warning(f"Analysis failed for {symbol} at {current_time}: {e}")
                 
-                # 次の評価時点に進む
-                current_time += evaluation_interval
+                # forループなので自動的に次のインデックスに進む
             
-            # 評価回数制限に達した場合の警告
-            if total_evaluations >= max_evaluations:
-                logger.warning(f"⚠️ {symbol} {timeframe} {config}: 最大評価回数({max_evaluations})に達しました")
+            # 全データ評価完了のログ
+            logger.info(f"✅ {symbol} {timeframe} {config}: 全{total_evaluations}本のデータを評価完了")
             
             if not trades:
                 print(f"ℹ️ {symbol} {timeframe} {config}: 評価期間中に条件を満たすシグナルが見つかりませんでした")

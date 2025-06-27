@@ -62,13 +62,13 @@ class RealPreparedData:
     
     def get_price_at(self, eval_time: datetime) -> float:
         """
-        指定時点の価格（終値）を取得
+        指定時点の価格（開始価格）を取得
         
         Args:
             eval_time: 評価時点
             
         Returns:
-            終値
+            開始価格（open価格）
         """
         # 範囲チェック
         if eval_time < self.ohlcv_data['timestamp'].iloc[0]:
@@ -79,7 +79,24 @@ class RealPreparedData:
         # 最も近い時点のインデックスを検索
         idx = self.timestamp_index.get_indexer([eval_time], method='ffill')[0]
         
-        # 終値を返す
+        # 開始価格を返す（その時点で実際に利用可能な価格）
+        return float(self.ohlcv_data.iloc[idx]['open'])
+    
+    def get_close_price_at(self, eval_time: datetime) -> float:
+        """
+        指定時点の終値を取得（過去データ分析用）
+        
+        Args:
+            eval_time: 評価時点
+            
+        Returns:
+            終値（close価格）
+            
+        Note:
+            バックテストでは基本的にget_price_at()（open価格）を使用し、
+            このメソッドは過去データの分析や支持線・抵抗線計算に使用
+        """
+        idx = self.timestamp_index.get_indexer([eval_time], method='ffill')[0]
         return float(self.ohlcv_data.iloc[idx]['close'])
     
     def get_volume_at(self, eval_time: datetime) -> float:
@@ -94,6 +111,27 @@ class RealPreparedData:
         """
         idx = self.timestamp_index.get_indexer([eval_time], method='ffill')[0]
         return float(self.ohlcv_data.iloc[idx]['volume'])
+    
+    def get_ohlc_at(self, eval_time: datetime) -> Dict[str, float]:
+        """
+        指定時点のOHLC価格を取得
+        
+        Args:
+            eval_time: 評価時点
+            
+        Returns:
+            OHLC価格の辞書
+        """
+        idx = self.timestamp_index.get_indexer([eval_time], method='ffill')[0]
+        row = self.ohlcv_data.iloc[idx]
+        
+        return {
+            'open': float(row['open']),
+            'high': float(row['high']),
+            'low': float(row['low']),
+            'close': float(row['close']),
+            'timestamp': row['timestamp']
+        }
     
     def get_ohlcv_until(self, eval_time: datetime, lookback_periods: int = 100) -> List[Dict]:
         """

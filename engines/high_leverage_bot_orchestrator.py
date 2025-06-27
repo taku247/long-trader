@@ -333,27 +333,50 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                     f.write(f"Starting analysis at {datetime.now()}\n")
             
             if self.support_resistance_analyzer:
+                # 🔧 環境変数からパラメータオーバーライドを確認
+                import os
+                import json
+                override_params = {}
+                
+                filter_params_env = os.getenv('FILTER_PARAMS')
+                if filter_params_env:
+                    try:
+                        filter_params = json.loads(filter_params_env)
+                        sr_params = filter_params.get('support_resistance', {})
+                        if sr_params:
+                            if 'fractal_window' in sr_params:
+                                override_params['window'] = sr_params['fractal_window']
+                            if 'min_touch_count' in sr_params:
+                                override_params['min_touches'] = sr_params['min_touch_count']
+                            if 'tolerance_pct' in sr_params:
+                                override_params['tolerance'] = sr_params['tolerance_pct']
+                            print(f"  🔧 環境変数パラメータ検出: {sr_params}")
+                    except Exception as e:
+                        print(f"  ⚠️ 環境変数パラメータ解析エラー: {e}")
+                
                 # 短期間足の場合はより敏感なパラメータを使用
                 if is_short_timeframe:
                     kwargs = {
-                        'window': 3,         # より小さなウィンドウ
-                        'min_touches': 2,    # タッチ回数は維持
-                        'tolerance': 0.005   # より厳密な許容範囲
+                        'window': override_params.get('window', 3),
+                        'min_touches': override_params.get('min_touches', 2),
+                        'tolerance': override_params.get('tolerance', 0.005)
                     }
-                    print("  ⚡ 短期取引用パラメータ適用: window=3, min_touches=2, tolerance=0.5%")
+                    param_source = "環境変数オーバーライド" if override_params else "短期取引用デフォルト"
+                    print(f"  ⚡ {param_source}パラメータ適用: window={kwargs['window']}, min_touches={kwargs['min_touches']}, tolerance={kwargs['tolerance']*100:.1f}%")
                     if debug_mode:
                         with open(debug_log_path, 'a') as f:
-                            f.write(f"Parameters: window=3, min_touches=2, tolerance=0.5% (short timeframe)\n")
+                            f.write(f"Parameters: window={kwargs['window']}, min_touches={kwargs['min_touches']}, tolerance={kwargs['tolerance']*100:.1f}% ({param_source})\n")
                 else:
                     kwargs = {
-                        'window': 5,         # 標準ウィンドウ
-                        'min_touches': 2,    # 標準タッチ回数
-                        'tolerance': 0.01    # 標準許容範囲
+                        'window': override_params.get('window', 5),
+                        'min_touches': override_params.get('min_touches', 2),
+                        'tolerance': override_params.get('tolerance', 0.01)
                     }
-                    print("  📐 標準パラメータ適用: window=5, min_touches=2, tolerance=1.0%")
+                    param_source = "環境変数オーバーライド" if override_params else "標準デフォルト"
+                    print(f"  📐 {param_source}パラメータ適用: window={kwargs['window']}, min_touches={kwargs['min_touches']}, tolerance={kwargs['tolerance']*100:.1f}%")
                     if debug_mode:
                         with open(debug_log_path, 'a') as f:
-                            f.write(f"Parameters: window=5, min_touches=2, tolerance=1.0% (standard)\n")
+                            f.write(f"Parameters: window={kwargs['window']}, min_touches={kwargs['min_touches']}, tolerance={kwargs['tolerance']*100:.1f}% ({param_source})\n")
                 
                 print(f"  🔍 アナライザーによるレベル検出実行中...")
                 if debug_mode:

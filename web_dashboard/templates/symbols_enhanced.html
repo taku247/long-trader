@@ -322,20 +322,20 @@
                                                             <div class="col-md-4">
                                                                 <label class="form-label">最小レバレッジ (min_leverage)</label>
                                                                 <input type="number" class="form-control" id="minLeverage" 
-                                                                       value="0.5" min="0.1" max="10" step="0.1">
-                                                                <small class="text-muted">更新: 1.0 → 0.5 (DOGE対応)</small>
+                                                                       value="1.0" min="0.1" max="10" step="0.1">
+                                                                <small class="text-muted">現在: 1.5 → 推奨: 1.0 (SOL対応)</small>
                                                             </div>
                                                             <div class="col-md-4">
                                                                 <label class="form-label">最小信頼度 (min_confidence)</label>
                                                                 <input type="number" class="form-control" id="minConfidence" 
-                                                                       value="0.25" min="0.1" max="1" step="0.05">
-                                                                <small class="text-muted">更新: 0.35 → 0.25 (25%)</small>
+                                                                       value="0.35" min="0.1" max="1" step="0.05">
+                                                                <small class="text-muted">現在: 0.35 (35%) ✅</small>
                                                             </div>
                                                             <div class="col-md-4">
                                                                 <label class="form-label">最小リスクリワード比 (min_risk_reward)</label>
                                                                 <input type="number" class="form-control" id="minRiskReward" 
-                                                                       value="0.3" min="0.1" max="5" step="0.1">
-                                                                <small class="text-muted">更新: 0.5 → 0.3 (DOGE対応)</small>
+                                                                       value="0.5" min="0.1" max="5" step="0.1">
+                                                                <small class="text-muted">現在: 1.5 → 推奨: 0.5 (SOL対応)</small>
                                                             </div>
                                                         </div>
                                                         <div class="alert alert-warning mt-3">
@@ -1055,10 +1055,10 @@
             document.getElementById('tolerancePct').value = '0.02';
             document.getElementById('fractalWindow').value = '5';
             
-            // エントリー条件パラメータのデフォルト値（さらに緩和済み）
-            document.getElementById('minLeverage').value = '0.5';
-            document.getElementById('minConfidence').value = '0.25';
-            document.getElementById('minRiskReward').value = '0.3';
+            // エントリー条件パラメータのデフォルト値
+            document.getElementById('minLeverage').value = '1.0';
+            document.getElementById('minConfidence').value = '0.35';
+            document.getElementById('minRiskReward').value = '0.5';
             
             showAlert('フィルターパラメータとエントリー条件をデフォルト値に戻しました', 'info');
         }

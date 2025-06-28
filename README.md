@@ -5905,6 +5905,40 @@ if cursor.fetchone():
 - **プロセス特定**: execution_id, symbol, ファイル名でマッチング
 - **キャンセル伝播**: データベース経由で子プロセスに伝達
 
+## 🚨 エラーハンドリング
+
+### 設計方針
+- **Fail-Fast原則**: エラーが発生したら即座に例外を発生させる
+- **詳細なエラー情報**: エラータイプと詳細メッセージを保持
+- **段階的エラー処理**: 各処理段階で適切なエラータイプを使用
+
+### カスタムエラータイプ
+システムでは以下の5種類のカスタムエラーを使用：
+
+1. **InsufficientMarketDataError** - 市場データ不足（例：サポート・レジスタンス検出失敗）
+2. **InsufficientConfigurationError** - 設定不足（例：設定ファイル読み込み失敗）
+3. **LeverageAnalysisError** - レバレッジ分析エラー
+4. **ValidationError** - データ検証エラー
+5. **CriticalAnalysisError** - 重要分析データ不足
+
+### エラー情報の確認方法
+```sql
+-- 最新のエラーを確認
+SELECT error_message FROM analyses 
+WHERE error_message IS NOT NULL 
+ORDER BY task_created_at DESC LIMIT 10;
+
+-- エラータイプ別の集計
+SELECT 
+  SUBSTR(error_message, 2, INSTR(error_message, ']') - 2) as error_type,
+  COUNT(*) as count
+FROM analyses 
+WHERE error_message IS NOT NULL 
+GROUP BY error_type;
+```
+
+詳細は[エラーハンドリング設計ドキュメント](ERROR_HANDLING_DESIGN.md)を参照。
+
 ----
 
 **⚠️ 免責事項**: このシステムは教育・研究目的のツールです。実際の取引には十分な検証とリスク管理を行ってください。

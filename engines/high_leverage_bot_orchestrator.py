@@ -580,6 +580,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         """ブレイクアウト予測"""
         
         predictions = []
+        prediction_errors = []
         
         try:
             if self.breakout_predictor and levels:
@@ -587,7 +588,10 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                 # モデルが訓練されていない場合は訓練を試行
                 if not hasattr(self.breakout_predictor, 'is_trained') or not self.breakout_predictor.is_trained:
                     print("🏋️ MLモデル訓練中...")
-                    self.breakout_predictor.train_model(data, levels)
+                    try:
+                        self.breakout_predictor.train_model(data, levels)
+                    except Exception as train_error:
+                        raise Exception(f"MLモデル訓練に失敗: {str(train_error)} - 予測システムが利用できません")
                 
                 # 各レベルに対して予測実行
                 for level in levels:
@@ -599,11 +603,32 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                         else:
                             print(f"レベル{level.price}のシグナル検知をスキップ（実データ不足）")
                     except Exception as e:
-                        print(f"レベル{level.price}の予測エラー: {e}")
-                        continue
+                        error_info = {
+                            'level_price': level.price,
+                            'error_type': type(e).__name__,
+                            'error_message': str(e)
+                        }
+                        prediction_errors.append(error_info)
+                        print(f"❌ レベル{level.price}の予測エラー: {e}")
+                
+                # エラーが1回でもあれば例外発生（より安全なアプローチ）
+                if prediction_errors:
+                    error_count = len(prediction_errors)
+                    error_rate = error_count / len(levels)
+                    error_summary = f"ML予測でエラーが発生: {error_count}/{len(levels)} ({error_rate*100:.1f}%)"
+                    print(f"❌ {error_summary}")
+                    
+                    # 全エラーの詳細情報を含めて例外発生
+                    detailed_errors = [f"{err['level_price']}: {err['error_type']}" for err in prediction_errors]
+                    raise Exception(f"{error_summary} - エラー詳細: {', '.join(detailed_errors)}")
             
         except Exception as e:
-            print(f"ブレイクアウト予測エラー: {e}")
+            # 全てのエラーを致命的エラーとして扱う（より安全なアプローチ）
+            if "ML予測でエラーが発生" in str(e) or "MLモデル訓練に失敗" in str(e):
+                raise Exception(f"ブレイクアウト予測システムでエラーが発生: {str(e)}")
+            else:
+                print(f"❌ ブレイクアウト予測で予期しないエラー: {e}")
+                raise Exception(f"ブレイクアウト予測処理で致命的エラー: {str(e)}")
         
         return predictions
     
@@ -613,10 +638,31 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
         try:
             if self.btc_correlation_analyzer:
                 # BTC 5%下落のシナリオで分析
-                return self.btc_correlation_analyzer.predict_altcoin_impact(symbol, -5.0)
+                correlation_result = self.btc_correlation_analyzer.predict_altcoin_impact(symbol, -5.0)
+                if correlation_result is None:
+                    print(f"⚠️ BTC相関分析結果がNone: {symbol}の相関データが不足している可能性")
+                return correlation_result
+            else:
+                # アナライザーが初期化されていない場合
+                print(f"⚠️ BTC相関アナライザーが初期化されていません")
+                return None
             
         except Exception as e:
-            print(f"BTC相関分析エラー: {e}")
+            # BTC相関分析は補助的だが、エラーは記録
+            error_details = {
+                'symbol': symbol,
+                'error_type': type(e).__name__,
+                'error_message': str(e)
+            }
+            print(f"❌ BTC相関分析エラー ({symbol}): {e}")
+            
+            # 全てのエラーを例外として処理（より安全なアプローチ）
+            # データ不足もシステムの問題として扱う
+            if any(keyword in str(e).lower() for keyword in ['data', 'insufficient', 'not found', 'empty']):
+                raise Exception(f"BTC相関分析でデータ不足エラー: {str(e)} (銘柄: {symbol})")
+            else:
+                # その他の予期しないエラーも例外として処理
+                raise Exception(f"BTC相関分析で致命的エラー: {str(e)} (銘柄: {symbol})")
         
         return None
     

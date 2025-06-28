@@ -856,10 +856,16 @@ class AutoSymbolTrainer:
                     
             except Exception as e:
                 error_msg = str(e)
-                self.logger.error(f"  ❌ {strategy_name}: 分析エラー - {error_msg[:100]}")
+                error_type = type(e).__name__
                 
-                # エラーの場合もシグナルなしレコード作成（エラー情報付き）
-                self._create_no_signal_record(symbol, config, execution_id, error_msg[:100])
+                # 詳細なエラーログ（切り詰めなし）
+                self.logger.error(f"  ❌ {strategy_name}: 分析エラー ({error_type})")
+                self.logger.error(f"     エラー詳細: {error_msg}")
+                
+                # エラーの場合もシグナルなしレコード作成（詳細情報付き）
+                # DBの制限を考慮してエラーメッセージを500文字に制限（100→500に拡大）
+                detailed_error = f"[{error_type}] {error_msg}"
+                self._create_no_signal_record(symbol, config, execution_id, detailed_error[:500])
                 
                 # 重要: 他戦略の処理を継続
                 continue

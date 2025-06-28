@@ -443,14 +443,19 @@ class NewSymbolAdditionSystem:
             return True
             
         except Exception as e:
-            self.logger.error(f"❌ {symbol} 分析失敗: {e}")
+            error_type = type(e).__name__
+            error_msg = str(e)
             
-            # execution_logsステータス更新: FAILED
+            # 詳細なエラーログ（切り詰めなし）
+            self.logger.error(f"❌ {symbol} 分析失敗 ({error_type}): {error_msg}")
+            
+            # execution_logsステータス更新: FAILED（250文字に拡大）
+            detailed_status = f"[{error_type}] {error_msg}"
             self.update_execution_logs_status(execution_id, ExecutionStatus.FAILED, 
-                                            f"分析失敗: {str(e)[:50]}")
+                                            detailed_status[:250])
             
-            # analysesテーブルのpendingタスクもfailedに更新
-            self.update_pending_tasks_to_failed(execution_id, symbol, str(e))
+            # analysesテーブルのpendingタスクもfailedに更新（元のままフル情報）
+            self.update_pending_tasks_to_failed(execution_id, symbol, error_msg)
             
             return False
     
@@ -467,7 +472,7 @@ class NewSymbolAdditionSystem:
                     WHERE execution_id = ? 
                     AND symbol = ?
                     AND task_status = 'pending'
-                """, (error_message[:500], execution_id, symbol))
+                """, (error_message[:1000], execution_id, symbol))  # 500→1000文字に拡大
                 
                 updated_count = cursor.rowcount
                 conn.commit()

@@ -455,7 +455,7 @@ class ExecutionLogDatabase:
                     SELECT execution_id, execution_type, symbol, symbols,
                            timestamp_start, timestamp_end, status, duration_seconds,
                            triggered_by, current_operation, progress_percentage,
-                           total_tasks, completed_tasks
+                           total_tasks, completed_tasks, metadata
                     FROM execution_logs 
                     WHERE {where_clause}
                     ORDER BY timestamp_start DESC 

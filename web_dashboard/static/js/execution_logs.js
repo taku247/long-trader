@@ -294,6 +294,9 @@ class ExecutionLogsManager {
         // リソース使用状況
         this.populateResourceSection(execution);
         
+        // フィルターパラメータ情報
+        this.populateFilterParamsSection(execution);
+        
         // 再実行ボタンの設定
         const rerunBtn = document.getElementById('btn-rerun-execution');
         rerunBtn.dataset.executionId = execution.execution_id;
@@ -400,6 +403,74 @@ class ExecutionLogsManager {
             execution.memory_peak_mb || '-';
         document.getElementById('detail-disk').textContent = 
             execution.disk_io_mb || '-';
+    }
+    
+    populateFilterParamsSection(execution) {
+        const filterParamsSection = document.getElementById('filter-params-section');
+        
+        // metadata（filter_params）がない場合は非表示
+        if (!execution.metadata) {
+            filterParamsSection.style.display = 'none';
+            return;
+        }
+        
+        try {
+            const filterParams = JSON.parse(execution.metadata);
+            const filterParamsContent = document.getElementById('filter-params-content');
+            
+            filterParamsSection.style.display = 'block';
+            
+            // フィルターパラメータをテーブル形式で表示
+            let paramsHtml = '<table class="table table-sm table-striped">';
+            for (const [key, value] of Object.entries(filterParams)) {
+                const displayKey = this.formatFilterParamKey(key);
+                const displayValue = this.formatFilterParamValue(value);
+                paramsHtml += `
+                    <tr>
+                        <td><strong>${displayKey}:</strong></td>
+                        <td>${displayValue}</td>
+                    </tr>
+                `;
+            }
+            paramsHtml += '</table>';
+            
+            filterParamsContent.innerHTML = paramsHtml;
+            
+        } catch (error) {
+            console.warn('Failed to parse filter params:', error);
+            filterParamsSection.style.display = 'none';
+        }
+    }
+    
+    formatFilterParamKey(key) {
+        const keyMap = {
+            'auto_training': '自動学習',
+            'source': '実行元',
+            'execution_mode': '実行モード',
+            'selected_strategy_ids': '選択戦略ID',
+            'estimated_patterns': '推定パターン数',
+            'selected_strategies': '選択戦略',
+            'selected_timeframes': '選択時間枠',
+            'custom_strategy_configs': 'カスタム戦略設定',
+            'all_strategies': '全戦略',
+            'all_timeframes': '全時間枠'
+        };
+        return keyMap[key] || key;
+    }
+    
+    formatFilterParamValue(value) {
+        if (Array.isArray(value)) {
+            return value.join(', ');
+        } else if (typeof value === 'boolean') {
+            return value ? 'はい' : 'いいえ';
+        } else if (value === 'web_dashboard') {
+            return 'Webダッシュボード';
+        } else if (value === 'selective') {
+            return '選択実行';
+        } else if (value === 'all') {
+            return '全て';
+        }
+        return value;
     }
     
     async rerunExecution(executionId) {

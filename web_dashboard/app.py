@@ -440,7 +440,21 @@ class WebDashboard:
         @self.app.route('/symbols-enhanced')
         def symbols_enhanced_page():
             """Enhanced symbol management page with strategy customization."""
-            return render_template('symbols_enhanced.html')
+            try:
+                from config.defaults_manager import get_default_min_risk_reward, get_default_min_leverage, get_default_min_confidence
+                defaults = {
+                    'min_risk_reward': get_default_min_risk_reward(),
+                    'min_leverage': get_default_min_leverage(),
+                    'min_confidence': get_default_min_confidence()
+                }
+            except Exception as e:
+                print(f"⚠️ デフォルト値取得エラー: {e}")
+                defaults = {
+                    'min_risk_reward': 1.2,
+                    'min_leverage': 3.0,
+                    'min_confidence': 0.5
+                }
+            return render_template('symbols_enhanced.html', defaults=defaults)
         
         @self.app.route('/api/symbols/status')
         def api_symbols_status():
@@ -1879,6 +1893,7 @@ class WebDashboard:
                             "execution_mode": execution_mode,
                             "selected_strategy_ids": selected_strategy_ids,
                             "estimated_patterns": len(selected_strategy_ids),
+                            "filter_params": filter_params,  # 手動設定パラメータを保存
                             # 後方互換性
                             "selected_strategies": selected_strategies or "all",
                             "selected_timeframes": selected_timeframes or "all",

@@ -9,6 +9,9 @@ import sqlite3
 from pathlib import Path
 import json
 from datetime import datetime, timezone
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
+from config.defaults_manager import get_default_min_risk_reward
 
 def get_migration_info():
     """マイグレーション情報を返す"""
@@ -66,7 +69,7 @@ def up(db_path):
                     'risk_multiplier': 0.8,
                     'confidence_boost': 0.0,
                     'leverage_cap': 50,
-                    'min_risk_reward': 1.1,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 3.5,
                     'take_profit_percent': 8.0,
                     'custom_sltp_calculator': 'ConservativeSLTPCalculator'
@@ -82,7 +85,7 @@ def up(db_path):
                     'risk_multiplier': 0.8,
                     'confidence_boost': 0.0,
                     'leverage_cap': 50,
-                    'min_risk_reward': 1.25,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 4.0,
                     'take_profit_percent': 10.0,
                     'custom_sltp_calculator': 'ConservativeSLTPCalculator'
@@ -98,7 +101,7 @@ def up(db_path):
                     'risk_multiplier': 0.8,
                     'confidence_boost': 0.0,
                     'leverage_cap': 50,
-                    'min_risk_reward': 1.0,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 5.0,
                     'take_profit_percent': 12.0,
                     'custom_sltp_calculator': 'ConservativeSLTPCalculator'
@@ -114,7 +117,7 @@ def up(db_path):
                     'risk_multiplier': 1.2,
                     'confidence_boost': -0.05,
                     'leverage_cap': 100,
-                    'min_risk_reward': 1.1,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 3.5,
                     'take_profit_percent': 8.0,
                     'custom_sltp_calculator': 'AggressiveSLTPCalculator'
@@ -130,7 +133,7 @@ def up(db_path):
                     'risk_multiplier': 1.2,
                     'confidence_boost': -0.05,
                     'leverage_cap': 100,
-                    'min_risk_reward': 1.25,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 4.0,
                     'take_profit_percent': 10.0,
                     'custom_sltp_calculator': 'AggressiveSLTPCalculator'
@@ -146,7 +149,7 @@ def up(db_path):
                     'risk_multiplier': 1.2,
                     'confidence_boost': -0.05,
                     'leverage_cap': 100,
-                    'min_risk_reward': 1.0,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 5.0,
                     'take_profit_percent': 12.0,
                     'custom_sltp_calculator': 'AggressiveSLTPCalculator'
@@ -162,7 +165,7 @@ def up(db_path):
                     'risk_multiplier': 1.0,
                     'confidence_boost': 0.0,
                     'leverage_cap': 75,
-                    'min_risk_reward': 1.15,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 4.0,
                     'take_profit_percent': 10.0,
                     'custom_sltp_calculator': 'DefaultSLTPCalculator'
@@ -178,7 +181,7 @@ def up(db_path):
                     'risk_multiplier': 1.0,
                     'confidence_boost': 0.0,
                     'leverage_cap': 75,
-                    'min_risk_reward': 1.0,
+                    'min_risk_reward': get_default_min_risk_reward(),
                     'stop_loss_percent': 5.0,
                     'take_profit_percent': 12.0,
                     'custom_sltp_calculator': 'DefaultSLTPCalculator'

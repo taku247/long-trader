@@ -71,7 +71,6 @@ class LeverageConfigManager:
         
         return {
             'max_leverage': core_limits.get('max_leverage', 100.0),
-            'min_risk_reward': core_limits.get('min_risk_reward', 0.4),
             'max_drawdown_tolerance': core_limits.get('max_drawdown_tolerance', 0.15),
             'btc_correlation_threshold': correlation_thresholds.get('btc_correlation_threshold', 0.7),
             'min_support_strength': support_resistance.get('min_support_strength', 0.6)

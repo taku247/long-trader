@@ -81,7 +81,6 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
             # コア定数を設定
             core_constants = adjusted_constants['core']
             self.max_leverage = core_constants['max_leverage']
-            self.min_risk_reward = core_constants['min_risk_reward']
             self.btc_correlation_threshold = core_constants['btc_correlation_threshold']
             self.min_support_strength = core_constants['min_support_strength']
             self.max_drawdown_tolerance = core_constants['max_drawdown_tolerance']
@@ -99,7 +98,7 @@ class CoreLeverageDecisionEngine(ILeverageDecisionEngine):
             self.symbol_category = symbol_category
             
             print(f"✅ レバレッジエンジン定数をロード (timeframe: {timeframe}, category: {symbol_category})")
-            print(f"   最大レバレッジ: {self.max_leverage:.1f}x, 最小RR比: {self.min_risk_reward:.1f}")
+            print(f"   最大レバレッジ: {self.max_leverage:.1f}x")
             
         except Exception as e:
             print(f"❌ 設定定数読み込みエラー: {e}")

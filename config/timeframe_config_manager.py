@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import copy
+from .defaults_manager import defaults_manager
 
 class TimeframeConfigManager:
     """時間足設定管理クラス"""
@@ -89,6 +90,9 @@ class TimeframeConfigManager:
         # 設定をコピーして返す（元データ保護）
         config = copy.deepcopy(timeframe_configs[timeframe])
         
+        # デフォルト値を動的解決
+        config = defaults_manager.resolve_defaults_in_config(config)
+        
         # entry_conditions を展開（後方互換性）
         if 'entry_conditions' in config:
             config.update(config['entry_conditions'])
@@ -156,17 +160,26 @@ class TimeframeConfigManager:
         if 'entry_conditions' in config:
             entry_conditions = config['entry_conditions']
             
+            # use_defaultマーカーを解決してから検証
+            resolved_conditions = defaults_manager.resolve_defaults_in_config(entry_conditions)
+            
             # 信頼度範囲チェック
-            confidence = entry_conditions.get('min_confidence', 0)
+            confidence = resolved_conditions.get('min_confidence', 0)
             conf_range = validation_rules.get('min_confidence_range', [0.1, 1.0])
-            if not (conf_range[0] <= confidence <= conf_range[1]):
+            if isinstance(confidence, (int, float)) and not (conf_range[0] <= confidence <= conf_range[1]):
                 print(f"⚠️ {timeframe}: min_confidence が範囲外: {confidence}")
             
             # レバレッジ範囲チェック
-            leverage = entry_conditions.get('min_leverage', 1)
+            leverage = resolved_conditions.get('min_leverage', 1)
             lev_range = validation_rules.get('min_leverage_range', [1.0, 50.0])
-            if not (lev_range[0] <= leverage <= lev_range[1]):
+            if isinstance(leverage, (int, float)) and not (lev_range[0] <= leverage <= lev_range[1]):
                 print(f"⚠️ {timeframe}: min_leverage が範囲外: {leverage}")
+            
+            # リスクリワード範囲チェック
+            risk_reward = resolved_conditions.get('min_risk_reward', 1.0)
+            rr_range = validation_rules.get('min_risk_reward_range', [0.5, 10.0])
+            if isinstance(risk_reward, (int, float)) and not (rr_range[0] <= risk_reward <= rr_range[1]):
+                print(f"⚠️ {timeframe}: min_risk_reward が範囲外: {risk_reward}")
         
         # 評価間隔チェック
         interval = config.get('evaluation_interval_minutes', 0)
@@ -205,7 +218,7 @@ class TimeframeConfigManager:
                     "entry_conditions": {
                         "min_leverage": 3.0,
                         "min_confidence": 0.50,
-                        "min_risk_reward": 2.5
+                        "min_risk_reward": 1.2
                     },
                     "active_hours_range": [9, 22]
                 }

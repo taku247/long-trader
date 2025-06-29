@@ -21,7 +21,8 @@ from real_time_system.utils.colored_log import get_colored_logger
 from scalable_analysis_system import ScalableAnalysisSystem
 from execution_log_database import ExecutionLogDatabase, ExecutionType, ExecutionStatus
 from engines.leverage_decision_engine import InsufficientMarketDataError, InsufficientConfigurationError, LeverageAnalysisError
-from engines.filtering_framework import FilteringFramework, FilteringStatistics
+# Stage 9フィルタリングシステム削除済み (2025年6月29日)
+# from engines.filtering_framework import FilteringFramework, FilteringStatistics
 from symbol_early_fail_validator import SymbolEarlyFailValidator
 
 # progress_tracker統合

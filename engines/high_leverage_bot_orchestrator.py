@@ -170,29 +170,49 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             
             print(f"📍 検出レベル: サポート{len(support_levels)}件, レジスタンス{len(resistance_levels)}件")
             
+            # Early Exit: サポレジが検出されない場合は即座にスキップ
+            if not support_levels and not resistance_levels:
+                print("⏭️ Early Exit: 有効なサポレジレベル0個 → この評価時点をスキップ")
+                return None  # Noneを返してスキップを示す
+            
             # === STEP 3: ML予測 ===
             print("\n🤖 ML予測分析中...")
-            breakout_predictions = self._predict_breakouts(market_data, support_levels + resistance_levels)
-            
-            print(f"🎯 予測完了: {len(breakout_predictions)}件")
+            try:
+                breakout_predictions = self._predict_breakouts(market_data, support_levels + resistance_levels)
+                print(f"🎯 予測完了: {len(breakout_predictions)}件")
+            except Exception as e:
+                if "ML予測でエラーが発生" in str(e) or "MLモデル訓練に失敗" in str(e):
+                    print(f"⏭️ Early Exit: ML予測システム失敗 → この評価時点をスキップ ({str(e)[:100]})")
+                    return None
+                else:
+                    raise  # 予期しないエラーは再発生
             
             # === STEP 4: BTC相関分析 ===
             print("\n₿ BTC相関リスク分析中...")
-            btc_correlation_risk = self._analyze_btc_correlation(symbol)
-            
-            if btc_correlation_risk:
-                print(f"⚠️ BTC相関リスク: {btc_correlation_risk.risk_level}")
+            try:
+                btc_correlation_risk = self._analyze_btc_correlation(symbol)
+                if btc_correlation_risk:
+                    print(f"⚠️ BTC相関リスク: {btc_correlation_risk.risk_level}")
+            except Exception as e:
+                if "データ不足エラー" in str(e):
+                    print(f"⏭️ Early Exit: BTC相関データ不足 → この評価時点をスキップ ({str(e)[:100]})")
+                    return None
+                else:
+                    raise  # 予期しないエラーは再発生
             
             # === STEP 5: 市場コンテキスト分析 ===
             print("\n📈 市場コンテキスト分析中...")
-            # バックテスト時は各時点の価格、リアルタイム時は現在価格を使用
-            market_context = self._analyze_market_context(
-                market_data, 
-                is_realtime=not is_backtest,
-                target_timestamp=target_timestamp
-            )
-            
-            print(f"🎪 市場状況: {market_context.trend_direction} / {market_context.market_phase}")
+            try:
+                # バックテスト時は各時点の価格、リアルタイム時は現在価格を使用
+                market_context = self._analyze_market_context(
+                    market_data, 
+                    is_realtime=not is_backtest,
+                    target_timestamp=target_timestamp
+                )
+                print(f"🎪 市場状況: {market_context.trend_direction} / {market_context.market_phase}")
+            except Exception as e:
+                print(f"⏭️ Early Exit: 市場コンテキスト分析失敗 → この評価時点をスキップ ({str(e)[:100]})")
+                return None
             
             # === STEP 6: 統合レバレッジ判定 ===
             print("\n⚖️ レバレッジ判定実行中...")
@@ -200,14 +220,31 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             if not self.leverage_decision_engine:
                 raise Exception("レバレッジ判定エンジンが初期化されていません - 銘柄追加を中止")
             
-            leverage_recommendation = self.leverage_decision_engine.calculate_safe_leverage(
-                symbol=symbol,
-                support_levels=support_levels,
-                resistance_levels=resistance_levels,
-                breakout_predictions=breakout_predictions,
-                btc_correlation_risk=btc_correlation_risk,
-                market_context=market_context
-            )
+            try:
+                leverage_recommendation = self.leverage_decision_engine.calculate_safe_leverage(
+                    symbol=symbol,
+                    support_levels=support_levels,
+                    resistance_levels=resistance_levels,
+                    breakout_predictions=breakout_predictions,
+                    btc_correlation_risk=btc_correlation_risk,
+                    market_context=market_context
+                )
+                
+                # Early Exit: レバレッジが閾値未満の場合スキップ
+                min_leverage_threshold = 2.0  # 最小レバレッジ閾値
+                if leverage_recommendation.recommended_leverage < min_leverage_threshold:
+                    print(f"⏭️ Early Exit: レバレッジ閾値未満 ({leverage_recommendation.recommended_leverage:.1f}x < {min_leverage_threshold}x) → この評価時点をスキップ")
+                    return None
+                
+                # Early Exit: 信頼度が低い場合スキップ
+                min_confidence_threshold = 0.3  # 最小信頼度閾値（30%）
+                if leverage_recommendation.confidence_score < min_confidence_threshold:
+                    print(f"⏭️ Early Exit: 信頼度閾値未満 ({leverage_recommendation.confidence_score:.1%} < {min_confidence_threshold:.1%}) → この評価時点をスキップ")
+                    return None
+                    
+            except Exception as e:
+                print(f"⏭️ Early Exit: レバレッジ判定エラー → この評価時点をスキップ ({str(e)[:100]})")
+                return None
             
             # === 結果サマリー表示 ===
             self._display_analysis_summary(leverage_recommendation)
@@ -219,13 +256,21 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             raise Exception(f"分析中にエラーが発生: {str(e)} - フォールバックは使用しません")
     
     def _fetch_market_data(self, symbol: str, timeframe: str, custom_period_settings: dict = None) -> pd.DataFrame:
-        """市場データを取得（マルチ取引所APIクライアントを使用）"""
+        """市場データを取得（RealPreparedData統合版）"""
         
-        # キャッシュされたデータがあれば使用
+        # RealPreparedDataインスタンスがあれば使用
+        if hasattr(self, '_prepared_data') and self._prepared_data:
+            print("📊 RealPreparedDataキャッシュからデータ取得")
+            return self._prepared_data.ohlcv_data
+        
+        # 従来のキャッシュがあれば使用（後方互換性）
         if hasattr(self, '_cached_data') and not self._cached_data.empty:
+            print("📊 従来キャッシュからデータ取得")
             return self._cached_data
         
         try:
+            print("🌐 API経由でOHLCVデータ取得中...")
+            
             # マルチ取引所APIクライアントを使用
             from hyperliquid_api_client import MultiExchangeAPIClient
             import asyncio
@@ -276,19 +321,35 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                data = loop.run_until_complete(
+                raw_data = loop.run_until_complete(
                     api_client.get_ohlcv_data(symbol, timeframe, start_time, end_time)
                 )
             finally:
                 loop.close()
             
-            if data is not None and not data.empty:
-                return data
+            if raw_data is not None and not raw_data.empty:
+                # RealPreparedDataを作成（高速アクセス・キャッシュ機能付き）
+                try:
+                    from engines.data_preparers import RealPreparedData
+                    self._prepared_data = RealPreparedData(raw_data)
+                    print(f"✅ RealPreparedData作成完了: {len(raw_data)}本のデータ")
+                    print(f"   📊 期間: {raw_data['timestamp'].iloc[0]} ～ {raw_data['timestamp'].iloc[-1]}")
+                    print(f"   ⚡ 高速アクセス・テクニカル指標キャッシュ機能を利用可能")
+                    
+                    # 従来のキャッシュも設定（後方互換性）
+                    self._cached_data = raw_data
+                    
+                except Exception as e:
+                    print(f"⚠️ RealPreparedData作成エラー: {e}")
+                    print("📊 従来キャッシュのみ使用")
+                    self._cached_data = raw_data
+                
+                return raw_data
             else:
                 raise Exception(f"{symbol}のOHLCVデータが空です - 実データが必要です")
             
         except Exception as e:
-            print(f"データ取得エラー: {e}")
+            print(f"❌ データ取得エラー: {e}")
             # フォールバックは使用せず、例外を再発生
             raise Exception(f"市場データ取得に失敗: {e} - 実データが必要です")
     
@@ -824,6 +885,51 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             'position_size': 100.0,  # デフォルト
             'risk_level': max(0, 100 - recommendation.confidence_level * 100)  # リスクレベル
         }
+    
+    # === RealPreparedData活用メソッド ===
+    
+    def get_prepared_data(self):
+        """RealPreparedDataインスタンスを取得"""
+        if hasattr(self, '_prepared_data') and self._prepared_data:
+            return self._prepared_data
+        return None
+    
+    def get_technical_indicators(self, eval_time: datetime) -> Dict[str, float]:
+        """
+        指定時点のテクニカル指標を一括取得
+        
+        Args:
+            eval_time: 評価時点
+            
+        Returns:
+            テクニカル指標の辞書
+        """
+        if not hasattr(self, '_prepared_data') or not self._prepared_data:
+            return {}
+        
+        try:
+            return {
+                'rsi_14': self._prepared_data.get_rsi(eval_time, 14),
+                'rsi_21': self._prepared_data.get_rsi(eval_time, 21),
+                'sma_20': self._prepared_data.get_moving_average(eval_time, 20),
+                'sma_50': self._prepared_data.get_moving_average(eval_time, 50),
+                'atr_14': self._prepared_data.get_atr_at(eval_time, 14),
+                'volatility_20': self._prepared_data.get_volatility_at(eval_time, 20),
+                'vwap_20': self._prepared_data.get_vwap(eval_time, 20),
+                'liquidity_score': self._prepared_data.get_liquidity_score_at(eval_time),
+                'spread': self._prepared_data.get_spread_at(eval_time)
+            }
+        except Exception as e:
+            print(f"⚠️ テクニカル指標取得エラー: {e}")
+            return {}
+    
+    def clear_data_cache(self):
+        """データキャッシュをクリア"""
+        if hasattr(self, '_prepared_data'):
+            delattr(self, '_prepared_data')
+        if hasattr(self, '_cached_data'):
+            delattr(self, '_cached_data')
+        print("🧹 データキャッシュをクリアしました")
     
     # === プラグイン設定メソッド ===
     

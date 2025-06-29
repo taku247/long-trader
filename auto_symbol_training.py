@@ -151,7 +151,7 @@ class AutoSymbolTrainer:
                 ExecutionStatus.RUNNING,
                 current_operation='開始中',
                 progress_percentage=0,
-                total_tasks=4
+                total_tasks=3
             )
             
             # Step 1: データ取得と検証
@@ -162,11 +162,7 @@ class AutoSymbolTrainer:
             await self._execute_step(execution_id, 'backtest', 
                                    self._run_comprehensive_backtest, symbol, selected_strategies, selected_timeframes, strategy_configs, skip_pretask_creation, custom_period_settings)
             
-            # Step 3: ML学習実行
-            await self._execute_step(execution_id, 'ml_training', 
-                                   self._train_ml_models, symbol)
-            
-            # Step 4: 結果保存とランキング更新
+            # Step 3: 結果保存とランキング更新
             await self._execute_step(execution_id, 'result_save', 
                                    self._save_results, symbol)
             
@@ -246,7 +242,6 @@ class AutoSymbolTrainer:
             step_display_names = {
                 'data_fetch': f'{exchange.capitalize()}銘柄確認・データ取得',
                 'backtest': '全戦略バックテスト実行',
-                'ml_training': 'ML学習実行',
                 'result_save': '結果保存・ランキング更新'
             }
             
@@ -262,7 +257,6 @@ class AutoSymbolTrainer:
                 stage_mapping = {
                     'data_fetch': 'data_validation',
                     'backtest': 'backtest_analysis', 
-                    'ml_training': 'ml_training',
                     'result_save': 'finalizing'
                 }
                 stage = stage_mapping.get(step_name, step_name)
@@ -666,77 +660,6 @@ class AutoSymbolTrainer:
             
         except Exception as e:
             self.logger.error(f"Backtest failed for {symbol}: {e}")
-            raise
-    
-    async def _train_ml_models(self, symbol: str) -> Dict:
-        """ML学習実行"""
-        
-        try:
-            self.logger.info(f"Training ML models for {symbol}")
-            
-            # ML学習の実装
-            # TODO: 実際のML学習ロジックを実装
-            
-            # TODO: ランダムML結果生成は品質問題のためコメントアウト (2024-06-18)
-            # 実際のML学習ロジック実装が必要
-            import time
-            # import random
-            
-            # 学習時間をシミュレート
-            await asyncio.sleep(2)
-            
-            # TODO: 以下のランダム生成は削除し、実際のML学習結果を返すように修正必要
-            # models_trained = {
-            #     'support_resistance_ml': {
-            #         'accuracy': round(random.uniform(0.65, 0.85), 3),
-            #         'f1_score': round(random.uniform(0.6, 0.8), 3),
-            #         'training_samples': random.randint(5000, 15000)
-            #     },
-            #     'breakout_predictor': {
-            #         'accuracy': round(random.uniform(0.6, 0.8), 3),
-            #         'precision': round(random.uniform(0.65, 0.85), 3),
-            #         'training_samples': random.randint(3000, 10000)
-            #     },
-            #     'btc_correlation': {
-            #         'r_squared': round(random.uniform(0.7, 0.9), 3),
-            #         'mae': round(random.uniform(0.02, 0.08), 4),
-            #         'training_samples': random.randint(8000, 20000)
-            #     }
-            # }
-            
-            # 暫定: 実際のML学習未実装のため固定値を返す
-            models_trained = {
-                'support_resistance_ml': {
-                    'accuracy': 0.000,  # 未学習状態を示す
-                    'f1_score': 0.000,
-                    'training_samples': 0,
-                    'status': 'not_implemented'
-                },
-                'breakout_predictor': {
-                    'accuracy': 0.000,
-                    'precision': 0.000,
-                    'training_samples': 0,
-                    'status': 'not_implemented'
-                },
-                'btc_correlation': {
-                    'r_squared': 0.000,
-                    'mae': 0.000,
-                    'training_samples': 0,
-                    'status': 'not_implemented'
-                }
-            }
-            
-            self.logger.success(f"ML training completed for {symbol}")
-            
-            return {
-                'models_trained': models_trained,
-                'total_training_time': 120,  # seconds
-                'avg_accuracy': 0.000,  # ML未実装のため0
-                'status': 'ml_training_not_implemented'
-            }
-            
-        except Exception as e:
-            self.logger.error(f"ML training failed for {symbol}: {e}")
             raise
     
     async def _save_results(self, symbol: str) -> Dict:

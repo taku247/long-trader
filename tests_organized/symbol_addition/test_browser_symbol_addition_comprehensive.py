@@ -152,8 +152,6 @@ def test_symbol_addition_dry_run(symbol: str) -> Dict:
         stages = [
             'initialization',
             'data_fetching', 
-            'support_resistance_analysis',
-            'ml_prediction',
             'backtest_execution',
             'result_storage'
         ]

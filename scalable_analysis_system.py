@@ -27,6 +27,9 @@ from engines.price_consistency_validator import PriceConsistencyValidator, Unifi
 # 進捗ロガーのインポート
 from progress_logger import SymbolProgressLogger
 
+# Discord通知システムのインポート
+from discord_notifier import discord_notifier
+
 # エラー例外のインポート
 from engines.leverage_decision_engine import InsufficientConfigurationError
 
@@ -563,6 +566,7 @@ class ScalableAnalysisSystem:
     def _generate_single_analysis(self, symbol, timeframe, config, execution_id=None):
         """単一の分析を生成（ハイレバレッジボット使用版 + task_status更新）"""
         analysis_id = f"{symbol}_{timeframe}_{config}"
+        start_time = time.time()
         
         # 既存チェック
         if self._analysis_exists(analysis_id):
@@ -574,6 +578,17 @@ class ScalableAnalysisSystem:
         except Exception as e:
             logger.warning(f"Failed to update task_status to running: {e}")
         
+        # 🆕 Discord通知: 子プロセス開始
+        try:
+            discord_notifier.child_process_started(
+                symbol=symbol,
+                strategy_name=config,
+                timeframe=timeframe,
+                execution_id=execution_id or "unknown"
+            )
+        except Exception as e:
+            logger.warning(f"Discord開始通知エラー: {e}")
+        
         # ハイレバレッジボットを使用した分析を試行
         try:
             # execution_idをログ出力
@@ -582,6 +597,22 @@ class ScalableAnalysisSystem:
         except Exception as e:
             logger.error(f"Real analysis failed for {symbol} {timeframe} {config}: {e}")
             logger.error(f"Analysis terminated - no fallback to sample data")
+            
+            execution_time = time.time() - start_time
+            
+            # 🆕 Discord通知: 子プロセス失敗
+            try:
+                discord_notifier.child_process_completed(
+                    symbol=symbol,
+                    strategy_name=config,
+                    timeframe=timeframe,
+                    execution_id=execution_id or "unknown",
+                    success=False,
+                    execution_time=execution_time,
+                    error_msg=str(e)[:100]  # エラーメッセージを100文字に制限
+                )
+            except Exception as discord_error:
+                logger.warning(f"Discord失敗通知エラー: {discord_error}")
             
             # task_statusを'failed'に更新
             try:
@@ -606,6 +637,21 @@ class ScalableAnalysisSystem:
         # execution_idを環境変数または引数から取得（引数を優先）
         final_execution_id = execution_id or os.environ.get('CURRENT_EXECUTION_ID')
         self._save_to_database(symbol, timeframe, config, metrics, chart_path, compressed_path, final_execution_id)
+        
+        execution_time = time.time() - start_time
+        
+        # 🆕 Discord通知: 子プロセス成功
+        try:
+            discord_notifier.child_process_completed(
+                symbol=symbol,
+                strategy_name=config,
+                timeframe=timeframe,
+                execution_id=execution_id or "unknown",
+                success=True,
+                execution_time=execution_time
+            )
+        except Exception as discord_error:
+            logger.warning(f"Discord成功通知エラー: {discord_error}")
         
         return True, metrics
     

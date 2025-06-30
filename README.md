@@ -41,6 +41,38 @@
 - `engines/high_leverage_bot_orchestrator.py` - Early Exitトラッキング統合
 - `auto_symbol_training.py` - 結果検証とサマリー表示改善
 
+### 📡 **Discord通知システム (ProcessPoolExecutor対応)**
+
+**ProcessPoolExecutor環境でのEarly Exit発生時に、詳細な分析結果をDiscordに自動通知。**
+
+#### 🚨 **通知機能**
+- **Early Exit専用**: 分析失敗時のみ通知（正常完了時は通知なし）
+- **詳細情報**: 銘柄、戦略、実行ID、失敗ステージ、改善提案を含む
+- **ProcessPoolExecutor対応**: 子プロセスからの直接通知送信
+- **同期HTTP通信**: `requests`ライブラリで確実な通知配信
+
+#### 🔧 **設定方法**
+```bash
+# .envファイルにDiscord Webhook URLを追加
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
+```
+
+#### 📋 **通知される内容**
+- **🚨 Early Exit Analysis**: 銘柄名とステージ
+- **Exit Stage**: 失敗した分析ステージ（STEP1-6）
+- **Exit Reason**: 具体的な失敗理由
+- **💡 Suggestions**: 改善提案（期間延長、戦略変更等）
+- **Execution ID**: デバッグ用の実行識別子
+
+#### 🧪 **テスト実行**
+```bash
+# Discord通知システムのテスト
+python test_discord_notification.py
+
+# 強制Early Exit通知テスト
+python force_early_exit_test.py
+```
+
 ### 🔄 **ファイルベース進捗トラッカー**
 
 **ProcessPoolExecutor環境での競合状態を解決し、安全なマルチプロセス進捗管理を実現。**

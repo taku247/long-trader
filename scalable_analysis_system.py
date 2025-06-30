@@ -15,6 +15,11 @@ import pickle
 from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
+import asyncio
+import aiohttp
+import time
+from typing import List
+import requests
 
 # 価格データ整合性チェックシステムのインポート
 from engines.price_consistency_validator import PriceConsistencyValidator, UnifiedPriceData
@@ -28,6 +33,13 @@ from engines.leverage_decision_engine import InsufficientConfigurationError
 # Stage 9フィルタリングシステム削除済み (2025年6月29日)
 # 理由: 性能問題 - "軽量事前チェック"と謳いながら重い計算を実行
 # 詳細: README.md参照
+
+# 環境変数読み込み
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -881,10 +893,16 @@ class ScalableAnalysisSystem:
                         if isinstance(result, dict):
                             logger.info(f"   辞書キー: {list(result.keys()) if result else 'None/Empty'}")
                     
+                    # 🎯 DISCORD通知処理（ProcessPoolExecutor専用・確実実行版）
+                    self._handle_discord_notification_for_result(result, symbol, timeframe, config, execution_id)
+                    
                     # 🔍 AnalysisResult対応: Early Exitの詳細ログ出力（ProcessPoolExecutor対応強化版）
                     from engines.analysis_result import AnalysisResult
                     import sys
                     if isinstance(result, AnalysisResult):
+                        # 必ずEarly Exit検出ログを出力（通知前確認用）
+                        logger.info(f"⚡ AnalysisResult処理開始: early_exit={result.early_exit}")
+                        
                         if result.early_exit:
                             # ProcessPoolExecutor環境での確実なログ出力
                             detailed_msg = result.get_detailed_log_message()
@@ -907,6 +925,88 @@ class ScalableAnalysisSystem:
                             for handler in logger.handlers:
                                 if hasattr(handler, 'flush'):
                                     handler.flush()
+                            
+                            # 🎯 Discord webhook通知: 子プロセスのEarly Exit詳細送信
+                            try:
+                                # 同期実行（ProcessPoolExecutor環境では非同期は使用できない）
+                                import requests
+                                
+                                # ProcessPoolExecutor環境での環境変数再読み込み
+                                try:
+                                    from dotenv import load_dotenv
+                                    load_dotenv()
+                                except ImportError:
+                                    pass
+                                
+                                # Discord webhook URL (環境変数から取得)
+                                webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
+                                
+                                # デバッグログ: Discord通知試行ログ
+                                logger.info(f"🎯 Discord通知試行: {symbol} {timeframe} {config}")
+                                logger.info(f"   webhook_url設定: {bool(webhook_url)}")
+                                logger.info(f"   Early Exit詳細: {result.exit_stage}/{result.exit_reason}")
+                                
+                                if webhook_url:
+                                    # embed作成
+                                    embed = {
+                                        "title": f"🚨 Early Exit Analysis: {symbol}",
+                                        "color": 0xFF4444,  # 赤色
+                                        "timestamp": datetime.now().isoformat(),
+                                        "fields": [
+                                            {"name": "Symbol", "value": symbol, "inline": True},
+                                            {"name": "Timeframe", "value": timeframe, "inline": True},
+                                            {"name": "Strategy", "value": config, "inline": True},
+                                            {"name": "Exit Stage", "value": result.exit_stage.value if result.exit_stage else 'unknown', "inline": True},
+                                            {"name": "Exit Reason", "value": result.exit_reason.value if result.exit_reason else 'unknown', "inline": True},
+                                            {"name": "Execution ID", "value": f"`{execution_id}`", "inline": False},
+                                            {"name": "Detailed Message", "value": detailed_msg[:1000], "inline": False},
+                                            {"name": "User Message", "value": user_msg[:1000], "inline": False}
+                                        ],
+                                        "footer": {"text": "Long Trader - Early Exit Analysis"}
+                                    }
+                                    
+                                    # 改善提案を追加
+                                    if suggestions:
+                                        embed["fields"].append({
+                                            "name": "💡 Suggestions",
+                                            "value": "\n".join([f"• {s}" for s in suggestions[:5]])[:1000],
+                                            "inline": False
+                                        })
+                                    
+                                    # Discord APIに送信
+                                    payload = {
+                                        "embeds": [embed],
+                                        "username": "Long Trader Bot"
+                                    }
+                                    
+                                    # 最大3回のリトライ（ProcessPoolExecutor環境では軽量化）
+                                    for attempt in range(3):
+                                        try:
+                                            response = requests.post(webhook_url, json=payload, timeout=10)
+                                            if response.status_code == 200:
+                                                logger.info(f"✅ Discord通知送信成功: {symbol} Early Exit")
+                                                break
+                                            elif response.status_code == 429:  # Rate limit
+                                                retry_after = int(response.headers.get('Retry-After', 1))
+                                                logger.warning(f"Discord rate limit, retrying after {retry_after}s")
+                                                time.sleep(retry_after)
+                                            else:
+                                                logger.warning(f"Discord API error: {response.status_code}")
+                                                break
+                                        except Exception as e:
+                                            if attempt == 2:  # 最後の試行
+                                                logger.error(f"❌ Discord送信失敗: {e}")
+                                                break
+                                            wait_time = 2 ** attempt
+                                            logger.warning(f"Discord送信失敗 (attempt {attempt + 1}/3): {e}, retrying in {wait_time}s")
+                                            time.sleep(wait_time)
+                                else:
+                                    logger.warning("⚠️ DISCORD_WEBHOOK_URL not set, skipping notification")
+                                    
+                            except Exception as discord_error:
+                                logger.error(f"❌ Discord通知システムエラー: {discord_error}")
+                                import traceback
+                                logger.error(f"   スタックトレース: {traceback.format_exc()}")
                             
                             # 🔧 ProcessPoolExecutor環境用: AnalysisResult詳細を一時ファイルに出力
                             try:
@@ -1994,6 +2094,71 @@ class ScalableAnalysisSystem:
         logger.info(f"CSVエクスポート完了: {output_path}")
         return True
     
+    def test_discord_notification(self, test_type="early_exit"):
+        """Discord通知テスト機能"""
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass
+        
+        import os
+        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        
+        if not webhook_url:
+            logger.error("❌ DISCORD_WEBHOOK_URL環境変数が設定されていません")
+            return False
+        
+        logger.info(f"🔔 Discord通知テスト開始: {test_type}")
+        
+        if test_type == "early_exit":
+            # Early Exit模擬通知
+            from engines.analysis_result import AnalysisResult, AnalysisStage, ExitReason
+            
+            result = AnalysisResult(
+                symbol="TEST",
+                timeframe="1h", 
+                strategy="Conservative_ML-1h",
+                execution_id="test_discord_001"
+            )
+            result.mark_early_exit(
+                stage=AnalysisStage.SUPPORT_RESISTANCE,
+                reason=ExitReason.NO_SUPPORT_RESISTANCE,
+                error_message="Discord通知テスト用Early Exit"
+            )
+            
+            return self._send_discord_notification_sync(
+                symbol="TEST",
+                timeframe="1h",
+                strategy="Conservative_ML-1h", 
+                execution_id="test_discord_001",
+                result=result,
+                webhook_url=webhook_url
+            )
+        
+        elif test_type == "simple":
+            # シンプルテスト通知
+            payload = {
+                "content": "🧪 **Discord通知テスト**\n\n"
+                          "✅ ProcessPoolExecutor環境からのDiscord通知が正常に動作しています。\n"
+                          f"⏰ テスト時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            }
+            
+            import requests
+            try:
+                response = requests.post(webhook_url, json=payload, timeout=10)
+                if response.status_code == 204:
+                    logger.info("✅ Discord通知テスト成功")
+                    return True
+                else:
+                    logger.error(f"❌ Discord通知失敗: {response.status_code}")
+                    return False
+            except Exception as e:
+                logger.error(f"❌ Discord通知エラー: {e}")
+                return False
+        
+        return False
+
     def get_analysis_details(self, symbol, timeframe, config):
         """分析の詳細情報を取得（データベース + トレードデータ）"""
         # データベースから基本情報取得
@@ -2014,6 +2179,165 @@ class ScalableAnalysisSystem:
             'info': analysis_info.iloc[0].to_dict(),
             'trades': trades_df
         }
+    
+    def _handle_discord_notification_for_result(self, result, symbol, timeframe, config, execution_id):
+        """ProcessPoolExecutor専用Discord通知処理"""
+        try:
+            from engines.analysis_result import AnalysisResult
+            
+            # AnalysisResultのEarly Exit確認
+            if isinstance(result, AnalysisResult) and result.early_exit:
+                logger.info(f"🎯 Discord通知処理開始: {symbol} {timeframe} Early Exit")
+                
+                # 環境変数再読み込み（ProcessPoolExecutor対応）
+                try:
+                    from dotenv import load_dotenv
+                    load_dotenv()
+                except ImportError:
+                    pass
+                
+                webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
+                
+                if webhook_url:
+                    # Discord通知送信
+                    self._send_discord_notification_sync(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        strategy=config,
+                        execution_id=execution_id,
+                        result=result,
+                        webhook_url=webhook_url
+                    )
+                else:
+                    logger.warning("⚠️ DISCORD_WEBHOOK_URL not set in ProcessPoolExecutor")
+            else:
+                logger.debug(f"Discord通知スキップ: Early Exit無し ({symbol} {timeframe})")
+                
+        except Exception as e:
+            logger.error(f"❌ Discord通知処理エラー: {e}")
+    
+    def _send_discord_notification_sync(self, symbol, timeframe, strategy, execution_id, result, webhook_url):
+        """同期Discord通知送信（ProcessPoolExecutor専用）"""
+        try:
+            import requests
+            
+            # メッセージ作成
+            detailed_msg = result.get_detailed_log_message()
+            user_msg = result.get_user_friendly_message()
+            suggestions = result.get_suggestions()
+            
+            # Embed作成
+            embed = {
+                "title": f"🚨 Early Exit Analysis: {symbol}",
+                "color": 0xFF4444,
+                "timestamp": datetime.now().isoformat(),
+                "fields": [
+                    {"name": "Symbol", "value": symbol, "inline": True},
+                    {"name": "Timeframe", "value": timeframe, "inline": True},
+                    {"name": "Strategy", "value": strategy, "inline": True},
+                    {"name": "Exit Stage", "value": result.exit_stage.value if result.exit_stage else 'unknown', "inline": True},
+                    {"name": "Exit Reason", "value": result.exit_reason.value if result.exit_reason else 'unknown', "inline": True},
+                    {"name": "Execution ID", "value": f"`{execution_id}`", "inline": False},
+                    {"name": "Detailed Message", "value": detailed_msg[:1000], "inline": False},
+                    {"name": "User Message", "value": user_msg[:1000], "inline": False}
+                ],
+                "footer": {"text": "Long Trader - ProcessPoolExecutor Early Exit"}
+            }
+            
+            if suggestions:
+                embed["fields"].append({
+                    "name": "💡 Suggestions",
+                    "value": "\n".join([f"• {s}" for s in suggestions[:5]])[:1000],
+                    "inline": False
+                })
+            
+            payload = {
+                "embeds": [embed],
+                "username": "Long Trader Bot"
+            }
+            
+            # 送信実行
+            response = requests.post(webhook_url, json=payload, timeout=10)
+            
+            if response.status_code in [200, 204]:
+                logger.info(f"✅ Discord通知送信成功: {symbol} Early Exit")
+                return True
+            else:
+                logger.warning(f"Discord通知失敗: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Discord通知送信エラー: {e}")
+            return False
+    
+    async def send_discord_early_exit_notification(self, symbol: str, timeframe: str, strategy: str, execution_id: str, exit_stage: str, exit_reason: str, detailed_msg: str, user_msg: str, suggestions: List[str]):
+        """Discord webhook通知: 子プロセスのEarly Exit詳細送信"""
+        try:
+            # Discord webhook URL (環境変数から取得)
+            webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
+            if not webhook_url:
+                self.logger.warning("DISCORD_WEBHOOK_URL not set, skipping notification")
+                return
+            
+            # embed作成
+            embed = {
+                "title": f"🚨 Early Exit Analysis: {symbol}",
+                "color": 0xFF4444,  # 赤色
+                "timestamp": datetime.now().isoformat(),
+                "fields": [
+                    {"name": "Symbol", "value": symbol, "inline": True},
+                    {"name": "Timeframe", "value": timeframe, "inline": True},
+                    {"name": "Strategy", "value": strategy, "inline": True},
+                    {"name": "Exit Stage", "value": exit_stage, "inline": True},
+                    {"name": "Exit Reason", "value": exit_reason, "inline": True},
+                    {"name": "Execution ID", "value": f"`{execution_id}`", "inline": False},
+                    {"name": "Detailed Message", "value": detailed_msg[:1000], "inline": False},
+                    {"name": "User Message", "value": user_msg[:1000], "inline": False}
+                ],
+                "footer": {"text": "Long Trader - Early Exit Analysis"}
+            }
+            
+            # 改善提案を追加
+            if suggestions:
+                embed["fields"].append({
+                    "name": "💡 Suggestions",
+                    "value": "\n".join([f"• {s}" for s in suggestions[:5]])[:1000],
+                    "inline": False
+                })
+            
+            # Discord APIに送信
+            payload = {
+                "embeds": [embed],
+                "username": "Long Trader Bot"
+            }
+            
+            # 最大8回のリトライ（指数バックオフ）
+            for attempt in range(8):
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(webhook_url, json=payload) as response:
+                            if response.status == 200:
+                                self.logger.info(f"✅ Discord通知送信成功: {symbol} Early Exit")
+                                return
+                            elif response.status == 429:  # Rate limit
+                                retry_after = int(response.headers.get('Retry-After', 1))
+                                self.logger.warning(f"Discord rate limit, retrying after {retry_after}s")
+                                await asyncio.sleep(retry_after)
+                            else:
+                                self.logger.warning(f"Discord API error: {response.status}")
+                                break
+                                
+                except Exception as e:
+                    if attempt == 7:  # 最後の試行
+                        raise e
+                    
+                    # 指数バックオフ (1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s)
+                    wait_time = 2 ** attempt
+                    self.logger.warning(f"Discord送信失敗 (attempt {attempt + 1}/8): {e}, retrying in {wait_time}s")
+                    await asyncio.sleep(wait_time)
+                    
+        except Exception as e:
+            self.logger.error(f"Discord通知送信エラー: {e}")
     
     def cleanup_low_performers(self, min_sharpe=0.5):
         """低パフォーマンス分析のクリーンアップ"""

@@ -583,24 +583,8 @@ class ScalableAnalysisSystem:
         except Exception as e:
             logger.warning(f"Discord開始通知エラー: {e}")
         
-        # 既存チェック（execution_id別に管理）
-        if self._analysis_exists(analysis_id, execution_id):
-            # 既存分析でもスキップ通知を送信
-            try:
-                logger.info(f"🔔 Discord既存スキップ通知呼び出し: {symbol} {config} - {timeframe}")
-                skip_result = discord_notifier.child_process_completed(
-                    symbol=symbol,
-                    strategy_name=config,
-                    timeframe=timeframe,
-                    execution_id=execution_id or "unknown",
-                    success=True,
-                    execution_time=0.0,
-                    error_msg="既存分析のためスキップ"
-                )
-                logger.info(f"🔔 Discord既存スキップ通知結果: {skip_result}")
-            except Exception as e:
-                logger.warning(f"Discord既存スキップ通知エラー: {e}")
-            return False, None
+        # 既存チェック削除: execution_id別の独立実行を許可
+        # 各execution_idは独立した分析実行として扱う
         
         # task_statusを'running'に更新
         try:
@@ -1697,53 +1681,9 @@ class ScalableAnalysisSystem:
     
     # Stage 9フィルタリング用モック戦略作成メソッド削除済み (2025年6月29日)
     
-    def _analysis_exists(self, analysis_id, execution_id=None, force_refresh=False):
-        """分析が既に存在するかチェック（改良版）
-        
-        Args:
-            analysis_id: 分析ID
-            execution_id: 実行ID（指定時は同一execution_id内でのみチェック）
-            force_refresh: 強制再実行フラグ（Trueの場合は常にFalseを返す）
-        """
-        # 強制再実行の場合は既存チェックをスキップ
-        if force_refresh:
-            return False
-            
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # ハッシュIDの場合はDBから直接検索
-            if len(analysis_id) == 32:  # MD5ハッシュの場合
-                if execution_id:
-                    # 同一execution_id内でのみチェック
-                    cursor.execute(
-                        'SELECT COUNT(*) FROM analyses WHERE symbol || "_" || timeframe || "_" || config = ? AND execution_id = ?',
-                        (analysis_id, execution_id)
-                    )
-                else:
-                    cursor.execute(
-                        'SELECT COUNT(*) FROM analyses WHERE symbol || "_" || timeframe || "_" || config = ?',
-                        (analysis_id,)
-                    )
-            else:
-                # 従来の形式の場合
-                try:
-                    symbol, timeframe, config = analysis_id.split('_', 2)
-                    if execution_id:
-                        # 同一execution_id内でのみチェック
-                        cursor.execute(
-                            'SELECT COUNT(*) FROM analyses WHERE symbol=? AND timeframe=? AND config=? AND execution_id=?',
-                            (symbol, timeframe, config, execution_id)
-                        )
-                    else:
-                        # 全体での既存チェック（従来通り）
-                        cursor.execute(
-                            'SELECT COUNT(*) FROM analyses WHERE symbol=? AND timeframe=? AND config=?',
-                            (symbol, timeframe, config)
-                        )
-                except ValueError:
-                    return False
-            return cursor.fetchone()[0] > 0
+    # _analysis_exists メソッド削除済み (2025-07-01)
+    # 理由: execution_id別の独立実行を阻害し、ユーザビリティを損なうため
+    # 各execution_idは独立した分析実行として扱い、既存分析チェックは不要
     
     # TODO: ランダムトレード生成は品質問題のためコメントアウト (2024-06-18)
     # 現在は使用されていないが、将来的に実データベースの方法に置き換える必要あり

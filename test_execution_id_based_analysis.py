@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
 execution_id別の分析実行テスト
+
+⚠️ 注意: _analysis_existsメソッドは2025-07-01に削除されました
+このテストは無効化されています
+理由: execution_id別の独立実行を阻害するため
 """
 
 import sys

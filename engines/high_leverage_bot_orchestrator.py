@@ -7,6 +7,7 @@ memo記載の核心目的「今このタイミングで対象のトークンに�
 
 import sys
 import os
+import time
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional
@@ -27,6 +28,7 @@ from adapters import (
 )
 
 from .leverage_decision_engine import CoreLeverageDecisionEngine, SimpleMarketContextAnalyzer
+from .analysis_result import AnalysisResult, AnalysisStage, ExitReason, StageResult
 
 warnings.filterwarnings('ignore')
 
@@ -100,14 +102,7 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             print(f"❌ プラグイン初期化エラー: {e}")
             print("🔄 基本的なフォールバックシステムを使用します")
     
-    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None, execution_id: str = None) -> LeverageRecommendation:
-        # execution_idが渡されていない場合は環境変数から取得
-        if not execution_id:
-            import os
-            env_execution_id = os.environ.get('CURRENT_EXECUTION_ID')
-            if env_execution_id:
-                execution_id = env_execution_id
-                print(f"📝 環境変数からexecution_id取得: {execution_id}")
+    def analyze_leverage_opportunity(self, symbol: str, timeframe: str = "1h", is_backtest: bool = False, target_timestamp: datetime = None, custom_period_settings: dict = None, execution_id: str = None):
         """
         ハイレバレッジ機会を総合分析
         
@@ -124,8 +119,26 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             timeframe: 時間足 (例: '1h', '15m', '5m')
             
         Returns:
-            LeverageRecommendation: レバレッジ推奨結果
+            AnalysisResult: 分析結果の詳細情報（成功時はrecommendationを含む）
         """
+        # 分析結果オブジェクトを初期化
+        from .analysis_result import AnalysisResult, AnalysisStage, ExitReason, StageResult
+        import time
+        
+        # execution_idが渡されていない場合は環境変数から取得
+        if not execution_id:
+            import os
+            env_execution_id = os.environ.get('CURRENT_EXECUTION_ID')
+            if env_execution_id:
+                execution_id = env_execution_id
+                print(f"📝 環境変数からexecution_id取得: {execution_id}")
+        
+        analysis_result = AnalysisResult(
+            symbol=symbol,
+            timeframe=timeframe,
+            strategy="momentum",  # TODO: 戦略を引数から取得
+            execution_id=execution_id
+        )
         
         try:
             print(f"\n🎯 ハイレバレッジ機会分析開始: {symbol} ({timeframe})")
@@ -153,55 +166,141 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                 print(f"⚡ 短期取引モード: {timeframe}足の最適化を適用")
             
             # === STEP 1: データ取得 ===
+            step1_start = time.time()
             market_data = self._fetch_market_data(symbol, timeframe, custom_period_settings)
+            step1_time = (time.time() - step1_start) * 1000
             
             if market_data.empty:
-                raise Exception(f"{symbol}の市場データ取得に失敗 - 実データが必要です")
+                analysis_result.mark_early_exit(
+                    AnalysisStage.DATA_FETCH,
+                    ExitReason.INSUFFICIENT_DATA,
+                    f"{symbol}の市場データ取得に失敗 - 実データが必要です"
+                )
+                print(analysis_result.get_detailed_log_message())
+                return analysis_result
+            
+            analysis_result.total_data_points = len(market_data)
+            analysis_result.add_stage_result(StageResult(
+                stage=AnalysisStage.DATA_FETCH,
+                success=True,
+                execution_time_ms=step1_time,
+                data_processed=len(market_data)
+            ))
             
             print(f"📊 データ取得完了: {len(market_data)}件")
             
             # === STEP 2: サポート・レジスタンス分析 ===
             print("\n🔍 サポート・レジスタンス分析中...")
+            step2_start = time.time()
             support_levels, resistance_levels = self._analyze_support_resistance(
                 market_data, 
                 is_short_timeframe=is_short_timeframe,
                 execution_id=execution_id
             )
+            step2_time = (time.time() - step2_start) * 1000
             
+            total_levels = len(support_levels) + len(resistance_levels)
             print(f"📍 検出レベル: サポート{len(support_levels)}件, レジスタンス{len(resistance_levels)}件")
             
             # Early Exit: サポレジが検出されない場合は即座にスキップ
             if not support_levels and not resistance_levels:
-                print("⏭️ Early Exit: 有効なサポレジレベル0個 → この評価時点をスキップ")
-                return None  # Noneを返してスキップを示す
+                analysis_result.mark_early_exit(
+                    AnalysisStage.SUPPORT_RESISTANCE,
+                    ExitReason.NO_SUPPORT_RESISTANCE,
+                    f"サポート・レジスタンスレベルが検出されませんでした (データ{len(market_data)}件処理済み)"
+                )
+                analysis_result.add_stage_result(StageResult(
+                    stage=AnalysisStage.SUPPORT_RESISTANCE,
+                    success=False,
+                    execution_time_ms=step2_time,
+                    data_processed=len(market_data),
+                    items_found=0,
+                    error_message="No support/resistance levels detected"
+                ))
+                print(analysis_result.get_detailed_log_message())
+                return analysis_result
+            
+            analysis_result.add_stage_result(StageResult(
+                stage=AnalysisStage.SUPPORT_RESISTANCE,
+                success=True,
+                execution_time_ms=step2_time,
+                data_processed=len(market_data),
+                items_found=total_levels
+            ))
             
             # === STEP 3: ML予測 ===
             print("\n🤖 ML予測分析中...")
+            step3_start = time.time()
             try:
                 breakout_predictions = self._predict_breakouts(market_data, support_levels + resistance_levels)
+                step3_time = (time.time() - step3_start) * 1000
                 print(f"🎯 予測完了: {len(breakout_predictions)}件")
+                
+                analysis_result.add_stage_result(StageResult(
+                    stage=AnalysisStage.ML_PREDICTION,
+                    success=True,
+                    execution_time_ms=step3_time,
+                    data_processed=len(market_data),
+                    items_found=len(breakout_predictions)
+                ))
             except Exception as e:
+                step3_time = (time.time() - step3_start) * 1000
                 if "ML予測でエラーが発生" in str(e) or "MLモデル訓練に失敗" in str(e):
-                    print(f"⏭️ Early Exit: ML予測システム失敗 → この評価時点をスキップ ({str(e)[:100]})")
-                    return None
+                    analysis_result.mark_early_exit(
+                        AnalysisStage.ML_PREDICTION,
+                        ExitReason.ML_PREDICTION_FAILED,
+                        f"ML予測システムでエラーが発生しました: {str(e)[:100]}"
+                    )
+                    analysis_result.add_stage_result(StageResult(
+                        stage=AnalysisStage.ML_PREDICTION,
+                        success=False,
+                        execution_time_ms=step3_time,
+                        data_processed=len(market_data),
+                        error_message=str(e)[:200]
+                    ))
+                    print(analysis_result.get_detailed_log_message())
+                    return analysis_result
                 else:
                     raise  # 予期しないエラーは再発生
             
             # === STEP 4: BTC相関分析 ===
             print("\n₿ BTC相関リスク分析中...")
+            step4_start = time.time()
             try:
                 btc_correlation_risk = self._analyze_btc_correlation(symbol)
+                step4_time = (time.time() - step4_start) * 1000
                 if btc_correlation_risk:
                     print(f"⚠️ BTC相関リスク: {btc_correlation_risk.risk_level}")
+                    
+                analysis_result.add_stage_result(StageResult(
+                    stage=AnalysisStage.BTC_CORRELATION,
+                    success=True,
+                    execution_time_ms=step4_time,
+                    data_processed=len(market_data)
+                ))
             except Exception as e:
+                step4_time = (time.time() - step4_start) * 1000
                 if "データ不足エラー" in str(e):
-                    print(f"⏭️ Early Exit: BTC相関データ不足 → この評価時点をスキップ ({str(e)[:100]})")
-                    return None
+                    analysis_result.mark_early_exit(
+                        AnalysisStage.BTC_CORRELATION,
+                        ExitReason.BTC_DATA_INSUFFICIENT,
+                        f"BTC相関分析用のデータが不足しています: {str(e)[:100]}"
+                    )
+                    analysis_result.add_stage_result(StageResult(
+                        stage=AnalysisStage.BTC_CORRELATION,
+                        success=False,
+                        execution_time_ms=step4_time,
+                        data_processed=len(market_data),
+                        error_message=str(e)[:200]
+                    ))
+                    print(analysis_result.get_detailed_log_message())
+                    return analysis_result
                 else:
                     raise  # 予期しないエラーは再発生
             
             # === STEP 5: 市場コンテキスト分析 ===
             print("\n📈 市場コンテキスト分析中...")
+            step5_start = time.time()
             try:
                 # バックテスト時は各時点の価格、リアルタイム時は現在価格を使用
                 market_context = self._analyze_market_context(
@@ -209,13 +308,35 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                     is_realtime=not is_backtest,
                     target_timestamp=target_timestamp
                 )
+                step5_time = (time.time() - step5_start) * 1000
                 print(f"🎪 市場状況: {market_context.trend_direction} / {market_context.market_phase}")
+                
+                analysis_result.add_stage_result(StageResult(
+                    stage=AnalysisStage.MARKET_CONTEXT,
+                    success=True,
+                    execution_time_ms=step5_time,
+                    data_processed=len(market_data)
+                ))
             except Exception as e:
-                print(f"⏭️ Early Exit: 市場コンテキスト分析失敗 → この評価時点をスキップ ({str(e)[:100]})")
-                return None
+                step5_time = (time.time() - step5_start) * 1000
+                analysis_result.mark_early_exit(
+                    AnalysisStage.MARKET_CONTEXT,
+                    ExitReason.MARKET_CONTEXT_FAILED,
+                    f"市場コンテキスト分析でエラーが発生しました: {str(e)[:100]}"
+                )
+                analysis_result.add_stage_result(StageResult(
+                    stage=AnalysisStage.MARKET_CONTEXT,
+                    success=False,
+                    execution_time_ms=step5_time,
+                    data_processed=len(market_data),
+                    error_message=str(e)[:200]
+                ))
+                print(analysis_result.get_detailed_log_message())
+                return analysis_result
             
             # === STEP 6: 統合レバレッジ判定 ===
             print("\n⚖️ レバレッジ判定実行中...")
+            step6_start = time.time()
             
             if not self.leverage_decision_engine:
                 raise Exception("レバレッジ判定エンジンが初期化されていません - 銘柄追加を中止")
@@ -229,27 +350,91 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
                     btc_correlation_risk=btc_correlation_risk,
                     market_context=market_context
                 )
+                step6_time = (time.time() - step6_start) * 1000
                 
                 # Early Exit: レバレッジが閾値未満の場合スキップ
                 min_leverage_threshold = 2.0  # 最小レバレッジ閾値
                 if leverage_recommendation.recommended_leverage < min_leverage_threshold:
-                    print(f"⏭️ Early Exit: レバレッジ閾値未満 ({leverage_recommendation.recommended_leverage:.1f}x < {min_leverage_threshold}x) → この評価時点をスキップ")
-                    return None
+                    analysis_result.mark_early_exit(
+                        AnalysisStage.LEVERAGE_DECISION,
+                        ExitReason.LEVERAGE_CONDITIONS_NOT_MET,
+                        f"レバレッジ閾値未満 ({leverage_recommendation.recommended_leverage:.1f}x < {min_leverage_threshold}x)"
+                    )
+                    analysis_result.add_stage_result(StageResult(
+                        stage=AnalysisStage.LEVERAGE_DECISION,
+                        success=False,
+                        execution_time_ms=step6_time,
+                        data_processed=len(market_data),
+                        error_message=f"Leverage below threshold: {leverage_recommendation.recommended_leverage:.1f}x"
+                    ))
+                    print(analysis_result.get_detailed_log_message())
+                    return analysis_result
                 
                 # Early Exit: 信頼度が低い場合スキップ
                 min_confidence_threshold = 0.3  # 最小信頼度閾値（30%）
                 if leverage_recommendation.confidence_score < min_confidence_threshold:
-                    print(f"⏭️ Early Exit: 信頼度閾値未満 ({leverage_recommendation.confidence_score:.1%} < {min_confidence_threshold:.1%}) → この評価時点をスキップ")
-                    return None
+                    analysis_result.mark_early_exit(
+                        AnalysisStage.LEVERAGE_DECISION,
+                        ExitReason.LEVERAGE_CONDITIONS_NOT_MET,
+                        f"信頼度閾値未満 ({leverage_recommendation.confidence_score:.1%} < {min_confidence_threshold:.1%})"
+                    )
+                    analysis_result.add_stage_result(StageResult(
+                        stage=AnalysisStage.LEVERAGE_DECISION,
+                        success=False,
+                        execution_time_ms=step6_time,
+                        data_processed=len(market_data),
+                        error_message=f"Confidence below threshold: {leverage_recommendation.confidence_score:.1%}"
+                    ))
+                    print(analysis_result.get_detailed_log_message())
+                    return analysis_result
+                
+                analysis_result.add_stage_result(StageResult(
+                    stage=AnalysisStage.LEVERAGE_DECISION,
+                    success=True,
+                    execution_time_ms=step6_time,
+                    data_processed=len(market_data)
+                ))
                     
             except Exception as e:
-                print(f"⏭️ Early Exit: レバレッジ判定エラー → この評価時点をスキップ ({str(e)[:100]})")
-                return None
+                step6_time = (time.time() - step6_start) * 1000
+                analysis_result.mark_early_exit(
+                    AnalysisStage.LEVERAGE_DECISION,
+                    ExitReason.EXECUTION_ERROR,
+                    f"レバレッジ判定エラー: {str(e)[:100]}"
+                )
+                analysis_result.add_stage_result(StageResult(
+                    stage=AnalysisStage.LEVERAGE_DECISION,
+                    success=False,
+                    execution_time_ms=step6_time,
+                    data_processed=len(market_data),
+                    error_message=str(e)[:200]
+                ))
+                print(analysis_result.get_detailed_log_message())
+                return analysis_result
+            
+            # === 分析成功 ===
+            recommendation_dict = {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'leverage': leverage_recommendation.recommended_leverage,
+                'confidence': leverage_recommendation.confidence_score,
+                'current_price': leverage_recommendation.market_conditions.current_price if leverage_recommendation.market_conditions else None,
+                'entry_price': leverage_recommendation.market_conditions.current_price if leverage_recommendation.market_conditions else None,
+                'target_price': leverage_recommendation.take_profit_price,
+                'stop_loss': leverage_recommendation.stop_loss_price,
+                'risk_reward_ratio': leverage_recommendation.risk_reward_ratio,
+                'timestamp': datetime.now(timezone.utc),
+                'position_size': 100.0,
+                'risk_level': max(0, 100 - leverage_recommendation.confidence_score * 100)
+            }
+            
+            analysis_result.mark_completed(recommendation_dict)
             
             # === 結果サマリー表示 ===
             self._display_analysis_summary(leverage_recommendation)
+            print(analysis_result.get_user_friendly_message())
             
-            return leverage_recommendation
+            return analysis_result
             
         except Exception as e:
             print(f"❌ 分析エラー: {e}")
@@ -832,58 +1017,64 @@ class HighLeverageBotOrchestrator(IHighLeverageBotOrchestrator):
             Dict: 分析結果辞書
         """
         
-        recommendation = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp, custom_period_settings, execution_id)
+        analysis_result = self.analyze_leverage_opportunity(symbol, timeframe, is_backtest, target_timestamp, custom_period_settings, execution_id)
         
-        # 🔍 recommendationの詳細検証
-        if recommendation is None:
-            error_msg = f"analyze_leverage_opportunity returned None for {symbol} {timeframe}"
+        # Early Exitまたはエラーの場合
+        if analysis_result.early_exit or not analysis_result.completed:
+            # 詳細な理由をログ出力
+            print(f"🚨 {analysis_result.get_detailed_log_message()}")
+            print(f"💡 改善提案: {'; '.join(analysis_result.get_suggestions())}")
+            
+            # analysis_resultを返すように変更 (詳細情報を保持)
+            return analysis_result
+        
+        # 成功時のrecommendationを取得
+        recommendation = analysis_result.recommendation
+        if not recommendation:
+            error_msg = f"analyze_leverage_opportunity completed but no recommendation found for {symbol} {timeframe}"
             print(f"🚨 {error_msg}")
-            raise ValueError(error_msg)
+            analysis_result.error_details = error_msg
+            return analysis_result
         
         # 各値のNone検証と詳細ログ
         validation_errors = []
         
-        if recommendation.recommended_leverage is None:
-            validation_errors.append("recommended_leverage is None")
-        if recommendation.confidence_level is None:
-            validation_errors.append("confidence_level is None")
-        if recommendation.risk_reward_ratio is None:
+        if recommendation.get('leverage') is None:
+            validation_errors.append("leverage is None")
+        if recommendation.get('confidence') is None:
+            validation_errors.append("confidence is None")
+        if recommendation.get('risk_reward_ratio') is None:
             validation_errors.append("risk_reward_ratio is None")
-        if recommendation.market_conditions is None:
-            validation_errors.append("market_conditions is None")
+        if recommendation.get('current_price') is None:
+            validation_errors.append("current_price is None")
         elif recommendation.market_conditions.current_price is None:
             validation_errors.append("market_conditions.current_price is None")
         
         if validation_errors:
-            error_details = f"LeverageRecommendationにNone値が含まれています: {', '.join(validation_errors)}"
+            error_details = f"RecommendationにNone値が含まれています: {', '.join(validation_errors)}"
             print(f"🚨 {error_details}")
             print(f"📊 recommendation詳細:")
-            print(f"   recommended_leverage: {recommendation.recommended_leverage}")
-            print(f"   confidence_level: {recommendation.confidence_level}")
-            print(f"   risk_reward_ratio: {recommendation.risk_reward_ratio}")
-            print(f"   take_profit_price: {recommendation.take_profit_price}")
-            print(f"   stop_loss_price: {recommendation.stop_loss_price}")
-            if recommendation.market_conditions:
-                print(f"   market_conditions.current_price: {recommendation.market_conditions.current_price}")
-            else:
-                print(f"   market_conditions: None")
+            for key, value in recommendation.items():
+                print(f"   {key}: {value}")
             
-            raise ValueError(error_details)
+            analysis_result.error_details = error_details
+            return analysis_result
         
+        # 成功ケース: 従来の辞書形式を返す
         return {
             'symbol': symbol,
             'timeframe': timeframe,
             'strategy': strategy,
-            'leverage': recommendation.recommended_leverage,
-            'confidence': recommendation.confidence_level * 100,  # パーセント変換
-            'current_price': recommendation.market_conditions.current_price,
-            'entry_price': recommendation.market_conditions.current_price,
-            'target_price': recommendation.take_profit_price,
-            'stop_loss': recommendation.stop_loss_price,
-            'risk_reward_ratio': recommendation.risk_reward_ratio,
-            'timestamp': datetime.now(timezone.utc),
-            'position_size': 100.0,  # デフォルト
-            'risk_level': max(0, 100 - recommendation.confidence_level * 100)  # リスクレベル
+            'leverage': recommendation['leverage'],
+            'confidence': recommendation['confidence'],
+            'current_price': recommendation['current_price'],
+            'entry_price': recommendation['entry_price'],
+            'target_price': recommendation['target_price'],
+            'stop_loss': recommendation['stop_loss'],
+            'risk_reward_ratio': recommendation['risk_reward_ratio'],
+            'timestamp': recommendation['timestamp'],
+            'position_size': recommendation['position_size'],
+            'risk_level': recommendation['risk_level']
         }
     
     # === RealPreparedData活用メソッド ===

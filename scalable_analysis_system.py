@@ -237,9 +237,11 @@ class ScalableAnalysisSystem:
             
             # ファイルベースprogress_trackerの初期化
             try:
-                self._init_file_based_progress_tracker(execution_id, symbol)
+                from file_based_progress_tracker import file_progress_tracker
+                file_progress_tracker.start_analysis(symbol, execution_id)
+                logger.info(f"📝 FileBasedProgressTracker初期化完了: {execution_id}")
             except Exception as e:
-                logger.warning(f"⚠️ ファイルベースprogress_tracker初期化エラー: {e}")
+                logger.warning(f"⚠️ FileBasedProgressTracker初期化エラー: {e}")
         
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = []
@@ -275,10 +277,12 @@ class ScalableAnalysisSystem:
             # 成功判定: 分析が実行された場合（シグナルなしでも成功）
             analysis_attempted = len(batch_configs) > 0
             
-            # ファイルベースprogress_tracker更新
+            # ファイルベースprogress_tracker更新 - 新しいFileBasedProgressTrackerを使用
             if execution_id:
                 try:
-                    self._update_file_based_progress_tracker(execution_id, "backtest_completed", "support_resistance")
+                    from file_based_progress_tracker import file_progress_tracker
+                    file_progress_tracker.update_stage(execution_id, "support_resistance")
+                    logger.info(f"📝 新progress_tracker段階更新: backtest_completed → support_resistance")
                 except Exception as e:
                     logger.warning(f"⚠️ ファイルベースprogress_tracker更新エラー: {e}")
             progress_logger.log_final_summary(analysis_attempted)
@@ -366,11 +370,20 @@ class ScalableAnalysisSystem:
                 # ファイルハンドラーの追加に失敗した場合は無視
                 pass
         
-        # 各モジュールのロガーも再設定
+        # 各モジュールのロガーも再設定（ProcessPoolExecutor環境強化）
         for module_name in ['__main__', 'scalable_analysis_system', 'engines.support_resistance_detector', 
-                           'engines.support_resistance_adapter', 'engines.high_leverage_bot_orchestrator']:
+                           'engines.support_resistance_adapter', 'engines.high_leverage_bot_orchestrator',
+                           'engines.analysis_result']:
             module_logger = logging.getLogger(module_name)
             module_logger.setLevel(logging.INFO)
+            
+            # 子プロセス用のコンソールハンドラー追加（重複チェック付き）
+            has_console_handler = any(isinstance(h, logging.StreamHandler) for h in module_logger.handlers)
+            if not has_console_handler:
+                console_handler_child = logging.StreamHandler()
+                console_handler_child.setLevel(logging.INFO)
+                console_handler_child.setFormatter(formatter)
+                module_logger.addHandler(console_handler_child)
     
     def _process_chunk(self, configs_chunk, chunk_id, execution_id=None):
         """チャンクを処理（プロセス内で実行）"""
@@ -467,6 +480,31 @@ class ScalableAnalysisSystem:
                 logger.error(f"分析エラー {config}: {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # 🔧 子プロセス完了後: 一時ファイルから詳細ログを読み取り
+        try:
+            import glob
+            import json
+            if execution_id:
+                log_pattern = f"/tmp/analysis_log_{execution_id}_*.json"
+                log_files = glob.glob(log_pattern)
+                for log_file in log_files:
+                    try:
+                        with open(log_file, 'r', encoding='utf-8') as f:
+                            analysis_log = json.load(f)
+                        
+                        # 詳細ログを親プロセスで表示
+                        logger.info(f"📋 子プロセス詳細ログ: {analysis_log['detailed_msg']}")
+                        logger.info(f"💡 子プロセス詳細ログ: {analysis_log['user_msg']}")
+                        if analysis_log.get('suggestions'):
+                            logger.info(f"🎯 子プロセス詳細ログ: 改善提案: {'; '.join(analysis_log['suggestions'])}")
+                        
+                        # 一時ファイル削除
+                        os.remove(log_file)
+                    except Exception as read_error:
+                        logger.warning(f"一時ファイル読み取りエラー: {read_error}")
+        except Exception as cleanup_error:
+            logger.warning(f"一時ファイル処理エラー: {cleanup_error}")
         
         return processed
     
@@ -830,12 +868,102 @@ class ScalableAnalysisSystem:
                         
                         result = bot.analyze_symbol(symbol, timeframe, config, is_backtest=True, target_timestamp=current_time, custom_period_settings=custom_period_settings, execution_id=execution_id)
                     
+                    # 🔍 ProcessPoolExecutor環境診断: 結果の型・内容詳細調査
+                    logger.info(f"🔍 子プロセス結果診断: {symbol} {timeframe} {config}")
+                    logger.info(f"   結果の型: {type(result)}")
+                    if hasattr(result, 'early_exit'):
+                        logger.info(f"   AnalysisResult detected - early_exit: {result.early_exit}")
+                        if result.early_exit:
+                            logger.info(f"   exit_stage: {result.exit_stage}")
+                            logger.info(f"   exit_reason: {result.exit_reason}")
+                    else:
+                        logger.info(f"   結果内容: {result}")
+                        if isinstance(result, dict):
+                            logger.info(f"   辞書キー: {list(result.keys()) if result else 'None/Empty'}")
+                    
+                    # 🔍 AnalysisResult対応: Early Exitの詳細ログ出力（ProcessPoolExecutor対応強化版）
+                    from engines.analysis_result import AnalysisResult
+                    import sys
+                    if isinstance(result, AnalysisResult):
+                        if result.early_exit:
+                            # ProcessPoolExecutor環境での確実なログ出力
+                            detailed_msg = result.get_detailed_log_message()
+                            user_msg = result.get_user_friendly_message()
+                            
+                            # 強制的なログ出力とフラッシュ（ProcessPoolExecutor対応）
+                            logger.info(f"📋 {detailed_msg}")
+                            logger.info(f"💡 {user_msg}")
+                            
+                            # 改善提案も出力
+                            suggestions = result.get_suggestions()
+                            if suggestions:
+                                logger.info(f"🎯 改善提案: {'; '.join(suggestions)}")
+                            
+                            # ProcessPoolExecutor環境での確実な出力確保
+                            sys.stdout.flush()
+                            sys.stderr.flush()
+                            
+                            # ログハンドラーの強制フラッシュ
+                            for handler in logger.handlers:
+                                if hasattr(handler, 'flush'):
+                                    handler.flush()
+                            
+                            # 🔧 ProcessPoolExecutor環境用: AnalysisResult詳細を一時ファイルに出力
+                            try:
+                                import tempfile
+                                import json
+                                analysis_log = {
+                                    'timestamp': datetime.now().isoformat(),
+                                    'execution_id': execution_id,
+                                    'symbol': symbol,
+                                    'timeframe': timeframe,
+                                    'strategy': config,
+                                    'detailed_msg': detailed_msg,
+                                    'user_msg': user_msg,
+                                    'suggestions': suggestions,
+                                    'early_exit': True,
+                                    'stage': result.exit_stage.value if result.exit_stage else 'unknown',
+                                    'reason': result.exit_reason.value if result.exit_reason else 'unknown'
+                                }
+                                
+                                log_file = f"/tmp/analysis_log_{execution_id}_{symbol}_{timeframe}_{config}.json"
+                                with open(log_file, 'w', encoding='utf-8') as f:
+                                    json.dump(analysis_log, f, ensure_ascii=False, indent=2)
+                                
+                                # 親プロセス確認用
+                                print(f"📝 子プロセス詳細ログ出力: {log_file}", flush=True)
+                            except Exception as log_error:
+                                logger.warning(f"一時ファイルログ出力エラー: {log_error}")
+                            
+                            continue
+                        elif result.completed and result.recommendation:
+                            # 成功時のログも出力
+                            success_msg = result.get_detailed_log_message()
+                            logger.info(f"✅ {success_msg}")
+                            
+                            # ProcessPoolExecutor環境での確実な出力確保
+                            sys.stdout.flush()
+                            sys.stderr.flush()
+                            for handler in logger.handlers:
+                                if hasattr(handler, 'flush'):
+                                    handler.flush()
+                            
+                            # AnalysisResultから辞書形式に変換してそのまま使用
+                            result = result.recommendation
+                        else:
+                            # 不完全な結果はスキップ
+                            logger.warning(f"⚠️ 不完全なAnalysisResult: {symbol} {timeframe}")
+                            continue
+                    
                     # 🔍 analyze_symbolの結果を詳細ログ出力（デバッグ用）
                     if total_evaluations <= 3:  # 最初の3回のみ詳細ログ
                         logger.error(f"🔍 analyze_symbol結果詳細 #{total_evaluations} ({symbol} {timeframe}):")
                         if result:
-                            for key, value in result.items():
-                                logger.error(f"   {key}: {value} (型: {type(value)})")
+                            if isinstance(result, dict):
+                                for key, value in result.items():
+                                    logger.error(f"   {key}: {value} (型: {type(value)})")
+                            else:
+                                logger.error(f"   結果: {result} (型: {type(result)})")
                         else:
                             logger.error(f"   結果: None または空")
                     
@@ -2290,80 +2418,14 @@ def add_get_timeframe_config_method():
     # クラスにメソッドを動的に追加
     ScalableAnalysisSystem.get_timeframe_config = get_timeframe_config
     
-    def _init_file_based_progress_tracker(self, execution_id: str, symbol: str):
-        """ファイルベースprogress_tracker初期化（プロセス間共有対応）"""
-        import json
-        import os
-        from datetime import datetime
-        
-        progress_file = f"/tmp/progress_{execution_id}.json"
-        
-        # 初期データ作成
-        initial_data = {
-            "symbol": symbol,
-            "execution_id": execution_id,
-            "start_time": datetime.now().isoformat(),
-            "current_stage": "backtest_starting",
-            "overall_status": "running",
-            "phases": {
-                "data_validation": {"status": "completed"},
-                "backtest": {"status": "running", "start_time": datetime.now().isoformat()},
-                "support_resistance": {"status": "pending"},
-                "ml_prediction": {"status": "pending"},
-                "market_context": {"status": "pending"},
-                "leverage_decision": {"status": "pending"}
-            }
-        }
-        
-        # ファイルに保存
-        with open(progress_file, 'w') as f:
-            json.dump(initial_data, f, indent=2)
-        
-        logger.info(f"📝 ファイルベースprogress_tracker初期化完了: {progress_file}")
+    # 🔧 古い進捗トラッキングシステムは新しいFileBasedProgressTrackerに統一済み
+    # def _init_file_based_progress_tracker(self, execution_id: str, symbol: str):
+    #     """旧: ファイルベースprogress_tracker初期化（FileBasedProgressTrackerに統合済み）"""
+    #     pass
     
-    ScalableAnalysisSystem._init_file_based_progress_tracker = _init_file_based_progress_tracker
-    
-    def _update_file_based_progress_tracker(self, execution_id: str, completed_phase: str, next_phase: str):
-        """ファイルベースprogress_tracker更新"""
-        import json
-        import os
-        from datetime import datetime
-        
-        progress_file = f"/tmp/progress_{execution_id}.json"
-        
-        try:
-            # 既存データ読み込み
-            if os.path.exists(progress_file):
-                with open(progress_file, 'r') as f:
-                    data = json.load(f)
-            else:
-                logger.warning(f"進捗ファイルが見つかりません: {progress_file}")
-                return
-            
-            # フェーズ更新
-            current_time = datetime.now().isoformat()
-            
-            if completed_phase in data["phases"]:
-                data["phases"][completed_phase]["status"] = "completed"
-                data["phases"][completed_phase]["end_time"] = current_time
-                
-            if next_phase in data["phases"]:
-                data["phases"][next_phase]["status"] = "running"
-                data["phases"][next_phase]["start_time"] = current_time
-                
-            data["current_stage"] = next_phase
-            data["last_update"] = current_time
-            
-            # ファイルに保存
-            with open(progress_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            
-            logger.info(f"📝 進捗更新: {completed_phase} → {next_phase}")
-            
-        except Exception as e:
-            logger.error(f"❌ ファイルベース進捗更新エラー: {e}")
-    
-    ScalableAnalysisSystem._update_file_based_progress_tracker = _update_file_based_progress_tracker
+    # def _update_file_based_progress_tracker(self, execution_id: str, completed_phase: str, next_phase: str):
+    #     """旧: ファイルベースprogress_tracker更新（FileBasedProgressTrackerに統合済み）"""
+    #     pass
 
 # メソッド追加を実行
 add_get_timeframe_config_method()

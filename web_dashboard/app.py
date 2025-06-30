@@ -37,7 +37,8 @@ except ImportError:
 from real_time_system.monitor import RealTimeMonitor
 from real_time_system.utils.colored_log import get_colored_logger
 from scalable_analysis_system import ScalableAnalysisSystem
-from analysis_progress import progress_tracker, AnalysisProgress
+from analysis_progress import AnalysisProgress
+from file_based_progress_tracker import file_progress_tracker as progress_tracker
 
 # Force ScalableAnalysisSystem to use root directory database only
 # This prevents creation of duplicate web_dashboard/large_scale_analysis/analysis.db

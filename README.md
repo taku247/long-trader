@@ -43,10 +43,22 @@
 
 ### 📡 **Discord通知システム (ProcessPoolExecutor対応)**
 
-**ProcessPoolExecutor環境でのEarly Exit発生時に、詳細な分析結果をDiscordに自動通知。**
+**ProcessPoolExecutor環境での子プロセス可視化と分析失敗時の詳細通知を実現。**
 
-#### 🚨 **通知機能**
-- **Early Exit専用**: 分析失敗時のみ通知（正常完了時は通知なし）
+#### 🔄 **子プロセス可視化通知（NEW！）**
+- **シンプル1行通知**: 子プロセス開始・完了の可視化
+- **リアルタイム進捗**: ProcessPoolExecutor環境での進捗把握改善
+- **実行時間表示**: 各戦略の処理時間を秒単位で表示
+
+**通知例:**
+```
+🔄 子プロセス開始: SOL Conservative_ML - 1h
+✅ 子プロセス完了: SOL Conservative_ML - 1h (180秒)
+❌ 子プロセス失敗: SOL Conservative_ML - 1h - データ不足エラー
+```
+
+#### 🚨 **Early Exit通知機能**
+- **分析失敗専用**: Early Exit発生時の詳細情報通知
 - **詳細情報**: 銘柄、戦略、実行ID、失敗ステージ、改善提案を含む
 - **ProcessPoolExecutor対応**: 子プロセスからの直接通知送信
 - **同期HTTP通信**: `requests`ライブラリで確実な通知配信
@@ -57,7 +69,13 @@
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
 ```
 
-#### 📋 **通知される内容**
+#### 📋 **通知内容**
+**子プロセス通知:**
+- **🔄 開始**: 戦略開始時の即座通知
+- **✅ 成功**: 完了時間を含む成功通知  
+- **❌ 失敗**: エラー詳細を含む失敗通知
+
+**Early Exit通知:**
 - **🚨 Early Exit Analysis**: 銘柄名とステージ
 - **Exit Stage**: 失敗した分析ステージ（STEP1-6）
 - **Exit Reason**: 具体的な失敗理由

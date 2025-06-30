@@ -37,10 +37,12 @@ from engines.leverage_decision_engine import InsufficientConfigurationError
 # 理由: 性能問題 - "軽量事前チェック"と謳いながら重い計算を実行
 # 詳細: README.md参照
 
-# 環境変数読み込み
+# 環境変数読み込み（.env ファイル対応）
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    env_path = Path(__file__).parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
 except ImportError:
     pass
 
@@ -568,8 +570,36 @@ class ScalableAnalysisSystem:
         analysis_id = f"{symbol}_{timeframe}_{config}"
         start_time = time.time()
         
-        # 既存チェック
-        if self._analysis_exists(analysis_id):
+        # 🆕 Discord通知: 子プロセス開始（既存チェック前に実行）
+        try:
+            logger.info(f"🔔 Discord開始通知呼び出し: {symbol} {config} - {timeframe}")
+            result = discord_notifier.child_process_started(
+                symbol=symbol,
+                strategy_name=config,
+                timeframe=timeframe,
+                execution_id=execution_id or "unknown"
+            )
+            logger.info(f"🔔 Discord開始通知結果: {result}")
+        except Exception as e:
+            logger.warning(f"Discord開始通知エラー: {e}")
+        
+        # 既存チェック（execution_id別に管理）
+        if self._analysis_exists(analysis_id, execution_id):
+            # 既存分析でもスキップ通知を送信
+            try:
+                logger.info(f"🔔 Discord既存スキップ通知呼び出し: {symbol} {config} - {timeframe}")
+                skip_result = discord_notifier.child_process_completed(
+                    symbol=symbol,
+                    strategy_name=config,
+                    timeframe=timeframe,
+                    execution_id=execution_id or "unknown",
+                    success=True,
+                    execution_time=0.0,
+                    error_msg="既存分析のためスキップ"
+                )
+                logger.info(f"🔔 Discord既存スキップ通知結果: {skip_result}")
+            except Exception as e:
+                logger.warning(f"Discord既存スキップ通知エラー: {e}")
             return False, None
         
         # task_statusを'running'に更新
@@ -577,17 +607,6 @@ class ScalableAnalysisSystem:
             self._update_task_status(symbol, timeframe, config, 'running')
         except Exception as e:
             logger.warning(f"Failed to update task_status to running: {e}")
-        
-        # 🆕 Discord通知: 子プロセス開始
-        try:
-            discord_notifier.child_process_started(
-                symbol=symbol,
-                strategy_name=config,
-                timeframe=timeframe,
-                execution_id=execution_id or "unknown"
-            )
-        except Exception as e:
-            logger.warning(f"Discord開始通知エラー: {e}")
         
         # ハイレバレッジボットを使用した分析を試行
         try:
@@ -602,7 +621,8 @@ class ScalableAnalysisSystem:
             
             # 🆕 Discord通知: 子プロセス失敗
             try:
-                discord_notifier.child_process_completed(
+                logger.info(f"🔔 Discord失敗通知呼び出し: {symbol} {config} - {timeframe}")
+                result = discord_notifier.child_process_completed(
                     symbol=symbol,
                     strategy_name=config,
                     timeframe=timeframe,
@@ -611,6 +631,7 @@ class ScalableAnalysisSystem:
                     execution_time=execution_time,
                     error_msg=str(e)[:100]  # エラーメッセージを100文字に制限
                 )
+                logger.info(f"🔔 Discord失敗通知結果: {result}")
             except Exception as discord_error:
                 logger.warning(f"Discord失敗通知エラー: {discord_error}")
             
@@ -642,7 +663,8 @@ class ScalableAnalysisSystem:
         
         # 🆕 Discord通知: 子プロセス成功
         try:
-            discord_notifier.child_process_completed(
+            logger.info(f"🔔 Discord成功通知呼び出し: {symbol} {config} - {timeframe}")
+            result = discord_notifier.child_process_completed(
                 symbol=symbol,
                 strategy_name=config,
                 timeframe=timeframe,
@@ -650,6 +672,7 @@ class ScalableAnalysisSystem:
                 success=True,
                 execution_time=execution_time
             )
+            logger.info(f"🔔 Discord成功通知結果: {result}")
         except Exception as discord_error:
             logger.warning(f"Discord成功通知エラー: {discord_error}")
         
@@ -1674,26 +1697,50 @@ class ScalableAnalysisSystem:
     
     # Stage 9フィルタリング用モック戦略作成メソッド削除済み (2025年6月29日)
     
-    def _analysis_exists(self, analysis_id):
-        """分析が既に存在するかチェック"""
-        # ハッシュIDの場合はDBから直接検索
+    def _analysis_exists(self, analysis_id, execution_id=None, force_refresh=False):
+        """分析が既に存在するかチェック（改良版）
+        
+        Args:
+            analysis_id: 分析ID
+            execution_id: 実行ID（指定時は同一execution_id内でのみチェック）
+            force_refresh: 強制再実行フラグ（Trueの場合は常にFalseを返す）
+        """
+        # 強制再実行の場合は既存チェックをスキップ
+        if force_refresh:
+            return False
+            
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # まずハッシュIDで検索を試行
+            # ハッシュIDの場合はDBから直接検索
             if len(analysis_id) == 32:  # MD5ハッシュの場合
-                cursor.execute(
-                    'SELECT COUNT(*) FROM analyses WHERE symbol || "_" || timeframe || "_" || config = ?',
-                    (analysis_id,)
-                )
+                if execution_id:
+                    # 同一execution_id内でのみチェック
+                    cursor.execute(
+                        'SELECT COUNT(*) FROM analyses WHERE symbol || "_" || timeframe || "_" || config = ? AND execution_id = ?',
+                        (analysis_id, execution_id)
+                    )
+                else:
+                    cursor.execute(
+                        'SELECT COUNT(*) FROM analyses WHERE symbol || "_" || timeframe || "_" || config = ?',
+                        (analysis_id,)
+                    )
             else:
                 # 従来の形式の場合
                 try:
                     symbol, timeframe, config = analysis_id.split('_', 2)
-                    cursor.execute(
-                        'SELECT COUNT(*) FROM analyses WHERE symbol=? AND timeframe=? AND config=?',
-                        (symbol, timeframe, config)
-                    )
+                    if execution_id:
+                        # 同一execution_id内でのみチェック
+                        cursor.execute(
+                            'SELECT COUNT(*) FROM analyses WHERE symbol=? AND timeframe=? AND config=? AND execution_id=?',
+                            (symbol, timeframe, config, execution_id)
+                        )
+                    else:
+                        # 全体での既存チェック（従来通り）
+                        cursor.execute(
+                            'SELECT COUNT(*) FROM analyses WHERE symbol=? AND timeframe=? AND config=?',
+                            (symbol, timeframe, config)
+                        )
                 except ValueError:
                     return False
             return cursor.fetchone()[0] > 0

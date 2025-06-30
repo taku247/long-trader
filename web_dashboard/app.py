@@ -1754,7 +1754,11 @@ class WebDashboard:
                 custom_start_date = data.get('start_date')
                 custom_end_date = data.get('end_date')
                 
+                # 強制再実行パラメータ
+                force_refresh = data.get('force_refresh', False)  # True: 既存分析を無視して再実行
+                
                 self.logger.info(f"📅 Period settings: mode={period_mode}, start={custom_start_date}, end={custom_end_date}")
+                self.logger.info(f"🔄 Force refresh: {force_refresh}")
                 
                 # フィルターパラメータの取得
                 filter_params = data.get('filter_params', {})

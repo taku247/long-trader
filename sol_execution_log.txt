@@ -1,0 +1,216 @@
+✅ Using production HighLeverageBotOrchestrator
+✅ file_based_progress_tracker インポート成功
+2025-06-30 07:37:54 - symbol_early_fail_validator - INFO - 📋 Early Fail設定読み込み: early_fail_config.json
+2025-06-30 07:37:54 - auto_symbol_training - INFO - ✅ フィルタリングシステム初期化完了
+🚀 SOL銘柄追加開始
+📅 期間設定: 2025-02-01T07:30:00Z ～ 2025-06-30T00:00:00Z
+2025-06-30 07:37:54 - auto_symbol_training - INFO - Starting automatic training for symbol: SOL
+2025-06-30 07:37:54 - auto_symbol_training - INFO - 🔍 Early Fail検証開始: SOL
+2025-06-30 07:37:54 - symbol_early_fail_validator - INFO - 🔍 Early Fail検証開始（強化版）: SOL
+2025-06-30 07:37:55 - hyperliquid_api_client - INFO - ✅ ✅ Gate.io client initialized (futures)
+2025-06-30 07:37:55 - hyperliquid_api_client - INFO - 🔄 Multi-Exchange API Client initialized with: gateio
+2025-06-30 07:37:57 - hyperliquid_api_client - INFO - ✅ ✅ Gate.io client initialized (futures)
+2025-06-30 07:37:57 - hyperliquid_api_client - INFO - 🔄 Multi-Exchange API Client initialized with: gateio
+2025-06-30 07:38:00 - hyperliquid_api_client - INFO - ✅ ✅ Gate.io client initialized (futures)
+2025-06-30 07:38:00 - hyperliquid_api_client - INFO - 🔄 Multi-Exchange API Client initialized with: gateio
+2025-06-30 07:38:03 - hyperliquid_api_client - INFO - ✅ ✅ Gate.io client initialized (futures)
+2025-06-30 07:38:03 - hyperliquid_api_client - INFO - 🔄 Multi-Exchange API Client initialized with: gateio
+2025-06-30 07:38:03 - hyperliquid_api_client - INFO - 🔄 Mapping SOL -> SOL/USDT:USDT for Gate.io
+2025-06-30 07:38:03 - hyperliquid_api_client - INFO - 📈 🔥 GATE.IO OHLCV FETCH START 🔥 Symbol: SOL/USDT:USDT | Timeframe: 1h | Period: 30日間
+2025-06-30 07:38:03 - hyperliquid_api_client - INFO -    📅 Range: 2025-05-30 22:38 → 2025-06-29 22:38
+2025-06-30 07:38:06 - hyperliquid_api_client - INFO - ✅ ✅ 🔥 GATE.IO OHLCV COMPLETE 🔥 Symbol: SOL | Timeframe: 1h | Points: 720
+2025-06-30 07:38:06 - hyperliquid_api_client - INFO - ✅ ✅ Gate.io client initialized (futures)
+2025-06-30 07:38:06 - hyperliquid_api_client - INFO - 🔄 Multi-Exchange API Client initialized with: gateio
+2025-06-30 07:38:06 - hyperliquid_api_client - INFO - 🔄 Mapping SOL -> SOL/USDT:USDT for Gate.io
+2025-06-30 07:38:06 - hyperliquid_api_client - INFO - 📈 🔥 GATE.IO OHLCV FETCH START 🔥 Symbol: SOL/USDT:USDT | Timeframe: 1h | Period: 0日間
+2025-06-30 07:38:06 - hyperliquid_api_client - INFO -    📅 Range: 2025-03-31 22:38 → 2025-04-01 00:38
+2025-06-30 07:38:09 - hyperliquid_api_client - INFO - ✅ ✅ 🔥 GATE.IO OHLCV COMPLETE 🔥 Symbol: SOL | Timeframe: 1h | Points: 2
+
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - ================================================================================
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - 🚀 EARLY FAIL VALIDATION SUCCESS - SOL 🚀
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - ================================================================================
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - ⏰ 検証完了時刻: 2025-06-29 22:38:09
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - 🔍 検証項目: 10項目すべて合格
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - 📊 実行内容:
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 1. シンボル存在チェック
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 2. 取引所サポートチェック
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 3. API接続タイムアウト（10秒以内）
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 4. 取引所アクティブ状態（取引可能）
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 5. システムリソース（CPU/メモリ/ディスク正常）
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 6. データベース接続性（execution_logs・analysis DB）
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 7. 戦略設定バリデーション（利用可能戦略確認）
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 8. データ品質（95%以上完全性）
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 9. 履歴データ可用性（90日分）
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO -    ✅ 10. カスタム検証ルール
+
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - 🎯 SOL は全ての品質基準を満たしており、分析処理の実行が承認されました
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - 🔥 マルチプロセス分析を安全に開始できます
+
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉 VALIDATION SUCCESS 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+2025-06-30 07:38:09 - symbol_early_fail_validator - INFO - ================================================================================
+
+
+🚨 【重要】Early Fail検証完了: SOL が全ての品質基準をクリアしました！
+   → 分析処理の実行を開始します... ⚡
+
+2025-06-30 07:38:09,172 - INFO - EARLY_FAIL_SUCCESS: SOL passed all 9 validation checks at 2025-06-29 22:38:09
+2025-06-30 07:38:09 - auto_symbol_training - INFO - ✅ Early Fail検証成功: SOL
+2025-06-30 07:38:09 - auto_symbol_training - INFO - 📊 検証メタデータ: {'validation_time': '2025-06-29T22:38:09.173035+00:00', 'enhanced': True}
+2025-06-30 07:38:09 - auto_symbol_training - INFO - ✅ Early Fail検証合格: SOL
+2025-06-30 07:38:09 - execution_log_database - INFO - 📝 Created execution record: symbol_addition_20250630_073809_6ab3acef
+2025-06-30 07:38:09 - auto_symbol_training - INFO - Execution ID: symbol_addition_20250630_073809_6ab3acef
+2025-06-30 07:38:09 - auto_symbol_training - INFO - 📝 実行IDを環境変数に設定: symbol_addition_20250630_073809_6ab3acef
+2025-06-30 07:38:09 - auto_symbol_training - INFO - 📊 progress_tracker初期化開始: SOL, symbol_addition_20250630_073809_6ab3acef
+2025-06-30 07:38:09,178 - INFO - Started analysis tracking for SOL (execution_id: symbol_addition_20250630_073809_6ab3acef)
+2025-06-30 07:38:09 - auto_symbol_training - INFO - ✅ progress_tracker初期化完了
+2025-06-30 07:38:09 - auto_symbol_training - INFO - Executing step: data_fetch
+2025-06-30 07:38:09 - auto_symbol_training - INFO - 📊 progress_tracker段階更新: data_fetch -> data_validation (execution_id: symbol_addition_20250630_073809_6ab3acef)
+2025-06-30 07:38:09 - auto_symbol_training - INFO - ✅ progress_tracker段階更新完了
+2025-06-30 07:38:09 - auto_symbol_training - INFO - Validating SOL on gateio...
+2025-06-30 07:38:09 - hyperliquid_api_client - INFO - ✅ ✅ Gate.io client initialized (futures)
+2025-06-30 07:38:09 - hyperliquid_api_client - INFO - 🔄 Multi-Exchange API Client initialized with: gateio
+2025-06-30 07:38:11 - auto_symbol_training - INFO - ✅ ✅ SOL validated on gateio
+2025-06-30 07:38:11 - auto_symbol_training - INFO - Fetching historical data for SOL
+2025-06-30 07:38:11 - auto_symbol_training - INFO - 🚀 STARTING OHLCV DATA VALIDATION for SOL
+2025-06-30 07:38:11 - auto_symbol_training - INFO - 📅 カスタム期間設定受信: {'mode': 'custom', 'start_date': '2025-02-01T07:30:00Z', 'end_date': '2025-06-30T00:00:00Z'}
+2025-06-30 07:38:11 - auto_symbol_training - INFO - 📅 カスタム期間設定使用: {'mode': 'custom', 'start_date': '2025-02-01T07:30:00Z', 'end_date': '2025-06-30T00:00:00Z'}
+2025-06-30 07:38:11 - auto_symbol_training - INFO - 📅 カスタム期間データ取得: 2025-01-23 23:30 ～ 2025-06-30 00:00
+2025-06-30 07:38:11 - hyperliquid_api_client - INFO - 🔄 Mapping SOL -> SOL/USDT:USDT for Gate.io
+2025-06-30 07:38:11 - hyperliquid_api_client - INFO - 📈 🔥 GATE.IO OHLCV FETCH START 🔥 Symbol: SOL/USDT:USDT | Timeframe: 1h | Period: 157日間
+2025-06-30 07:38:11 - hyperliquid_api_client - INFO -    📅 Range: 2025-01-23 23:30 → 2025-06-30 00:00
+2025-06-30 07:38:12 - hyperliquid_api_client - WARNING - ⚠️ No data returned for SOL/USDT:USDT from 2025-06-29 22:00:00.001000+00:00
+2025-06-30 07:38:12 - hyperliquid_api_client - INFO - ✅ ✅ 🔥 GATE.IO OHLCV COMPLETE 🔥 Symbol: SOL | Timeframe: 1h | Points: 3767
+2025-06-30 07:38:12 - auto_symbol_training - INFO - ✅ カスタム期間データ品質OK: 3767データポイント
+2025-06-30 07:38:12 - auto_symbol_training - INFO - ✅ 📊 Data fetched: 3767 records for SOL
+2025-06-30 07:38:12 - auto_symbol_training - INFO - ✅ Step data_fetch completed in 3.23s
+2025-06-30 07:38:12 - auto_symbol_training - INFO - Executing step: backtest
+2025-06-30 07:38:12 - auto_symbol_training - INFO - 📊 progress_tracker段階更新: backtest -> backtest_analysis (execution_id: symbol_addition_20250630_073809_6ab3acef)
+2025-06-30 07:38:12 - auto_symbol_training - INFO - ✅ progress_tracker段階更新完了
+2025-06-30 07:38:12 - auto_symbol_training - INFO - Running comprehensive backtest for SOL
+2025-06-30 07:38:12 - auto_symbol_training - INFO - Using default strategy combinations: 1 strategies × 1 timeframes = 1 configs
+2025-06-30 07:38:12 - auto_symbol_training - INFO - Generated 1 backtest configurations
+2025-06-30 07:38:12 - auto_symbol_training - INFO - バックテスト実行設定数: 1
+2025-06-30 07:38:12 - auto_symbol_training - INFO - 🔧 戦略別独立実行開始: 1戦略
+2025-06-30 07:38:12 - auto_symbol_training - INFO -   戦略 1/1: momentum-1h
+======================================================================
+2025-06-30 07:38:12,421 - INFO - ======================================================================
+🚀 SOL 銘柄追加開始 [実行ID: symbol_a]
+2025-06-30 07:38:12,421 - INFO - 🚀 SOL 銘柄追加開始 [実行ID: symbol_a]
+======================================================================
+2025-06-30 07:38:12,422 - INFO - ======================================================================
+📋 フェーズ開始: バックテスト
+2025-06-30 07:38:12,422 - INFO - 📋 フェーズ開始: バックテスト
+   詳細: 1パターン, 4並列
+2025-06-30 07:38:12,422 - INFO -    詳細: 1パターン, 4並列
+
+2025-06-30 07:38:12,422 - INFO - 
+🚀 SOL 銘柄追加進捗 [実行ID: symbol_a]
+2025-06-30 07:38:12,422 - INFO - 🚀 SOL 銘柄追加進捗 [実行ID: symbol_a]
+┌─────────────────────────────────────────────────────┐
+2025-06-30 07:38:12,422 - INFO - ┌─────────────────────────────────────────────────────┐
+│ フェーズ1: データ取得 ⏳ 進行中                                 │
+2025-06-30 07:38:12,422 - INFO - │ フェーズ1: データ取得 ⏳ 進行中                                 │
+│ フェーズ2: バックテスト 🔄 進行中 (0秒経過)                         │
+2025-06-30 07:38:12,422 - INFO - │ フェーズ2: バックテスト 🔄 進行中 (0秒経過)                         │
+│   ├─ 1h足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:12,422 - INFO - │   ├─ 1h足戦略群   [0/3完了] ░░░░░░   0%                  │
+│   ├─ 30m足戦略群   [0/3完了] ░░░░░░   0%                 │
+2025-06-30 07:38:12,422 - INFO - │   ├─ 30m足戦略群   [0/3完了] ░░░░░░   0%                 │
+│   ├─ 15m足戦略群   [0/3完了] ░░░░░░   0%                 │
+2025-06-30 07:38:12,422 - INFO - │   ├─ 15m足戦略群   [0/3完了] ░░░░░░   0%                 │
+│   ├─ 5m足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:12,423 - INFO - │   ├─ 5m足戦略群   [0/3完了] ░░░░░░   0%                  │
+│   ├─ 3m足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:12,423 - INFO - │   ├─ 3m足戦略群   [0/3完了] ░░░░░░   0%                  │
+│   ├─ 短期足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:12,423 - INFO - │   ├─ 短期足戦略群   [0/3完了] ░░░░░░   0%                  │
+│ フェーズ3: 最適化・保存 ⏳ 待機中                                │
+2025-06-30 07:38:12,423 - INFO - │ フェーズ3: 最適化・保存 ⏳ 待機中                                │
+└─────────────────────────────────────────────────────┘
+2025-06-30 07:38:12,423 - INFO - └─────────────────────────────────────────────────────┘
+📈 全体進捗: ░░░░░░░░░░░░░░░░░░░░ 0% (0/1)
+2025-06-30 07:38:12,423 - INFO - 📈 全体進捗: ░░░░░░░░░░░░░░░░░░░░ 0% (0/1)
+
+2025-06-30 07:38:12,423 - INFO - 
+2025-06-30 07:38:12,423 - INFO - 📅 期間設定を環境変数に設定: {'mode': 'custom', 'start_date': '2025-02-01T07:30:00Z', 'end_date': '2025-06-30T00:00:00Z'}
+2025-06-30 07:38:12,423 - INFO - 📝 実行IDを環境変数に設定: symbol_addition_20250630_073809_6ab3acef
+2025-06-30 07:38:12,425 - INFO - Started analysis tracking for SOL (execution_id: symbol_addition_20250630_073809_6ab3acef)
+2025-06-30 07:38:12,425 - INFO - 📝 FileBasedProgressTracker初期化完了: symbol_addition_20250630_073809_6ab3acef
+✅ Using production HighLeverageBotOrchestrator
+✅ file_based_progress_tracker インポート成功
+2025-06-30 07:38:17,133 - 59500 - INFO - チャンク 0: execution_id symbol_addition_20250630_073809_6ab3acef を環境変数に設定
+2025-06-30 07:38:17,243 - 59500 - INFO - 🔍 分析開始: SOL 1h momentum (execution_id: symbol_addition_20250630_073809_6ab3acef)
+✅ フェーズ完了: バックテスト (5.1s)
+2025-06-30 07:38:17,548 - INFO - ✅ フェーズ完了: バックテスト (5.1s)
+
+2025-06-30 07:38:17,548 - INFO - 
+🚀 SOL 銘柄追加進捗 [実行ID: symbol_a]
+2025-06-30 07:38:17,549 - INFO - 🚀 SOL 銘柄追加進捗 [実行ID: symbol_a]
+┌─────────────────────────────────────────────────────┐
+2025-06-30 07:38:17,549 - INFO - ┌─────────────────────────────────────────────────────┐
+│ フェーズ1: データ取得 ⏳ 進行中                                 │
+2025-06-30 07:38:17,549 - INFO - │ フェーズ1: データ取得 ⏳ 進行中                                 │
+│ フェーズ2: バックテスト 🔄 進行中 (5秒経過)                         │
+2025-06-30 07:38:17,549 - INFO - │ フェーズ2: バックテスト 🔄 進行中 (5秒経過)                         │
+│   ├─ 1h足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:17,549 - INFO - │   ├─ 1h足戦略群   [0/3完了] ░░░░░░   0%                  │
+│   ├─ 30m足戦略群   [0/3完了] ░░░░░░   0%                 │
+2025-06-30 07:38:17,549 - INFO - │   ├─ 30m足戦略群   [0/3完了] ░░░░░░   0%                 │
+│   ├─ 15m足戦略群   [0/3完了] ░░░░░░   0%                 │
+2025-06-30 07:38:17,549 - INFO - │   ├─ 15m足戦略群   [0/3完了] ░░░░░░   0%                 │
+│   ├─ 5m足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:17,549 - INFO - │   ├─ 5m足戦略群   [0/3完了] ░░░░░░   0%                  │
+│   ├─ 3m足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:17,549 - INFO - │   ├─ 3m足戦略群   [0/3完了] ░░░░░░   0%                  │
+│   ├─ 短期足戦略群   [0/3完了] ░░░░░░   0%                  │
+2025-06-30 07:38:17,549 - INFO - │   ├─ 短期足戦略群   [0/3完了] ░░░░░░   0%                  │
+│ フェーズ3: 最適化・保存 ⏳ 待機中                                │
+2025-06-30 07:38:17,549 - INFO - │ フェーズ3: 最適化・保存 ⏳ 待機中                                │
+└─────────────────────────────────────────────────────┘
+2025-06-30 07:38:17,550 - INFO - └─────────────────────────────────────────────────────┘
+📈 全体進捗: ░░░░░░░░░░░░░░░░░░░░ 0% (0/1)
+2025-06-30 07:38:17,550 - INFO - 📈 全体進捗: ░░░░░░░░░░░░░░░░░░░░ 0% (0/1)
+
+2025-06-30 07:38:17,550 - INFO - 
+2025-06-30 07:38:17,550 - WARNING - 進捗ファイルが見つかりません: /tmp/progress_symbol_addition_20250630_073809_6ab3acef.json
+======================================================================
+2025-06-30 07:38:17,550 - INFO - ======================================================================
+🎉 SOL 銘柄追加完了！
+2025-06-30 07:38:17,550 - INFO - 🎉 SOL 銘柄追加完了！
+   📊 総処理時間: 5秒
+2025-06-30 07:38:17,550 - INFO -    📊 総処理時間: 5秒
+   ✅ 完了戦略数: 0/1
+2025-06-30 07:38:17,550 - INFO -    ✅ 完了戦略数: 0/1
+======================================================================
+2025-06-30 07:38:17,550 - INFO - ======================================================================
+2025-06-30 07:38:17 - auto_symbol_training - WARNING -   ⚠️ momentum-1h: シグナルなし
+2025-06-30 07:38:17 - auto_symbol_training - INFO - 📝 シグナルなしレコード作成: SOL - momentum (1h)
+2025-06-30 07:38:17 - auto_symbol_training - INFO - 🎯 独立実行結果: 0/1 戦略成功
+2025-06-30 07:38:17 - auto_symbol_training - INFO - ✅ Backtest completed: 1 configurations tested
+2025-06-30 07:38:17 - auto_symbol_training - INFO - ✅ Step backtest completed in 5.14s
+2025-06-30 07:38:17 - auto_symbol_training - INFO - Executing step: result_save
+2025-06-30 07:38:17 - auto_symbol_training - INFO - 📊 progress_tracker段階更新: result_save -> finalizing (execution_id: symbol_addition_20250630_073809_6ab3acef)
+2025-06-30 07:38:17 - auto_symbol_training - INFO - ✅ progress_tracker段階更新完了
+2025-06-30 07:38:17 - auto_symbol_training - INFO - Saving results for SOL
+2025-06-30 07:38:18 - auto_symbol_training - INFO - ✅ Results saved for SOL
+2025-06-30 07:38:18 - auto_symbol_training - INFO - ✅ Step result_save completed in 1.00s
+2025-06-30 07:38:18 - auto_symbol_training - INFO - 📊 SOL の最近の分析結果:
+2025-06-30 07:38:18 - auto_symbol_training - INFO -   - execution_id: symbol_addition_20250630_072108_b130ac00, generated_at: 2025-06-29 22:21:16
+2025-06-30 07:38:18 - auto_symbol_training - INFO -   - execution_id: symbol_addition_20250627_160339_f1b901be, generated_at: 2025-06-28T01:04:07.669756
+2025-06-30 07:38:18 - auto_symbol_training - INFO -   - execution_id: symbol_addition_20250627_160339_f1b901be, generated_at: 2025-06-28T01:04:04.282595
+2025-06-30 07:38:18 - auto_symbol_training - INFO -   - execution_id: symbol_addition_20250627_160339_f1b901be, generated_at: 2025-06-28T01:04:00.944729
+2025-06-30 07:38:18 - auto_symbol_training - INFO -   - execution_id: symbol_addition_20250627_000815_e968c4a2, generated_at: 2025-06-27T09:08:43.942276
+2025-06-30 07:38:18 - auto_symbol_training - ERROR - ❌ SOL の分析結果が見つかりません（現在のexecution_id: symbol_addition_20250630_073809_6ab3acef）
+2025-06-30 07:38:18 - auto_symbol_training - INFO - 📊 progress_tracker失敗更新開始: symbol_addition_20250630_073809_6ab3acef
+2025-06-30 07:38:18 - auto_symbol_training - INFO - ✅ progress_tracker失敗更新完了
+2025-06-30 07:38:18 - auto_symbol_training - ERROR - ❌ Symbol SOL training failed: No analysis results found
+2025-06-30 07:38:18 - auto_symbol_training - ERROR - Error in symbol training: No analysis results found for SOL despite successful execution steps
+2025-06-30 07:38:18 - execution_log_database - WARNING - Added error to symbol_addition_20250630_073809_6ab3acef: No analysis results found for SOL despite successful execution steps
+❌ エラー発生: No analysis results found for SOL despite successful execution steps
+Traceback (most recent call last):
+  File "/Users/moriwakikeita/tools/long-trader/test_sol_custom_period.py", line 43, in test_sol_with_custom_period
+    execution_id = await trainer.add_symbol_with_training(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/moriwakikeita/tools/long-trader/auto_symbol_training.py", line 206, in add_symbol_with_training
+    raise ValueError(f"No analysis results found for {symbol} despite successful execution steps")
+ValueError: No analysis results found for SOL despite successful execution steps

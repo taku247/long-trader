@@ -11,7 +11,7 @@ import uuid
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import traceback
 
 # パス追加
@@ -25,14 +25,14 @@ from engines.leverage_decision_engine import InsufficientMarketDataError, Insuff
 # from engines.filtering_framework import FilteringFramework, FilteringStatistics
 from symbol_early_fail_validator import SymbolEarlyFailValidator
 
-# progress_tracker統合
+# progress_tracker統合 - ファイルベース実装使用
 try:
-    from web_dashboard.analysis_progress import progress_tracker
+    from file_based_progress_tracker import file_progress_tracker as progress_tracker
     PROGRESS_TRACKER_AVAILABLE = True
-    print("✅ progress_tracker インポート成功")
+    print("✅ file_based_progress_tracker インポート成功")
 except ImportError as e:
     PROGRESS_TRACKER_AVAILABLE = False
-    print(f"⚠️ progress_tracker インポートエラー: {e}")
+    print(f"⚠️ file_based_progress_tracker インポートエラー: {e}")
 
 
 class AutoSymbolTrainer:
@@ -167,11 +167,11 @@ class AutoSymbolTrainer:
             await self._execute_step(execution_id, 'result_save', 
                                    self._save_results, symbol)
             
-            # 実行完了前に分析結果の存在確認
-            analysis_results_exist = self._verify_analysis_results(symbol, execution_id)
+            # 実行完了前に分析結果の確認
+            analysis_summary = self._verify_analysis_results_detailed(symbol, execution_id)
             
-            if analysis_results_exist:
-                # 分析結果が存在する場合のみSUCCESS
+            if analysis_summary['has_results'] or analysis_summary['has_early_exits'] or analysis_summary['total_evaluations'] > 0:
+                # 分析結果、Early Exit結果、またはシグナルなし結果が存在する場合はSUCCESS
                 self.execution_db.update_execution_status(
                     execution_id,
                     ExecutionStatus.SUCCESS,
@@ -179,9 +179,20 @@ class AutoSymbolTrainer:
                     progress_percentage=100
                 )
                 
+                # 結果サマリーを表示
+                self._display_analysis_summary(analysis_summary)
+                
                 # progress_tracker最終更新（成功）
                 if PROGRESS_TRACKER_AVAILABLE:
-                    progress_tracker.complete_analysis(execution_id, "signal_detected", "Analysis completed successfully")
+                    if analysis_summary.get('has_results', False):
+                        completion_status = "signal_detected"
+                    elif analysis_summary.get('has_early_exits', False):
+                        completion_status = "early_exit_completed"
+                    elif analysis_summary.get('total_evaluations', 0) > 0:
+                        completion_status = "no_signal_completed"
+                    else:
+                        completion_status = "analysis_completed"
+                    progress_tracker.complete_analysis(execution_id, completion_status, "Analysis completed successfully")
                     
                 self.logger.success(f"Symbol {symbol} training completed successfully!")
             else:
@@ -706,28 +717,31 @@ class AutoSymbolTrainer:
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
-                # 既存のpendingレコードを更新（INSERTではなくUPDATE）
+                # 🔧 修正: 既存レコードをUPDATEする代わりに、新しいレコードをINSERT
+                # ProcessPoolExecutor環境でpendingレコードが作成されない問題に対応
                 conn.execute("""
-                    UPDATE analyses SET
-                        strategy_config_id = ?, strategy_name = ?,
-                        task_status = 'completed', task_completed_at = ?,
-                        total_return = ?, sharpe_ratio = ?, max_drawdown = ?, win_rate = ?, total_trades = ?,
-                        status = 'no_signal', error_message = ?, generated_at = ?
-                    WHERE symbol = ? AND timeframe = ? AND config = ? AND execution_id = ? AND task_status = 'pending'
+                    INSERT INTO analyses (
+                        symbol, timeframe, config, strategy_config_id, strategy_name,
+                        task_status, task_completed_at,
+                        total_return, sharpe_ratio, max_drawdown, win_rate, total_trades,
+                        status, error_message, generated_at, execution_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
+                    symbol,
+                    config['timeframe'],
+                    config['strategy'],
                     config.get('strategy_config_id'),
                     config.get('strategy_name', f"{config['strategy']}-{config['timeframe']}"),
+                    'completed',
                     datetime.now(timezone.utc).isoformat(),
                     0.0,  # シグナルなしのため0リターン
                     0.0,  # シグナルなしのため0シャープレシオ
                     0.0,  # シグナルなしのため0ドローダウン
                     0.0,  # シグナルなしのため0勝率
                     0,    # シグナルなしのため0取引
+                    'no_signal',
                     error_message or 'No trading signals detected',
                     datetime.now().isoformat(),
-                    symbol,
-                    config['timeframe'],
-                    config['strategy'],
                     execution_id
                 ))
                 
@@ -1005,6 +1019,204 @@ class AutoSymbolTrainer:
         except Exception as e:
             self.logger.error(f"分析結果確認エラー: {e}")
             return False
+    
+    def _verify_analysis_results_detailed(self, symbol: str, execution_id: str) -> Dict[str, Any]:
+        """分析結果の詳細確認（Early Exit結果を含む）"""
+        try:
+            from engines.analysis_result import AnalysisResult
+            import sqlite3
+            from pathlib import Path
+            
+            # 結果サマリー初期化
+            summary = {
+                'has_results': False,
+                'has_early_exits': False,
+                'signal_count': 0,
+                'early_exit_count': 0,
+                'early_exit_reasons': {},
+                'total_evaluations': 0,
+                'detailed_breakdown': []
+            }
+            
+            analysis_db_path = Path(__file__).parent / "large_scale_analysis" / "analysis.db"
+            if not analysis_db_path.exists():
+                self.logger.warning(f"Analysis database not found: {analysis_db_path}")
+                return summary
+                
+            with sqlite3.connect(analysis_db_path) as conn:
+                # 1. 該当execution_idの分析結果を確認
+                cursor = conn.execute('''
+                    SELECT COUNT(*), SUM(total_trades), COUNT(CASE WHEN total_trades > 0 THEN 1 END) as signal_count
+                    FROM analyses 
+                    WHERE symbol = ? AND execution_id = ?
+                ''', (symbol, execution_id))
+                
+                result = cursor.fetchone()
+                total_records, total_trades, signal_count = result if result else (0, 0, 0)
+                
+                summary['total_evaluations'] = total_records or 0
+                summary['signal_count'] = signal_count or 0
+                summary['has_results'] = (signal_count or 0) > 0
+                
+                if total_records > 0:
+                    self.logger.info(f"✅ {symbol} の分析結果確認（execution_id一致）: {total_records} 件 (シグナル: {signal_count}件)")
+                
+                # 2. 過去10分以内の分析結果を確認（バックテスト処理が完了している場合）
+                if summary['total_evaluations'] == 0:
+                    cursor = conn.execute('''
+                        SELECT COUNT(*), SUM(total_trades), COUNT(CASE WHEN total_trades > 0 THEN 1 END) as signal_count
+                        FROM analyses 
+                        WHERE symbol = ? 
+                        AND generated_at > datetime('now', '-10 minutes')
+                    ''', (symbol,))
+                    
+                    result = cursor.fetchone()
+                    recent_records, recent_trades, recent_signals = result if result else (0, 0, 0)
+                    
+                    if recent_records > 0:
+                        summary['total_evaluations'] = recent_records
+                        summary['signal_count'] = recent_signals or 0
+                        summary['has_results'] = (recent_signals or 0) > 0
+                        self.logger.info(f"✅ {symbol} の最近の分析結果確認: {recent_records} 件 (シグナル: {recent_signals}件)")
+                
+                # 3. 全ての結果を確認（execution_idに関係なく、5分以内）
+                if summary['total_evaluations'] == 0:
+                    cursor = conn.execute('''
+                        SELECT COUNT(*), SUM(total_trades), COUNT(CASE WHEN total_trades > 0 THEN 1 END) as signal_count
+                        FROM analyses 
+                        WHERE symbol = ? 
+                        AND generated_at > datetime('now', '-5 minutes')
+                    ''', (symbol,))
+                    
+                    result = cursor.fetchone()
+                    very_recent_records, very_recent_trades, very_recent_signals = result if result else (0, 0, 0)
+                    
+                    if very_recent_records > 0:
+                        summary['total_evaluations'] = very_recent_records
+                        summary['signal_count'] = very_recent_signals or 0
+                        summary['has_results'] = (very_recent_signals or 0) > 0
+                        self.logger.info(f"✅ {symbol} の最新結果確認(過去5分): {very_recent_records} 件 (シグナル: {very_recent_signals}件)")
+                        
+                        # execution_idが異なる場合の警告
+                        cursor = conn.execute('''
+                            SELECT DISTINCT execution_id FROM analyses 
+                            WHERE symbol = ? 
+                            AND generated_at > datetime('now', '-5 minutes')
+                        ''', (symbol,))
+                        recent_execution_ids = [row[0] for row in cursor.fetchall()]
+                        if execution_id not in recent_execution_ids:
+                            self.logger.warning(f"⚠️ execution_id不一致: 期待={execution_id}, 実際={recent_execution_ids}")
+                
+                # 4. Early Exit結果の推定（記録なし = Early Exitの可能性）
+                if summary['total_evaluations'] == 0:
+                    # ファイルベース進捗トラッカーでEarly Exit結果を確認
+                    early_exit_summary = self._check_early_exit_from_progress(execution_id)
+                    summary.update(early_exit_summary)
+                
+                return summary
+                
+        except Exception as e:
+            self.logger.error(f"分析結果確認エラー: {e}")
+            summary['error'] = str(e)
+            return summary
+    
+    def _check_early_exit_from_progress(self, execution_id: str) -> Dict[str, Any]:
+        """進捗トラッカーからEarly Exit情報を取得"""
+        early_exit_info = {
+            'has_early_exits': False,
+            'early_exit_count': 0,
+            'early_exit_reasons': {},
+            'detailed_breakdown': []
+        }
+        
+        try:
+            from file_based_progress_tracker import FileBasedProgressTracker
+            tracker = FileBasedProgressTracker()
+            progress_data = tracker.get_progress(execution_id)
+            
+            if progress_data:
+                # AnalysisProgressオブジェクトから適切にアクセス
+                if hasattr(progress_data, 'ml_prediction') and progress_data.ml_prediction:
+                    if hasattr(progress_data.ml_prediction, 'status') and progress_data.ml_prediction.status == 'failed':
+                        # Early Exitのケースを検出
+                        error_msg = getattr(progress_data.ml_prediction, 'error_message', '')
+                        
+                        if 'サポート・レジスタンスレベルが検出されませんでした' in str(error_msg):
+                            early_exit_info['has_early_exits'] = True
+                            early_exit_info['early_exit_count'] = 1
+                            early_exit_info['early_exit_reasons']['no_support_resistance'] = 1
+                            early_exit_info['detailed_breakdown'].append({
+                                'stage': 'support_resistance',
+                                'reason': 'no_support_resistance_levels',
+                                'message': str(error_msg)
+                            })
+                            self.logger.info(f"✅ Early Exit情報を進捗トラッカーから検出")
+                
+                # support_resistanceのチェックも追加
+                if hasattr(progress_data, 'support_resistance') and progress_data.support_resistance:
+                    if hasattr(progress_data.support_resistance, 'status') and progress_data.support_resistance.status == 'failed':
+                        error_msg = getattr(progress_data.support_resistance, 'error_message', '')
+                        
+                        if 'サポート・レジスタンスレベルが検出されませんでした' in str(error_msg) or 'レベル数0個' in str(error_msg):
+                            early_exit_info['has_early_exits'] = True
+                            early_exit_info['early_exit_count'] = 1
+                            early_exit_info['early_exit_reasons']['no_support_resistance'] = 1
+                            early_exit_info['detailed_breakdown'].append({
+                                'stage': 'support_resistance',
+                                'reason': 'no_support_resistance_levels',
+                                'message': str(error_msg)
+                            })
+                            self.logger.info(f"✅ Early Exit情報を進捗トラッカーから検出: {error_msg}")
+            
+        except Exception as e:
+            self.logger.warning(f"進捗トラッカーからのEarly Exit情報取得失敗: {e}")
+            # デバッグ情報を追加
+            if progress_data:
+                self.logger.debug(f"progress_dataタイプ: {type(progress_data)}")
+                self.logger.debug(f"progress_data属性: {dir(progress_data) if hasattr(progress_data, '__dict__') else 'N/A'}")
+        
+        return early_exit_info
+    
+    def _display_analysis_summary(self, summary: Dict[str, Any]):
+        """分析結果サマリーを表示"""
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("📊 分析結果サマリー")
+        self.logger.info("=" * 60)
+        
+        total_evals = summary.get('total_evaluations', 0)
+        signal_count = summary.get('signal_count', 0)
+        early_exit_count = summary.get('early_exit_count', 0)
+        
+        self.logger.info(f"🔍 総評価数: {total_evals}回")
+        
+        if signal_count > 0:
+            self.logger.info(f"✅ シグナル検出: {signal_count}回")
+        
+        if early_exit_count > 0:
+            self.logger.info(f"⏭️ Early Exit: {early_exit_count}回")
+            
+            # Early Exit理由の詳細
+            for reason, count in summary.get('early_exit_reasons', {}).items():
+                reason_names = {
+                    'no_support_resistance': 'サポート・レジスタンスレベル未検出',
+                    'insufficient_data': 'データ不足',
+                    'ml_prediction_failed': 'ML予測失敗',
+                    'btc_correlation_failed': 'BTC相関分析失敗',
+                    'market_context_failed': '市場コンテキスト失敗',
+                    'leverage_conditions_not_met': 'レバレッジ条件未達'
+                }
+                reason_name = reason_names.get(reason, reason)
+                self.logger.info(f"  • {reason_name}: {count}回")
+        
+        if signal_count == 0 and early_exit_count == 0 and total_evals > 0:
+            self.logger.info(f"📊 シグナルなし: {total_evals}回")
+            self.logger.info("  • この期間では取引機会がなかったため、正常な結果です")
+        elif signal_count == 0 and early_exit_count == 0 and total_evals == 0:
+            self.logger.warning("⚠️ 分析結果が未検出 - 処理が完了していない可能性があります")
+        else:
+            self.logger.info(f"📊 分析完了: シグナル{signal_count}回, Early Exit{early_exit_count}回, 総評価{total_evals}回")
+        
+        self.logger.info("=" * 60)
 
 
 async def main():
